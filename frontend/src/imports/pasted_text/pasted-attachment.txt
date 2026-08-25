@@ -1,0 +1,1848 @@
+Act as a Senior Web Developer, Senior UI/UX Designer, Product Designer, CRM Systems Architect, and Enterprise SaaS Designer.
+
+Design a complete, high-fidelity, production-ready Shipping Container CRM System in Figma.
+
+The system must be designed for a company that manages:
+
+Prospect clients
+Warm leads
+Outreach campaigns
+Calls, SMS, and email activity
+Customer inquiries
+Quotations
+Container sales
+Buying and selling prices
+Profit tracking
+Customer contracts
+Pickup scheduling
+Removed and opted-out contacts
+Email and phone deliverability
+Spreadsheet-style bulk data handling
+Google Sheets and Excel workflows
+Northern United States and Canadian customer locations
+
+The UI must feel like a polished enterprise CRM, but several modules must retain the practical convenience of Google Sheets for bulk copying, pasting, filtering, editing, and data manipulation.
+
+Use the two supplied CRM/dashboard reference images as visual inspiration.
+
+Use the first reference for:
+
+Main CRM structure
+Sidebar navigation
+Dashboard composition
+Sales pipeline
+Sales representative performance
+Activity and follow-up layouts
+Data tables
+
+Use the second reference for:
+
+Modern cards
+Rounded panels
+Spacious layouts
+Refined filters
+Financial summaries
+Purple, navy, blue, and neutral accents
+Detail panels and polished table states
+
+Do not directly copy either design. Produce an original, implementation-ready interface.
+
+1. Important Project Scope
+
+This prompt is for Figma design first, but the design must be backend-ready.
+
+Do not generate actual backend code, SQL queries, APIs, or database schemas inside the Figma output.
+
+However, every screen must be designed so it can later connect cleanly to:
+
+TypeScript
+Next.js
+Supabase PostgreSQL
+Google Sheets API
+Vercel
+
+Every field, dropdown, status, filter, table, summary card, modal, and relationship must use consistent names across the system.
+
+Do not create disconnected mock pages.
+
+Where modules need to connect, show those connections clearly through:
+
+Linked records
+Record IDs
+Source references
+Related-record panels
+Breadcrumbs
+Status timelines
+Conversion actions
+Detail tabs
+Side drawers
+Source inquiry links
+Source quotation links
+Source sales links
+Customer profile connections
+Sales representative assignments
+Sync status indicators
+Data-validation states
+
+The Figma design must give the development team a clear visual specification for both frontend and backend behavior.
+
+2. Main Business Flow
+
+Design the system around this complete workflow:
+
+Prospect Client
+→ Outreach
+→ Customer Reply
+→ Warm Lead
+→ Inquiry Captured
+→ Quotation Requested
+→ Quotation Sent
+→ Negotiation
+→ Sale Recorded
+→ Customer Contract
+→ Pickup Schedule
+→ Completed Sale
+→ Profit and Performance Reporting
+
+Alternative outcomes:
+
+Prospect Client
+→ Removed
+
+Warm Lead
+→ Lost
+
+Inquiry
+→ Lost
+
+Quotation
+→ Rejected
+
+Contact
+→ Opted Out
+
+Email or Phone
+→ Bounced, Invalid, or Removed
+
+All outcome states must remain traceable in the UI.
+
+3. Design Direction
+
+Create a professional enterprise SaaS CRM.
+
+The visual style must be:
+
+Modern
+Clean
+Premium
+Data-focused
+Spreadsheet-friendly
+Fast to use
+Suitable for repetitive daily operations
+Accessible
+Responsive
+Developer-friendly
+Consistent across all modules
+
+Use:
+
+Deep navy for primary text
+Royal blue for primary actions
+Indigo or violet for sales and financial highlights
+Teal for operational insights
+Green for Proceed, Active, Completed, and Target Achieved
+Amber for Pending and Follow-Up
+Orange for Delayed
+Red for Removed, Opted Out, Invalid, Lost, Overdue, and Error
+White and light gray for surfaces
+
+Recommended typography:
+
+Inter
+Geist
+Plus Jakarta Sans
+
+Use one font family throughout.
+
+Recommended corner radius:
+
+Inputs and buttons: 8–10px
+Cards: 12–16px
+Large panels: 16–18px
+Modals and drawers: 18px
+
+Use Auto Layout throughout the Figma file.
+
+4. Main Navigation
+
+Create the following sidebar structure:
+
+Overview
+├── Main Dashboard
+├── Outreach and Sales Dashboard
+└── Inquiry Dashboard
+
+Sales
+├── Prospect Clients
+├── Warm Leads
+├── Inquiries
+├── Opportunities
+├── Sales Pipeline
+├── Quotations
+├── Sales Tracker
+├── Sales Orders
+└── Customer Contracts
+
+Customers
+├── Customer Accounts
+├── Individual Contacts
+├── Contact Outreach Sheet
+└── Customer Status
+
+Container Catalog
+├── Container Categories
+├── Container Sizes
+├── Container Conditions
+└── Container Availability
+
+Activities
+├── Tasks
+├── Follow-Ups
+├── Calendar
+├── Pickup Schedules
+└── Overdue Pickups
+
+Data Management
+├── Deliverability Management
+├── Removed Sheet
+├── Google Sheets Sync
+├── Excel Import
+├── Export Center
+├── Import History
+└── Sync Logs
+
+Reports
+├── Sales Reports
+├── Inquiry Reports
+├── Customer Reports
+├── Container Reports
+├── Profit Reports
+├── Outreach Reports
+├── Sales Representative Performance
+├── Loss Analysis
+└── Custom Reports
+
+Administration
+├── Sales Representatives
+├── Lead Settings
+├── Inquiry Settings
+├── Outreach Targets
+├── Pipeline Settings
+├── Container Settings
+├── Service Territory Settings
+├── Numbering Formats
+├── Integrations
+└── System Settings
+
+Do not include:
+
+Marketing automation
+Ticketing
+Customer support
+Subscription billing
+Invoice management
+Payment management
+Customer portal
+Generic document management
+Generic audit logs
+Generic role-management screens unless required later
+5. Top Navigation
+
+Create a responsive top navigation bar containing:
+
+Sidebar toggle
+Global search
+Quick-create button
+Online or offline indicator
+Google Sheets sync status
+Last successful sync
+Notifications
+Calendar shortcut
+Current company
+User avatar
+Profile menu
+
+The global search should search across:
+
+Prospect clients
+Warm leads
+Customers
+Contacts
+Inquiries
+Opportunities
+Quotations
+Sales tracker records
+Contracts
+Pickup schedules
+Removed contacts
+
+Group search results by module.
+
+6. Main Dashboard
+
+Design a complete CRM overview dashboard.
+
+Include metric cards for:
+
+Total prospect clients
+Total warm leads
+Total inquiries
+Open opportunities
+Quotations sent
+Completed sales
+Active contracts
+Scheduled pickups
+Overdue pickups
+Units sold
+Sales revenue
+Total buying cost
+Gross profit
+Profit margin
+Eligible outreach contacts
+Removed contacts
+Bounced emails
+Invalid phone numbers
+
+Each card must include:
+
+Main value
+Comparison period
+Trend indicator
+Small chart or progress indicator
+Clickable drill-down
+Hover state
+Loading state
+Empty state
+Error state
+7. Outreach and Sales Performance Dashboard
+
+Create a dedicated dashboard for daily targets and monthly profit performance.
+
+Targets
+
+Use these current business targets:
+
+Monthly Gross Profit Target: 5,000
+Daily Email Target: 500
+Daily Call Target: 10 minimum and 15 preferred
+Daily Text Target: Declared by the company each day
+
+Allow a configuration interface for:
+
+Monthly profit target
+Daily email target
+Daily minimum call target
+Daily preferred call target
+Daily text target
+Working days
+Individual PIC target
+Team target
+Active period
+Main target cards
+
+Create cards for:
+
+Current monthly gross profit
+Monthly profit target
+Remaining profit
+Profit completion percentage
+Projected month-end profit
+Emails sent today
+Remaining emails
+Calls completed today
+Minimum call target status
+Preferred call target status
+Texts sent today
+Declared text target
+Total outreach completion
+Units sold
+Best client by quantity purchased
+Eligible Proceed contacts
+Removed contacts excluded
+Bounced emails processed
+Invalid numbers processed
+Profit source
+
+The profit shown on the dashboard must clearly come from the Sales Tracker.
+
+Show:
+
+Total Selling Amount
+Total Buying Cost
+Gross Profit
+Profit Margin
+Quantity Sold
+
+Include:
+
+Profit today
+Profit this week
+Profit this month
+Profit by PIC
+Profit by client
+Profit by category
+Profit by size
+Profit by condition
+Daily email target
+
+Show:
+
+Emails Sent Today / 500
+Remaining Emails
+Completion %
+Valid Emails Available
+Removed Emails Excluded
+Bounced Emails Excluded
+Emails by PIC
+
+Do not count:
+
+Removed
+Bounced
+Invalid
+Do Not Contact
+Daily call target
+
+Show:
+
+Calls Completed Today
+Minimum Target: 10
+Preferred Target: 15
+Calls Remaining
+Answered Calls
+No Answer
+Follow-Up Required
+Calls Producing Inquiries
+Calls Producing Sales
+
+Use a range progress indicator.
+
+Daily text target
+
+Show:
+
+Declared daily text target
+Texts sent
+Remaining texts
+Completion percentage
+Text replies
+Warm leads generated
+Inquiries generated
+Sales generated
+
+Include:
+
+Declare Today’s Text Target
+Combined outreach progress
+
+Display a table:
+
+Outreach Type	Target	Completed	Remaining	Status
+Email	500	Actual	Remaining	Progress
+Calls	10–15	Actual	Remaining	Minimum or preferred achieved
+Texts	Declared	Actual	Remaining	Progress
+
+Add statuses:
+
+Behind Target
+On Track
+Nearly Complete
+Target Achieved
+Target Exceeded
+8. Best Clients by Quantity Purchased
+
+Create a dashboard section named:
+
+Best Clients by Quantity Purchased
+
+Default ranking:
+
+Total Units Purchased
+
+Columns:
+
+Rank
+Company Name
+Contact Person
+Total Units Purchased
+Number of Sales
+Sales Revenue
+Buying Cost
+Gross Profit
+Average Units per Sale
+Last Purchase Date
+Assigned PIC
+
+Allow ranking by:
+
+Quantity purchased
+Gross profit
+Sales revenue
+Number of transactions
+
+Clicking a client opens a detail drawer containing:
+
+Company information
+Contact person
+Contact number
+Email
+Address
+Total units purchased
+Category breakdown
+Size breakdown
+Condition breakdown
+Sales revenue
+Buying cost
+Gross profit
+Latest sale
+Assigned PIC
+9. Prospect Clients Sheet
+
+Create a dedicated spreadsheet-style submodule named:
+
+Prospect Clients
+
+A Prospect Client is a company or contact identified for outreach but has not yet replied or asked for a quotation.
+
+The main desktop UI must resemble the practicality of Google Sheets.
+
+Support:
+
+Visible column letters
+Visible row numbers
+Sticky headers
+Frozen columns
+Resizable columns
+Reorderable columns
+Multi-cell selection
+Multi-row selection
+Shift selection
+Keyboard navigation
+Ctrl+C
+Ctrl+V
+Inline editing
+Undo and redo
+Fill down
+Bulk updates
+Sorting
+Filters
+Saved views
+Horizontal scrolling
+Compact and comfortable row density
+Required A–Q columns
+Column	Field
+A	Date Added
+B	PIC
+C	Category
+D	SMS Deliverability
+E	Email Deliverability
+F	Industry
+G	Service Locations
+H	Country
+I	State
+J	City
+K	Company Name
+L	Contact Person
+M	Contact Number — Direct Line
+N	Contact Number 2
+O	Email — Active
+P	Email 2
+Q	Address
+Category values
+Proceed
+Removed
+SMS deliverability values
+Call/Text
+Calls Only
+Text Only
+Removed
+Email deliverability values
+Mail Delivery Report
+Removed
+
+Optional warnings may show:
+
+Invalid
+Bounced
+Mailbox Full
+Blocked
+Unverified
+Duplicate
+Prospect actions
+
+Include:
+
+Add Prospect
+Paste Bulk Data
+Copy for RingCentral
+Assign PIC
+Change Category
+Update SMS Deliverability
+Update Email Deliverability
+Move to Warm Leads
+Export
+10. Warm Leads Sheet
+
+Create a separate spreadsheet-style submodule named:
+
+Warm Leads
+
+A Warm Lead is a prospect who:
+
+Replied
+Showed interest
+Asked a question
+Requested pricing
+Requested availability
+Asked for a quotation
+Requested delivery or pickup
+Requested a special arrangement
+
+Use the same exact A–Q structure as Prospect Clients.
+
+Do not combine Prospect Clients and Warm Leads into one table.
+
+Warm-lead actions:
+
+Add Warm Lead
+Paste Bulk Data
+Create Inquiry
+Create Quotation
+Schedule Follow-Up
+Assign PIC
+Copy for RingCentral
+Mark Converted
+Mark Lost
+Export
+
+Show warm-lead-specific data in expandable row details or drawers:
+
+Reply channel
+Latest inquiry date
+Quotation requested
+Follow-up date
+Special arrangement
+Conversion status
+Loss reason
+11. Address Helper Columns R–U
+
+Support optional helper columns:
+
+Column	Helper Field
+R	Street
+S	City Helper
+T	State or Province Helper
+U	Country Helper
+
+Use this visible relationship:
+
+S → J City
+T → I State or Province
+U → H Country
+
+R + S + T + U → Q Address
+
+Column Q should display:
+
+Street, City, State/Province, Country
+
+Do not display empty commas.
+
+Example:
+
+125 Main Street, Toronto, Ontario, Canada
+
+Show:
+
+Refresh Address
+Regenerate Selected Addresses
+Address mismatch warning
+Missing component warning
+Formula-inspired helper tooltip
+
+Provide three sheet views:
+
+Standard A–Q View
+Address Preparation A–U View
+Compact Outreach View
+12. Geographic Scope
+
+Customer data is limited to:
+
+Northern United States
+Canada
+
+Only allow Country values:
+
+United States
+Canada
+United States
+
+Show only approved Northern U.S. states.
+
+Create configurable Service Territory Settings so the company can decide which states and cities belong to the supported Northern USA territory.
+
+Canada
+
+Support Canadian provinces and territories.
+
+In forms, dynamically display:
+
+State
+Province
+Province/Territory
+
+Keep Column I named State for spreadsheet compatibility.
+
+Use a dependent location flow:
+
+Country
+→ State or Province
+→ City
+→ Street
+→ Full Address
+
+Add filters and analytics for:
+
+Country
+State or province
+City
+Service location
+Priority territory
+Unsupported territory
+13. Bulk Paste from Excel or Google Sheets
+
+Users must be able to copy structured rows from Excel or Google Sheets and paste directly into the Prospect Clients or Warm Leads spreadsheet.
+
+Support:
+
+Click starting cell
+→ Press Ctrl+V
+→ Detect rows and columns
+→ Preview data
+→ Validate
+→ Resolve errors
+→ Confirm paste
+
+Detect:
+
+17 columns = A–Q format
+21 columns = A–U format
+
+Show:
+
+Detected Format: Prospect Client A–Q
+Detected Format: Prospect Client A–U with Address Helpers
+Paste modes
+Append as New Rows
+Update Matching Records
+Paste into Selected Cells
+Replace Existing Values
+Fill Empty Cells Only
+
+Default to:
+
+Append as New Rows
+Paste preview
+
+Show:
+
+Rows detected
+Valid rows
+Warnings
+Invalid rows
+Duplicate records
+Possible updates
+Unsupported locations
+Incomplete addresses
+
+Include:
+
+Confirm Paste
+Review Errors
+Skip Invalid Rows
+Cancel
+14. Contact Outreach Sheet
+
+Create a native spreadsheet-style submodule under Customers:
+
+Contact Outreach Sheet
+
+Purpose:
+
+Select contacts
+Copy phone numbers
+Copy email addresses
+Paste data into RingCentral
+Mark outreach outcomes
+
+Required columns:
+
+Company Name
+Contact Person
+Contact Number
+Email Address
+Address
+
+Optional columns:
+
+Customer status
+Assigned PIC
+Industry
+City
+State
+Country
+Outreach status
+Last contacted
+Notes
+
+Support:
+
+Copy Contact Numbers
+Copy Email Addresses
+Copy Names and Numbers
+Copy Names and Emails
+Copy Selected Rows
+Copy Visible Results
+RingCentral-ready format
+
+Bulk copy formats:
+
+One per line
+Comma-separated
+Semicolon-separated
+Tab-separated
+15. Inquiry Management
+
+Create a separate submodule named:
+
+Inquiries
+
+Users must be able to enter a phone number or email and retrieve matching CRM information.
+
+Inquiry lookup
+
+Prominent input:
+
+Enter phone number or email address
+
+When a match is found, show:
+
+Company name
+Contact person
+Phone
+Email
+Address
+Lead type
+Customer status
+PIC
+Previous inquiries
+Latest quotation
+Latest sale
+Last contacted date
+
+Actions:
+
+Use This Contact
+Open Profile
+View Previous Inquiries
+Create New Contact
+Report Duplicate
+
+When multiple matches exist, show a selection panel.
+
+When no match exists, offer:
+
+Create Prospect Client
+Create Customer and Contact
+Record New Inquiry
+Inquiry fields
+
+Include:
+
+Inquiry Reference
+Inquiry Date
+Inquiry Time
+Inquiry Channel
+Company Name
+Contact Person
+Contact Number
+Email Address
+Address
+Assigned PIC
+Container Category
+Container Size
+Container Condition
+Quantity
+Inquiry Details
+Quotation Requested
+Expected Budget
+Preferred Pickup or Delivery Date
+Location
+Remarks
+Special Arrangements
+Follow-Up Date
+Inquiry Status
+Conversion Status
+Loss Reason
+Inquiry channels
+SMS
+Email
+Phone Call
+RingCentral
+Website
+Walk-In
+Referral
+Social Media
+Other
+Inquiry statuses
+New Inquiry
+Under Review
+Information Requested
+Quotation Required
+Quotation Prepared
+Quotation Sent
+Awaiting Response
+Negotiating
+Converted to Sale
+Closed
+Lost
+Spam or Invalid
+16. Inquiry Dashboard
+
+Create a dedicated Inquiry Dashboard.
+
+Cards:
+
+Total inquiries
+SMS inquiries
+Email inquiries
+RingCentral inquiries
+Phone-call inquiries
+Quotation requests
+Quotations sent
+Converted sales
+Lost inquiries
+Inquiry-to-quotation conversion
+Inquiry-to-sale conversion
+Revenue from inquiries
+Profit from inquiries
+Average response time
+Follow-ups due
+
+Charts:
+
+Inquiry source distribution
+Inquiry conversion funnel
+Inquiry-to-sales comparison
+Channel performance
+Special arrangement frequency
+Loss reasons
+PIC conversion performance
+17. Special Arrangements
+
+Create selectable tags for:
+
+Delivery Required
+Customer Pickup
+Crane Required
+Trucking Required
+Site Inspection
+Container Modification
+Custom Paint
+Lockbox Installation
+Shelving
+Ventilation
+Electrical Work
+Office Conversion
+Urgent Schedule
+Multiple Pickup Locations
+Special Payment Arrangement
+Other
+
+Keep:
+
+Remarks
+Special Arrangements
+
+as separate fields.
+
+18. Loss Reasons
+
+When a record is marked as lost, require a loss reason.
+
+Options:
+
+Price Too High
+No Available Unit
+Requested Size Unavailable
+Requested Condition Unavailable
+Customer Chose Competitor
+Customer Stopped Responding
+Budget Not Approved
+Schedule Conflict
+Delivery or Pickup Issue
+Location Too Far
+Terms Not Accepted
+Quotation Delayed
+Duplicate Inquiry
+Invalid Inquiry
+Requirement Changed
+Not Ready to Purchase
+Other
+
+Create a Mark as Lost modal containing:
+
+Loss reason
+Competitor
+Estimated lost revenue
+Estimated lost profit
+Additional remarks
+Follow-up later
+Suggested follow-up date
+19. Container Catalog
+
+Replace generic products with shipping-container categories.
+
+Categories
+
+Examples:
+
+Dry Container
+High-Cube Container
+Double-Door Container
+Open-Top Container
+Flat-Rack Container
+Refrigerated Container
+Side-Opening Container
+Tank Container
+Office Container
+Storage Container
+Modified Container
+Sizes
+10 ft
+20 ft
+20 ft HC
+40 ft HC
+45 ft HC
+53 ft HC
+Conditions
+Brand New
+One Trip
+Cargo Worthy
+Wind and Watertight
+As-Is
+Refurbished
+Modified
+Used
+
+Create management pages for:
+
+Categories
+Sizes
+Conditions
+Availability
+
+Do not include:
+
+Tax settings
+Discounts
+Multi-currency pricing
+Bundles
+Packages
+Customer-specific pricing
+20. Quotation Management
+
+Create:
+
+Quotation list
+Create quotation
+Edit quotation
+Quotation detail
+Quotation preview
+Printable quotation
+Send quotation
+Convert to sales tracker or sales order
+Cancel quotation
+
+Do not include:
+
+Discounts
+Taxes
+Approval workflow
+Version history
+Expiration tracking
+
+Fields:
+
+Quotation number
+Customer
+Contact
+PIC
+Date
+Category
+Size
+Condition
+Quantity
+Unit selling price
+Total selling price
+Estimated unit buying price
+Total buying price
+Gross profit
+Profit margin
+Pickup or delivery arrangement
+Proposed date
+Terms
+Customer notes
+Internal notes
+Status
+Source inquiry
+
+Statuses:
+
+Draft
+Sent
+Viewed
+Accepted
+Rejected
+Cancelled
+Converted
+21. Sales Tracker
+
+Create a complete spreadsheet-style Sales Tracker.
+
+Main fields:
+
+Sales Reference
+Date
+Company Name
+Contact Person
+Contact Number
+Email Address
+Address
+Container Category
+Container Size
+Container Condition
+Quantity
+Buying Price per Unit
+Selling Price per Unit
+Total Buying Price
+Total Selling Price
+Gross Profit
+Profit Margin
+Assigned PIC
+Source Inquiry
+Source Quotation
+Sales Status
+Remarks
+Special Arrangements
+
+Support multiple line items per sale.
+
+Calculations displayed in the UI
+Total Buying Price = Quantity × Buying Price per Unit
+
+Total Selling Price = Quantity × Selling Price per Unit
+
+Gross Profit = Total Selling Price − Total Buying Price
+
+Profit Margin = Gross Profit ÷ Total Selling Price × 100
+
+Create:
+
+Spreadsheet view
+Sales list
+Sale detail
+Profit view
+Sales by PIC
+Sales by client
+Sales by container
+
+Summary cards:
+
+Completed sales
+Units sold
+Total buying cost
+Total selling amount
+Gross profit
+Average profit per sale
+Average profit per unit
+Highest-profit sale
+Lost sales
+22. Customer Contracts and Pickup Scheduling
+
+Place Customer Contracts under Sales.
+
+Create contract screens with:
+
+Customer
+Contact
+Source quotation
+Source sale
+Category
+Size
+Condition
+Quantity
+Contract value
+Cost
+Profit
+Pickup arrangement
+Pickup location
+Scheduled pickup date
+Terms
+Status
+
+Contract statuses:
+
+Draft
+Active
+Completed
+Cancelled
+Terminated
+Pickup statuses
+Scheduled
+Confirmed
+Ready
+Picked Up
+Partially Picked Up
+Rescheduled
+Cancelled
+Overdue
+
+Replace contract-expiration alerts with Overdue Pickup Alerts.
+
+Show:
+
+Customer
+Contact
+Phone
+Contract
+Sale
+Category
+Size
+Quantity
+Original pickup date
+Days overdue
+Assigned PIC
+Reschedule action
+Mark picked up
+23. Removed Sheet
+
+Create a separate spreadsheet-style submodule named:
+
+Removed Sheet
+
+This sheet contains:
+
+Opted-out phone numbers
+Opted-out email addresses
+Unsubscribed contacts
+Do-not-contact records
+Invalid numbers
+Bounced emails
+Repeated failures
+Removed companies
+
+Columns:
+
+Date Added
+Removal Type
+Phone Number
+Email Address
+Company Name
+Contact Person
+Removal Source
+Removal Reason
+Channel
+Matched CRM Record
+Previous Category
+Current Category
+SMS Deliverability
+Email Deliverability
+Added By
+Notes
+
+Removal types:
+
+Phone Only
+Email Only
+Phone and Email
+Entire Contact
+Entire Company
+
+Removal reasons:
+
+Opted Out
+Do Not Contact
+Unsubscribed
+Invalid Phone Number
+Invalid Email
+Repeated Bounce
+Wrong Contact
+Business Closed
+Spam Complaint
+Requested Removal
+Other
+Removed Sheet behavior
+
+The Removed Sheet must visually check against:
+
+Prospect Clients
+Warm Leads
+Customers
+Contacts
+Inquiries
+Outreach Sheet
+
+When a match exists, the UI must show the resulting update:
+
+Category → Removed
+SMS Deliverability → Removed
+Email Deliverability → Removed
+Exclude from Call Lists
+Exclude from Text Lists
+Exclude from Email Lists
+
+No removed contact should appear in active outreach lists.
+
+24. Deliverability Management
+
+Create a separate module named:
+
+Deliverability Management
+
+Tabs:
+
+Email Deliverability
+SMS and Phone Deliverability
+Processing History
+Unmatched Records
+
+Actions:
+
+Paste Bounced Emails
+Paste Failed or Invalid Numbers
+Email results
+
+Support:
+
+Hard Bounce
+Soft Bounce
+Mailbox Full
+Domain Not Found
+Recipient Not Found
+Blocked
+Spam Complaint
+Unsubscribed
+Invalid Format
+Other
+
+Show recommended UI outcomes:
+
+Hard Bounce → Removed
+Recipient Not Found → Removed
+Invalid Format → Removed
+Unsubscribed → Removed
+Spam Complaint → Removed
+Soft Bounce → Mail Delivery Report with Warning
+Mailbox Full → Mail Delivery Report with Warning
+Blocked → Mail Delivery Report with Warning
+Phone and SMS results
+
+Support:
+
+SMS Failed
+SMS Undeliverable
+Cannot Receive SMS
+Call Connected
+Call Failed
+Invalid Number
+Disconnected
+Landline
+VoIP
+Opted Out
+Wrong Number
+Other
+
+Show recommended outcomes:
+
+Landline → Calls Only
+SMS Undeliverable but Calls Work → Calls Only
+SMS Works but Calls Not Allowed → Text Only
+Opted Out → Removed
+Invalid Number → Removed
+Disconnected → Removed
+Wrong Number → Removed
+Calls and SMS Work → Call/Text
+
+Create a match-results screen showing:
+
+Pasted value
+Matched company
+Matched contact
+Current status
+Recommended status
+Affected modules
+Apply action
+Review action
+Skip action
+25. Outreach Eligibility
+
+Add channel eligibility indicators to every prospect and warm-lead row.
+
+Statuses:
+
+Eligible for Call
+Eligible for Text
+Eligible for Email
+Partially Eligible
+Removed
+Invalid Contact
+Call eligibility
+
+Include only:
+
+Category = Proceed
+SMS Deliverability = Call/Text or Calls Only
+Number not in Removed Sheet
+Text eligibility
+
+Include only:
+
+Category = Proceed
+SMS Deliverability = Call/Text or Text Only
+Number not in Removed Sheet
+Email eligibility
+
+Include only:
+
+Category = Proceed
+Email exists
+Email status is acceptable
+Email not in Removed Sheet
+
+Before exporting or copying a campaign list, show:
+
+Eligible Contacts
+Removed Contacts Excluded
+Invalid Contacts Excluded
+Bounced Emails Excluded
+Channel-Restricted Contacts Excluded
+Incomplete Contacts Excluded
+26. Reports and Analytics
+
+Create reports for:
+
+Prospect clients
+Warm leads
+Inquiries
+Outreach activity
+Calls
+SMS
+Email
+Quotations
+Sales
+Profit
+Units sold
+Customers
+Container categories
+Container sizes
+Container conditions
+PIC performance
+Loss reasons
+Removed contacts
+Deliverability health
+Geographic performance
+
+Filters:
+
+Date range
+PIC
+Country
+State or province
+City
+Industry
+Category
+Size
+Condition
+Inquiry channel
+Lead type
+Status
+Profit range
+Removal reason
+Deliverability status
+
+Exports:
+
+Excel
+CSV
+PDF
+Print
+27. Backend-Ready Design Requirements
+
+Although Figma should not generate backend code, every screen must be designed with clear backend behavior in mind.
+
+Use consistent UI identifiers for:
+
+Customer
+Contact
+Prospect
+Warm lead
+Inquiry
+Quotation
+Sale
+Contract
+Pickup
+Removed entry
+Deliverability result
+PIC
+Container category
+Container size
+Container condition
+
+Each record detail page should visibly show:
+
+Record reference number
+Status
+Created date
+Updated date
+Assigned PIC
+Source module
+Related records
+Sync status
+Last sync
+Validation state
+
+Avoid duplicating the same field with different names across modules.
+
+For example, always use:
+
+Company Name
+Contact Person
+Contact Number — Direct Line
+Contact Number 2
+Email — Active
+Email 2
+Country
+State
+City
+Address
+PIC
+Category
+SMS Deliverability
+Email Deliverability
+
+Design all conversions with confirmation screens and source links.
+
+Examples:
+
+Prospect Client → Warm Lead
+Warm Lead → Inquiry
+Inquiry → Quotation
+Quotation → Sale
+Sale → Contract
+Contract → Pickup
+Contact → Removed
+Bounce Result → Deliverability Update
+28. Reusable Figma Components
+
+Create a complete component library.
+
+Include:
+
+Sidebar
+Top navigation
+Global search
+Metric cards
+Progress cards
+Target cards
+Spreadsheet grid
+Spreadsheet cell
+Column header
+Row number
+Selected cell
+Formula bar
+Filter toolbar
+Saved view selector
+Bulk action toolbar
+Status badge
+Deliverability badge
+Eligibility indicator
+Sync badge
+Table
+Pagination
+Tabs
+Breadcrumbs
+Drawers
+Modals
+Date picker
+Dropdown
+Multi-select
+Search input
+Tag selector
+Financial summary panel
+Line-item builder
+Charts
+Funnel
+Toasts
+Validation warnings
+Empty states
+Loading skeletons
+Offline states
+Error states
+
+Create variants:
+
+Default
+Hover
+Focus
+Selected
+Active
+Disabled
+Loading
+Success
+Warning
+Error
+Removed
+Offline
+Syncing
+29. Required High-Fidelity Screens
+
+Create at minimum:
+
+Login
+Main Dashboard
+Outreach and Sales Dashboard
+Inquiry Dashboard
+Prospect Clients A–Q Sheet
+Prospect Clients A–U Helper View
+Prospect Clients Compact Outreach View
+Warm Leads A–Q Sheet
+Warm Leads A–U Helper View
+Warm Leads Compact Outreach View
+Bulk Paste Preview
+Paste Validation Errors
+Duplicate Resolution
+Address Helper View
+Contact Outreach Sheet
+RingCentral Copy Dialog
+Inquiry List
+Inquiry Quick Capture
+Contact Lookup
+Inquiry Detail
+Inquiry Timeline
+Quotation Builder
+Quotation Preview
+Sales Tracker Spreadsheet
+Sale Detail
+Multi-Unit Sale Builder
+Sales Financial Summary
+Best Clients by Quantity Purchased
+Profit Report
+Prospect-to-Sales Funnel
+Customer List
+Customer Profile
+Contact List
+Container Category Management
+Container Size Management
+Container Condition Management
+Contract List
+Contract Detail
+Pickup Schedule
+Overdue Pickup Dashboard
+Removed Sheet
+Paste Removed Contacts
+Removal Match Results
+Deliverability Dashboard
+Paste Bounced Emails
+Paste Failed Numbers
+Deliverability Match Preview
+Campaign Preparation
+Email Eligibility Summary
+SMS Eligibility Summary
+Call Eligibility Summary
+Service Territory Settings
+Target Configuration
+Reports Dashboard
+Mobile Dashboard
+Mobile Prospect Cards
+Tablet Spreadsheet View
+Empty States
+Loading States
+Error States
+Success States
+Confirmation Modals
+30. Prototype Flows
+
+Create clickable prototypes for:
+
+Prospect to Warm Lead
+Prospect Clients
+→ Select Record
+→ Mark as Replied
+→ Convert to Warm Lead
+→ Confirm Reply Channel
+→ Open Warm Lead
+Warm Lead to Sale
+Warm Lead
+→ Create Inquiry
+→ Create Quotation
+→ Accept Quotation
+→ Create Sales Tracker Record
+→ Enter Buying Price
+→ Enter Selling Price
+→ Confirm Profit
+→ Create Contract
+→ Schedule Pickup
+Bulk Paste
+Open Sheet
+→ Select Starting Cell
+→ Paste Excel Data
+→ Detect A–Q or A–U
+→ Preview
+→ Resolve Errors
+→ Confirm
+Removed Contact
+Paste Opted-Out Number or Email
+→ Match CRM Record
+→ Review Update
+→ Mark Category Removed
+→ Update Deliverability
+→ Exclude from Outreach
+Deliverability Update
+Paste Bounced Emails or Failed Numbers
+→ Match Records
+→ Review Recommended Status
+→ Apply Updates
+→ Show Processing Summary
+Campaign Preparation
+Choose Email, SMS, or Call List
+→ Apply Eligibility Rules
+→ Show Exclusions
+→ Review Final Contacts
+→ Copy or Export
+31. Responsive Design
+Desktop
+Full spreadsheet grids
+Sticky headers
+Frozen columns
+Multi-column dashboards
+Side-by-side financial summaries
+Persistent filters
+Tablet
+Collapsible sidebar
+Horizontal spreadsheet scrolling
+Frozen company column
+Drawer-based details
+Condensed filters
+Mobile
+
+Do not display a full A–U grid.
+
+Use cards containing:
+
+Company name
+Contact person
+Direct number
+Active email
+City, state, country
+PIC
+Category
+SMS deliverability
+Email deliverability
+
+Quick actions:
+
+Copy Number
+Copy Email
+Open Record
+Move to Warm Lead
+Create Inquiry
+32. Final Figma Deliverables
+
+Organize the Figma file into:
+
+01 Cover
+02 Design Foundations
+03 Components
+04 Main Dashboard
+05 Outreach Dashboard
+06 Prospect Clients
+07 Warm Leads
+08 Contact Outreach
+09 Inquiries
+10 Customers
+11 Container Catalog
+12 Quotations
+13 Sales Tracker
+14 Contracts
+15 Pickup Scheduling
+16 Removed Sheet
+17 Deliverability Management
+18 Reports
+19 Administration
+20 Responsive Screens
+21 Prototype Flows
+22 Developer Handoff
+
+Include:
+
+Color tokens
+Typography tokens
+Spacing system
+Grid system
+Component naming
+Responsive annotations
+Interaction notes
+Form behavior
+Validation behavior
+Empty states
+Loading states
+Error states
+Developer handoff measurements
+Backend-readiness notes
+Data-source annotations
+Related-record annotations
+Final Design Goal
+
+The final Figma design must feel like a complete, real-world CRM and outreach operating system for a shipping-container business.
+
+It must clearly answer:
+
+How many prospects do we have?
+How many became warm leads?
+How many inquiries came through email, SMS, calls, or RingCentral?
+How many inquiries became quotations?
+How many quotations became sales?
+How many units were sold?
+Which client bought the most units?
+What is the total buying cost?
+What is the total selling amount?
+How much gross profit was generated?
+Are we on track to reach 5,000 monthly profit?
+Did we send 500 emails today?
+Did we complete 10–15 calls?
+Did we achieve the declared text target?
+Which contacts are Proceed?
+Which contacts are Removed?
+Which emails bounced?
+Which phone numbers are invalid?
+Who opted out?
+Which contacts can be safely included in email, SMS, or call campaigns?
+Which state, province, city, or territory performs best?
+Which PIC performs best?
+
+The experience must combine:
+
+Google Sheets convenience
++

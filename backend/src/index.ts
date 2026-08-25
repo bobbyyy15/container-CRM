@@ -3,6 +3,9 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import leadRoutes from './routes/lead.routes';
+import companyRoutes from './routes/company.routes';
+import contactRoutes from './routes/contact.routes';
+import importRoutes from './routes/import.routes';
 
 dotenv.config();
 
@@ -21,7 +24,10 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Backend is running' });
 });
 
-app.use('/api/v1', leadRoutes);
+app.use('/api/v1/leads', leadRoutes);
+app.use('/api/v1/companies', companyRoutes);
+app.use('/api/v1/contacts', contactRoutes);
+app.use('/api/v1/data/imports', importRoutes);
 
 // Start Server
 app.listen(PORT, () => {

@@ -1,0 +1,10 @@
+{
+  "description": "Streamline enterprise CRM with bulk outreach, inquiry tracking, and sales visibility to enhance relationships and drive profits for businesses.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

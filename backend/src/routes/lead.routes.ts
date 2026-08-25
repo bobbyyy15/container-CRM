@@ -3,6 +3,8 @@ import { LeadController } from '../controllers/lead.controller';
 
 const router = Router();
 
+router.get('/prospects', LeadController.getProspects);
+
 // Prospect -> Warm Lead
 router.post('/prospects/:prospectId/convert-to-warm-lead', LeadController.convertProspect);
 

@@ -1,8 +1,23 @@
 import { Request, Response } from 'express';
 import { LeadService } from '../services/lead.service';
 import { ConvertProspectSchema, CreateInquirySchema } from '../schemas/lead.schema';
+import { supabaseAdmin } from '../config/supabase';
 
 export class LeadController {
+  static async getProspects(req: Request, res: Response) {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('prospect_clients')
+        .select('*, companies(*), contacts(*)')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: { message: error.message } });
+    }
+  }
+
   static async convertProspect(req: Request, res: Response) {
     try {
       const prospectId = req.params.prospectId as string;
