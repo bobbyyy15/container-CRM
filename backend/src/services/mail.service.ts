@@ -1,49 +1,57 @@
 import nodemailer from 'nodemailer';
 import { supabaseAdmin } from '../config/supabase';
 
-// In a robust multi-tenant CRM, we would store SMTP credentials per user in the database.
-// For MVP, we configure a master transporter using env vars, or allow passing credentials.
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'dummy_client_id';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || 'dummy_client_secret';
+
 export class MailService {
   
-  static createTransporter(userEmail?: string, appPassword?: string) {
-    // If user provides specific credentials (from DB), use them. Otherwise fallback to global env vars
-    const user = userEmail || process.env.SMTP_USER;
-    const pass = appPassword || process.env.SMTP_PASS;
+  static async sendColdEmail(to: string, subject: string, html: string, actorId: string, prospectId: string) {
+    // 1. Fetch the user's Google OAuth refresh token
+    const { data: profile, error: profileErr } = await supabaseAdmin
+      .from('profiles')
+      .select('google_refresh_token, google_email')
+      .eq('id', actorId)
+      .single();
 
-    return nodemailer.createTransport({
+    if (profileErr || !profile || !profile.google_refresh_token) {
+      throw new Error("User has not connected their Google account for outreach.");
+    }
+
+    // 2. Configure Nodemailer with OAuth2
+    const transporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 465,
-      secure: true, // true for 465, false for other ports
+      secure: true,
       auth: {
-        user,
-        pass
+        type: 'OAuth2',
+        user: profile.google_email,
+        clientId: GOOGLE_CLIENT_ID,
+        clientSecret: GOOGLE_CLIENT_SECRET,
+        refreshToken: profile.google_refresh_token
       }
     });
-  }
-
-  static async sendColdEmail(to: string, subject: string, html: string, actorId: string, prospectId: string) {
-    const transporter = this.createTransporter();
 
     try {
+      // 3. Send Email
       const info = await transporter.sendMail({
-        from: process.env.SMTP_USER, // Sender address
+        from: profile.google_email,
         to,
         subject,
         html
       });
 
-      // Log the event in domain_events
+      // 4. Log event
       await supabaseAdmin.from('domain_events').insert({
         entity_type: 'prospect',
         entity_id: prospectId,
         event_type: 'email_sent',
         actor_id: actorId,
-        payload: { messageId: info.messageId, to, subject }
+        payload: { messageId: info.messageId, to, subject, sender: profile.google_email }
       });
 
       return { success: true, messageId: info.messageId };
     } catch (error: any) {
-      // Log the failure
       await supabaseAdmin.from('domain_events').insert({
         entity_type: 'prospect',
         entity_id: prospectId,
@@ -51,7 +59,6 @@ export class MailService {
         actor_id: actorId,
         payload: { to, subject, error: error.message }
       });
-
       throw new Error(`Failed to send email: ${error.message}`);
     }
   }
