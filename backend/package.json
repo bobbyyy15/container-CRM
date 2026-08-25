@@ -19,6 +19,7 @@
     "express": "^5.2.1",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^9.0.5",
     "supabase": "^2.115.0",
     "zod": "^4.4.3"
   },
@@ -27,6 +28,7 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.3.0",
+    "@types/nodemailer": "^8.0.1",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"
   }

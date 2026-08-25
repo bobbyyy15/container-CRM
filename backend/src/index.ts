@@ -8,6 +8,7 @@ import contactRoutes from './routes/contact.routes';
 import importRoutes from './routes/import.routes';
 import dealRoutes from './routes/deal.routes';
 import analyticsRoutes from './routes/analytics.routes';
+import outreachRoutes from './routes/outreach.routes';
 import { requireAuth } from './middleware/auth.middleware';
 
 dotenv.config();
@@ -35,6 +36,7 @@ app.use('/api/v1/contacts', contactRoutes);
 app.use('/api/v1/data/imports', importRoutes);
 app.use('/api/v1/deals', dealRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
+app.use('/api/v1/outreach', outreachRoutes);
 
 // Start Server
 app.listen(PORT, () => {
