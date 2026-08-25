@@ -18,7 +18,7 @@ import {
   LineChart, Line,
 } from 'recharts'
 
-export const exportToCSV = (data: any[], filename: string) => {
+const exportToCSV = (data: any[], filename: string) => {
   if (!data || !data.length) return;
   const headers = Object.keys(data[0]);
   const csvRows = [];
@@ -2283,6 +2283,9 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
+      if (session?.provider_refresh_token && session?.user) {
+        supabase.from('profiles').update({ google_refresh_token: session.provider_refresh_token, google_email: session.user.email }).eq('id', session.user.id).then();
+      }
       setAuthChecking(false)
     })
 
@@ -2290,6 +2293,9 @@ export default function App() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
+      if (session?.provider_refresh_token && session?.user) {
+        supabase.from('profiles').update({ google_refresh_token: session.provider_refresh_token, google_email: session.user.email }).eq('id', session.user.id).then();
+      }
     })
 
     return () => subscription.unsubscribe()

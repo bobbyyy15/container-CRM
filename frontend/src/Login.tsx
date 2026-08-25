@@ -127,6 +127,33 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           </button>
         </form>
 
+        <div style={{ display: 'flex', alignItems: 'center', margin: '20px 0' }}>
+          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+          <span style={{ padding: '0 12px', fontSize: 12, color: 'var(--t4)', fontWeight: 600 }}>OR</span>
+          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+        </div>
+
+        <button 
+          onClick={async () => {
+            const { error } = await supabase.auth.signInWithOAuth({
+              provider: 'google',
+              options: {
+                scopes: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email',
+                queryParams: {
+                  access_type: 'offline',
+                  prompt: 'consent',
+                },
+                redirectTo: window.location.origin
+              }
+            });
+            if (error) setError(error.message);
+          }}
+          style={{ width: '100%', padding: '10px', background: 'white', color: '#333', border: '1px solid #ccc', borderRadius: 8, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+        >
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" style={{ width: 18, height: 18 }} />
+          Sign in with Google
+        </button>
+
         <div style={{ textAlign: 'center', marginTop: 24, fontSize: 13, color: 'var(--t4)' }}>
           {isRegistering ? 'Already have an account? ' : "Don't have an account? "}
           <span style={{ color: 'var(--brand)', fontWeight: 600, cursor: 'pointer' }} onClick={() => setIsRegistering(!isRegistering)}>
