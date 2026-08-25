@@ -2,6 +2,15 @@ import { useState, useCallback, useEffect } from 'react'
 import axios from 'axios'
 import { supabase } from './config/supabase'
 import Login from './Login'
+
+axios.interceptors.request.use(async (config) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.access_token) {
+    config.headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  return config;
+});
+
 import {
   BarChart, Bar, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -33,7 +42,58 @@ export const exportToCSV = (data: any[], filename: string) => {
   document.body.removeChild(a);
 };
 
-export const useProspects = () => {
+export 
+const useWarmLeads = () => {
+  const [data, setData] = useState<any[]>([])
+  useEffect(() => {
+    axios.get('http://localhost:3001/api/v1/leads/warm-leads').then(res => {
+      if (res.data.success) setData(res.data.data)
+    }).catch(console.error)
+  }, [])
+  return data
+}
+
+const useInquiries = () => {
+  const [data, setData] = useState<any[]>([])
+  useEffect(() => {
+    axios.get('http://localhost:3001/api/v1/leads/inquiries').then(res => {
+      if (res.data.success) setData(res.data.data)
+    }).catch(console.error)
+  }, [])
+  return data
+}
+
+const useQuotations = () => {
+  const [data, setData] = useState<any[]>([])
+  useEffect(() => {
+    axios.get('http://localhost:3001/api/v1/deals/quotations').then(res => {
+      if (res.data.success) setData(res.data.data)
+    }).catch(console.error)
+  }, [])
+  return data
+}
+
+const useSales = () => {
+  const [data, setData] = useState<any[]>([])
+  useEffect(() => {
+    axios.get('http://localhost:3001/api/v1/deals/sales').then(res => {
+      if (res.data.success) setData(res.data.data)
+    }).catch(console.error)
+  }, [])
+  return data
+}
+
+const useAnalytics = () => {
+  const [data, setData] = useState<any>(null)
+  useEffect(() => {
+    axios.get('http://localhost:3001/api/v1/analytics/dashboard').then(res => {
+      if (res.data.success) setData(res.data.data)
+    }).catch(console.error)
+  }, [])
+  return data
+}
+
+const useProspects = () => {
   const [prospects, setProspects] = useState<any[]>([]);
   useEffect(() => {
     axios.get('http://localhost:3001/api/v1/leads/prospects').then(res => {
@@ -437,6 +497,8 @@ const TopBar = ({ isDark, onToggleDark }: { isDark: boolean; onToggleDark: () =>
 const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
   const [chartMetric, setChartMetric] = useState<'profit' | 'revenue' | 'cost'>('profit')
   const chartColor = chartMetric === 'profit' ? '#315EF6' : chartMetric === 'revenue' ? '#059669' : '#6B7280'
+  const analytics = useAnalytics()
+  const m = analytics?.metrics || {}
 
   return (
     <div className="page-scroll">
@@ -469,7 +531,7 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
               </button>
             </div>
             <div>
-              <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginBottom: 6 }}>$0</div>
+              <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginBottom: 6 }}>${m.total_gross_profit?.toLocaleString() || 0}</div>
               <Trend val="0" up white />
               <div style={{ fontSize: 11, opacity: 0.65, marginTop: 6 }}>Target: $0 · 0%</div>
               <div style={{ marginTop: 10, height: 5, background: 'rgba(255,255,255,0.2)', borderRadius: 99, overflow: 'hidden' }}>
@@ -482,13 +544,13 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="kpi-card" style={{ flex: 1 }}>
               <div className="kpi-label">Monthly Revenue</div>
-              <div className="kpi-value" style={{ fontSize: 22 }}>$0</div>
+              <div className="kpi-value" style={{ fontSize: 22 }}>${m.total_revenue?.toLocaleString() || 0}</div>
               <Trend val="0" up />
               <div className="kpi-sub">vs last month</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
               <div className="kpi-label">Units Sold</div>
-              <div className="kpi-value" style={{ fontSize: 22 }}>0</div>
+              <div className="kpi-value" style={{ fontSize: 22 }}>{m.total_units || 0}</div>
               <Trend val="0" up />
               <div className="kpi-sub">containers this month</div>
             </div>
@@ -497,13 +559,13 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="kpi-card" style={{ flex: 1 }}>
               <div className="kpi-label">Active Clients</div>
-              <div className="kpi-value" style={{ fontSize: 22 }}>0</div>
+              <div className="kpi-value" style={{ fontSize: 22 }}>{m.active_clients || 0}</div>
               <Trend val="0" up />
               <div className="kpi-sub">purchased in last 90 days</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
               <div className="kpi-label">Profit Margin</div>
-              <div className="kpi-value" style={{ fontSize: 22 }}>0%</div>
+              <div className="kpi-value" style={{ fontSize: 22 }}>{m.profit_margin?.toFixed(1) || 0}%</div>
               <Trend val="0" up />
               <div className="kpi-sub">vs last month average</div>
             </div>
@@ -949,7 +1011,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [view, setView] = useState('grid')
   const [tab, setTab] = useState('Standard A–Q View')
 
-  const prospectsData = useProspects()
+  const _prospectsData = useProspects()
+  const _warmData = useWarmLeads()
+  const prospectsData = mode === 'warm' ? _warmData : _prospectsData
 
   const handleImportMock = async () => {
     try {
@@ -1174,6 +1238,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 // ─── Inquiry List ─────────────────────────────────────────────────────────────
 
 const InquiryList = () => {
+  const INQUIRIES = useInquiries()
   const [tab, setTab] = useState('All')
   const [lookup, setLookup] = useState('')
   const tabs = ['All', 'New', 'Quotation Required', 'Awaiting Response', 'Negotiating', 'Converted', 'Lost']
@@ -1281,13 +1346,7 @@ const InquiryList = () => {
 // ─── Quotation List ───────────────────────────────────────────────────────────
 
 const QuotationList = () => {
-  const quotes = [
-    { ref: 'QT-2024-0092', date: 'Jul 29', co: 'GreatLakes Auto Inc', contact: 'Derek H.', category: 'High-Cube', size: '40ft HC', qty: 5, sellTotal: 24000, profit: 7200, margin: 30.0, status: 'Draft', pic: 'JC', source: 'INQ-2024-0291' },
-    { ref: 'QT-2024-0091', date: 'Jul 28', co: 'Maple Industrial Services', contact: 'Angela M.', category: 'Dry', size: '20ft', qty: 10, sellTotal: 26000, profit: 7800, margin: 30.0, status: 'Sent', pic: 'DL', source: 'INQ-2024-0289' },
-    { ref: 'QT-2024-0090', date: 'Jul 27', co: 'Calgary Build Corp', contact: 'Wade S.', category: 'Open-Top', size: '40ft HC', qty: 3, sellTotal: 18600, profit: 5400, margin: 29.0, status: 'Accepted', pic: 'JC', source: 'INQ-2024-0288' },
-    { ref: 'QT-2024-0089', date: 'Jul 26', co: 'Northland Mining', contact: 'Sven H.', category: 'Flat-Rack', size: '40ft HC', qty: 4, sellTotal: 22400, profit: 6400, margin: 28.6, status: 'Rejected', pic: 'SK', source: 'INQ-2024-0287' },
-    { ref: 'QT-2024-0088', date: 'Jul 25', co: 'Tundra Resources', contact: 'Elena S.', category: 'Refrigerated', size: '40ft HC', qty: 2, sellTotal: 28000, profit: 8400, margin: 30.0, status: 'Sent', pic: 'MS', source: 'INQ-2024-0290' },
-  ]
+  const quotes = useQuotations()
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="status-strip" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
@@ -1358,6 +1417,7 @@ const QuotationList = () => {
 // ─── Sales Tracker ────────────────────────────────────────────────────────────
 
 const SalesTracker = () => {
+  const SALES = useSales()
   const totalBuy = SALES.reduce((s, r) => s + r.totalBuy, 0)
   const totalSell = SALES.reduce((s, r) => s + r.totalSell, 0)
   const totalProfit = SALES.reduce((s, r) => s + r.profit, 0)

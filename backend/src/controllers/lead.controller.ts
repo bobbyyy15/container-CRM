@@ -18,6 +18,34 @@ export class LeadController {
     }
   }
 
+  static async getWarmLeads(req: Request, res: Response) {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('warm_leads')
+        .select('*, companies(*), contacts(*)')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async getInquiries(req: Request, res: Response) {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('inquiries')
+        .select('*, companies(*), contacts(*)')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: { message: error.message } });
+    }
+  }
+
   static async convertProspect(req: Request, res: Response) {
     try {
       const prospectId = req.params.prospectId as string;
