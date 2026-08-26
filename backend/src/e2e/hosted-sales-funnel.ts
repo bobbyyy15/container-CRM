@@ -107,16 +107,29 @@ const run = async () => {
         category: 'Proceed',
         industry: 'Automated Test',
       },
+      // A row with NO company name at all (e.g. an incomplete FMCSA record with only fleet/
+      // insurance data) must not be silently discarded -- it should be recorded in import
+      // history with a specific reason and its raw data preserved, not create a company.
+      {
+        address: `${stamp} No Company Rd`,
+        city: 'Nowhere',
+      },
     ],
   });
 
   const firstImport = await request(token, '/data/imports', { method: 'POST', body: importBody(batchIds[0]) });
-  if (firstImport.data.importedCount !== 2 || firstImport.data.withoutContactCount !== 1) {
-    throw new Error(`Expected 2 imported rows with 1 missing a contact, got ${JSON.stringify(firstImport.data)}`);
+  if (firstImport.data.importedCount !== 2 || firstImport.data.withoutContactCount !== 1 || firstImport.data.errorCount !== 1) {
+    throw new Error(`Expected 2 imported (1 missing a contact) and 1 recorded error, got ${JSON.stringify(firstImport.data)}`);
   }
+  const conflicts = await request(token, '/data/imports/conflicts');
+  const noNameRow = conflicts.data.find((row: any) => row.raw_data?.address === `${stamp} No Company Rd`);
+  if (!noNameRow || noNameRow.status !== 'error' || !/company name/i.test(noNameRow.reason ?? '')) {
+    throw new Error(`Missing-company-name row was not preserved in import history: ${JSON.stringify(noNameRow)}`);
+  }
+
   const secondImport = await request(token, '/data/imports', { method: 'POST', body: importBody(batchIds[1]) });
-  if (secondImport.data.importedCount !== 0 || secondImport.data.duplicateCount !== 2) {
-    throw new Error(`Re-import expected both rows (including the no-contact one) flagged as duplicates, got ${JSON.stringify(secondImport.data)}`);
+  if (secondImport.data.importedCount !== 0 || secondImport.data.duplicateCount !== 2 || secondImport.data.errorCount !== 1) {
+    throw new Error(`Re-import expected both real rows flagged as duplicates and the no-name row recorded again, got ${JSON.stringify(secondImport.data)}`);
   }
 
   let list = await request(token, `/leads/prospects?search=${encodeURIComponent(email)}`);

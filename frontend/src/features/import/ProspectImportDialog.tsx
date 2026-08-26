@@ -14,7 +14,7 @@ type Props = {
   onImported: () => void
 }
 
-const empty: ParsedProspectImport = { rows: [], errors: [], sourceRows: 0 }
+const empty: ParsedProspectImport = { rows: [], submitRows: [], errors: [], sourceRows: 0 }
 
 export default function ProspectImportDialog({ open, initialMode, onClose, onImported }: Props) {
   const [mode, setMode] = useState<'file' | 'paste'>(initialMode)
@@ -23,6 +23,8 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
   const [filename, setFilename] = useState<string>()
   const [working, setWorking] = useState(false)
   const [message, setMessage] = useState('')
+  const [recorded, setRecorded] = useState<any[] | null>(null)
+  const [loadingRecorded, setLoadingRecorded] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   if (!open) return null
@@ -30,6 +32,7 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
   const chooseFile = async (file?: File) => {
     if (!file) return
     setMessage('')
+    setRecorded(null)
     try {
       setFilename(file.name)
       setParsed(await parseProspectFile(file))
@@ -40,25 +43,42 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
 
   const parsePaste = async () => {
     setFilename('pasted-spreadsheet')
+    setRecorded(null)
     setParsed(await parseProspectPaste(paste))
   }
 
   const importRows = async () => {
-    if (!parsed.rows.length) return
+    if (!parsed.submitRows.length) return
     setWorking(true)
     setMessage('')
+    setRecorded(null)
     try {
-      const response = await api.post('/data/imports', { rows: parsed.rows, filename })
+      // Submit every parsed row, not just the "ready" ones -- a row missing a company name
+      // or contact still gets recorded in import history with a specific reason instead of
+      // being silently discarded (see process_prospect_import_batch).
+      const response = await api.post('/data/imports', { rows: parsed.submitRows, filename })
       const result = response.data.data
       const withoutContact = result.withoutContactCount ? ` (${result.withoutContactCount} without a named contact)` : ''
       setMessage(
-        `${result.importedCount} imported${withoutContact} · ${result.duplicateCount} duplicates · ${result.removedCount} removed · ${result.conflictCount} conflicts · ${result.errorCount} errors`,
+        `${result.importedCount} imported${withoutContact} · ${result.duplicateCount} duplicates · ${result.removedCount} removed · ${result.conflictCount} conflicts · ${result.errorCount} recorded for review`,
       )
       onImported()
     } catch (error: any) {
       setMessage(error.response?.data?.error?.message ?? error.message ?? 'Import failed.')
     } finally {
       setWorking(false)
+    }
+  }
+
+  const loadRecorded = async () => {
+    setLoadingRecorded(true)
+    try {
+      const response = await api.get('/data/imports/conflicts')
+      setRecorded((response.data.data ?? []).filter((row: any) => row.status === 'error'))
+    } catch (error: any) {
+      setMessage(error.response?.data?.error?.message ?? error.message ?? 'Could not load recorded rows.')
+    } finally {
+      setLoadingRecorded(false)
     }
   }
 
@@ -130,12 +150,39 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
             )
           })()}
 
-          {message && <div style={{ marginTop: 14, padding: 10, borderRadius: 8, background: 'var(--brand-bg)', color: 'var(--t1)', fontSize: 12 }}>{message}</div>}
+          {message && (
+            <div style={{ marginTop: 14, padding: 10, borderRadius: 8, background: 'var(--brand-bg)', color: 'var(--t1)', fontSize: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <span>{message}</span>
+                <button className="btn btn-ghost btn-sm" onClick={loadRecorded} disabled={loadingRecorded}>
+                  {loadingRecorded ? 'Loading…' : 'View recorded rows'}
+                </button>
+              </div>
+              {recorded && (
+                <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10, maxHeight: 220, overflow: 'auto' }}>
+                  {recorded.length === 0
+                    ? <div style={{ color: 'var(--t3)' }}>No rows are currently recorded for review.</div>
+                    : recorded.map(row => (
+                      <div key={row.id} style={{ marginBottom: 8 }}>
+                        <div style={{ fontWeight: 600 }}>{row.reason ?? 'Recorded for review'}</div>
+                        <div style={{ color: 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 11 }}>
+                          {Object.entries(row.raw_data ?? {}).filter(([, value]) => value).map(([k, v]) => `${k}: ${v}`).join(' · ') || '(no data captured)'}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
             <button className="btn btn-secondary btn-sm" onClick={onClose}>Cancel</button>
-            <button className="btn btn-primary btn-sm" disabled={working || !parsed.rows.length} onClick={importRows}>
-              {working ? 'Importing…' : `Import ${parsed.rows.length} valid rows`}
+            <button className="btn btn-primary btn-sm" disabled={working || !parsed.submitRows.length} onClick={importRows}>
+              {working
+                ? 'Importing…'
+                : parsed.submitRows.length > parsed.rows.length
+                  ? `Import ${parsed.rows.length} as prospects (+${parsed.submitRows.length - parsed.rows.length} recorded for review)`
+                  : `Import ${parsed.rows.length} valid rows`}
             </button>
           </div>
         </div>

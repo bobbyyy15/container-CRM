@@ -26,6 +26,10 @@ export type ImportNote = { message: string; kind: 'skipped' | 'issue' }
 
 export type ParsedProspectImport = {
   rows: ProspectImportRow[]
+  // Every non-empty candidate row, including ones missing a company name or contact info.
+  // These should still be submitted: the backend records them in import history with a
+  // specific reason instead of silently discarding them (see process_prospect_import_batch).
+  submitRows: ProspectImportRow[]
   errors: ImportNote[]
   sourceRows: number
 }
@@ -100,8 +104,14 @@ const strongGuess = (k: string): keyof ProspectImportRow | undefined => {
   if (/country/.test(k)) return 'country'
   if (/state|province/.test(k)) return 'state_province'
   if (/city|town/.test(k)) return 'city'
-  if (/address|location|street/.test(k)) return 'address'
-  if (/category|status/.test(k)) return 'category'
+  // Exclude "...is_undeliverable" flags: they contain the substring "address" but are a
+  // Y/N delivery-outcome indicator, not an actual street address.
+  if (/address|location|street/.test(k) && !k.includes('undeliverable')) return 'address'
+  // "status" alone is too common a substring to match loosely -- "operating_status" is an
+  // unrelated FMCSA authority concept, not the CRM's Proceed/Removed outreach category, and
+  // matching it here silently corrupted the category column (confirmed against a real file).
+  // Only an exact, known category-ish header counts.
+  if (['category', 'status', 'leadstatus', 'leadcategory', 'prospectstatus', 'prospectcategory'].includes(k)) return 'category'
   if (/date/.test(k)) return 'date_added'
   return undefined
 }
@@ -134,6 +144,9 @@ const validateCandidates = (
   sourceRows = candidates.length,
 ): ParsedProspectImport => {
   const rows: ProspectImportRow[] = []
+  // Every candidate becomes a submitRow regardless of validity -- the backend is the
+  // authority on what's importable vs. recorded for review (see process_prospect_import_batch).
+  const submitRows: ProspectImportRow[] = candidates.map(({ record }) => record as ProspectImportRow)
   const errors: ImportNote[] = []
   const seenEmails = new Map<string, number>()
   const seenPhones = new Map<string, number>()
@@ -166,14 +179,14 @@ const validateCandidates = (
     rows.push(record as ProspectImportRow)
   })
 
-  return { rows, errors, sourceRows }
+  return { rows, submitRows, errors, sourceRows }
 }
 
 export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport => {
   const nonEmpty = matrix
     .map((row, index) => ({ row, rowNumber: index + 1 }))
     .filter(item => item.row.some(cell => clean(cell)))
-  if (nonEmpty.length < 2) return { rows: [], errors: [{ message: 'The sheet must contain prospect data.', kind: 'issue' }], sourceRows: 0 }
+  if (nonEmpty.length < 2) return { rows: [], submitRows: [], errors: [{ message: 'The sheet must contain prospect data.', kind: 'issue' }], sourceRows: 0 }
 
   // Accept transposed sheets too: field labels run downward while prospects run
   // across columns. A two-column key/value form is the one-record version of this.
@@ -208,6 +221,7 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
     const detail = detected.length ? ` Found: ${detected.join(', ')}.` : ''
     return {
       rows: [],
+      submitRows: [],
       errors: [{
         message: `Recognizable CRM prospect fields were not found.${detail} The importer needs a Company Name and at least one email or phone (Contact Person is optional); records may run across rows or columns. This file appears to describe a different kind of data, so it was not converted into false prospects.`,
         kind: 'issue',
@@ -277,11 +291,11 @@ export const parseProspectFile = async (file: File) => {
   ))
   return results.find(result => result.rows.length > 0)
     ?? results.sort((a, b) => b.sourceRows - a.sourceRows)[0]
-    ?? { rows: [], errors: [{ message: 'The workbook does not contain any readable prospect data.', kind: 'issue' as const }], sourceRows: 0 }
+    ?? { rows: [], submitRows: [], errors: [{ message: 'The workbook does not contain any readable prospect data.', kind: 'issue' as const }], sourceRows: 0 }
 }
 
 export const parseProspectPaste = async (value: string) => {
-  if (!value.trim()) return { rows: [], errors: [{ message: 'Paste copied spreadsheet cells first.', kind: 'issue' as const }], sourceRows: 0 }
+  if (!value.trim()) return { rows: [], submitRows: [], errors: [{ message: 'Paste copied spreadsheet cells first.', kind: 'issue' as const }], sourceRows: 0 }
   const { read, utils } = await import('xlsx')
   const workbook = read(value, { type: 'string' })
   const sheet = workbook.Sheets[workbook.SheetNames[0]]

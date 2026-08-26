@@ -11,18 +11,19 @@ export const ImportRowSchema = z.object({
   country: z.string().optional(),
   state_province: z.string().optional(),
   city: z.string().optional(),
-  company_name: z.string().trim().min(1, "Company Name is required"),
+  // Company Name, Contact Person, and a contact channel are no longer enforced here: a row
+  // missing any of these is still worth preserving in import history (see
+  // process_prospect_import_batch) rather than rejecting the whole batch at the API
+  // boundary. The database function is the authority on what's importable vs. recorded for
+  // review, since it can give each row its own specific reason instead of one generic 400.
+  company_name: z.string().trim().optional(),
   contact_person: z.string().trim().min(1).optional(),
   contact_number_direct: z.string().optional(),
   contact_number_2: z.string().optional(),
   email_active: z.string().optional(),
   email_2: z.string().optional(),
   address: z.string().optional(),
-}).refine(
-  row => [row.email_active, row.email_2, row.contact_number_direct, row.contact_number_2]
-    .some(value => Boolean(value?.trim())),
-  { message: 'At least one email address or phone number is required' },
-);
+});
 
 export const BulkImportPayloadSchema = z.object({
   rows: z.array(ImportRowSchema).min(1).max(5000),

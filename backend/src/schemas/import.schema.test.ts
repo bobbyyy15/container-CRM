@@ -13,8 +13,10 @@ test('prospect import accepts the required company and contact identity', () => 
   assert.equal(row.contact_person, 'Taylor Morgan');
 });
 
-test('prospect import rejects rows without authoritative identity fields', () => {
-  assert.equal(ImportRowSchema.safeParse({ email_active: 'nobody@example.com' }).success, false);
+test('prospect import schema no longer blocks rows missing a company name', () => {
+  // The database layer (process_prospect_import_batch) is the authority on rejecting these --
+  // it records a specific per-row reason in import history instead of failing the whole batch.
+  assert.equal(ImportRowSchema.safeParse({ email_active: 'nobody@example.com' }).success, true);
 });
 
 test('prospect import accepts a company with no named contact yet', () => {
@@ -34,12 +36,12 @@ test('bulk import rejects an invalid batch identifier', () => {
   assert.equal(result.success, false);
 });
 
-test('prospect import requires a usable contact channel', () => {
+test('prospect import schema no longer blocks rows missing a contact channel', () => {
   const result = ImportRowSchema.safeParse({
     company_name: 'Northwind',
     contact_person: 'Taylor Morgan',
   });
-  assert.equal(result.success, false);
+  assert.equal(result.success, true);
 });
 
 test('prospect import accepts a phone when email is unavailable', () => {
