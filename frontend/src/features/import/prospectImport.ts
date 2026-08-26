@@ -55,6 +55,27 @@ const aliases: Record<string, keyof ProspectImportRow> = {
   address: 'address', streetaddress: 'address', location: 'address',
 }
 
+// Carrier/business registry exports (e.g. FMCSA census data) commonly carry per-commodity
+// Y/N flag columns instead of a single "industry" field. When no explicit Industry column
+// is present, derive it from whichever of these are marked Y on the row -- otherwise that
+// data is simply discarded even though it's the closest thing to an industry classification
+// the source file has.
+const CARGO_TYPE_LABELS: Record<string, string> = {
+  generalfreight: 'General Freight', householdgoods: 'Household Goods',
+  metalsheetscoilsrolls: 'Metal Sheets/Coils/Rolls', motorvehicles: 'Motor Vehicles',
+  driveawaytowaway: 'Driveaway/Towaway', logspolesbeamslumber: 'Logs/Poles/Beams/Lumber',
+  buildingmaterials: 'Building Materials', mobilehomes: 'Mobile Homes',
+  machinerylargeobjects: 'Machinery/Large Objects', freshproduce: 'Fresh Produce',
+  liquidsgases: 'Liquids/Gases', intermodalcontainers: 'Intermodal Containers',
+  passengers: 'Passengers', oilfieldequipment: 'Oilfield Equipment', livestock: 'Livestock',
+  grainfeedhay: 'Grain/Feed/Hay', coalcoke: 'Coal/Coke', meat: 'Meat',
+  garbagerefusetrash: 'Garbage/Refuse/Trash', usmail: 'US Mail', chemicals: 'Chemicals',
+  commoditiesdrybulk: 'Dry Bulk Commodities', refrigeratedfood: 'Refrigerated Food',
+  beverages: 'Beverages', paperproducts: 'Paper Products', utility: 'Utility',
+  farmsupplies: 'Farm Supplies', construction: 'Construction', waterwell: 'Water Well',
+  cargoother: 'Other',
+}
+
 const clean = (value: unknown) => String(value ?? '').trim()
 const key = (value: unknown) => clean(value).toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^\d+/, '')
 const phone = (value: string | undefined) => clean(value).replace(/\D/g, '')
@@ -201,6 +222,14 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
   const dataRows = hasHeader
     ? nonEmpty.filter(item => item.rowNumber > headerCandidate.rowNumber)
     : nonEmpty
+  const cargoColumns = hasHeader
+    ? header
+      .map((cell, index) => ({ index, label: CARGO_TYPE_LABELS[key(cell)] }))
+      .filter((entry): entry is { index: number; label: string } => Boolean(entry.label))
+    : []
+  const cargoOtherDescriptionIndex = hasHeader
+    ? header.findIndex(cell => key(cell) === 'cargootherdescription')
+    : -1
 
   const candidates = dataRows.map(({ row: source, rowNumber }) => {
     const record: Record<string, string> = {}
@@ -211,6 +240,16 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
       const value = clean(source[index])
       if (value) record[field] = value
     })
+    if (!record.industry && cargoColumns.length) {
+      const active = cargoColumns
+        .filter(({ index }) => /^y(es)?$/i.test(clean(source[index])))
+        .map(({ label }) => {
+          if (label !== 'Other' || cargoOtherDescriptionIndex < 0) return label
+          const description = clean(source[cargoOtherDescriptionIndex])
+          return description ? `Other (${description})` : label
+        })
+      if (active.length) record.industry = active.join(', ')
+    }
     return { record, rowNumber }
   })
 
