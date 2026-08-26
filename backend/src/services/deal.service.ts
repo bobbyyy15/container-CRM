@@ -1,8 +1,20 @@
 import { supabaseAdmin } from '../config/supabase';
-import { ConvertToSalePayload, CreateQuotationPayload } from '../schemas/deal.schema';
+import { ConvertToSalePayload, CreateQuotationPayload, UpdateQuotationStatusPayload } from '../schemas/deal.schema';
 
 export class DealService {
-  
+
+  static async updateQuotationStatus(quotationId: string, payload: UpdateQuotationStatusPayload, userId: string) {
+    const { data: quote, error } = await supabaseAdmin
+      .rpc('update_quotation_status', {
+        p_quotation_id: quotationId,
+        p_actor_id: userId,
+        p_status: payload.status,
+      })
+      .single();
+    if (error) throw new Error(`Failed to update quotation status: ${error.message}`);
+    return quote;
+  }
+
   static async createQuotation(payload: CreateQuotationPayload, userId: string) {
     const { data: quote, error } = await supabaseAdmin
       .rpc('create_quotation_from_inquiry', {

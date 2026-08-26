@@ -50,25 +50,9 @@ export class DealController {
     try {
       const id = req.params.id as string;
       const payload = UpdateQuotationStatusSchema.parse(req.body);
-      
-      const { data, error } = await supabaseAdmin
-        .from('quotations')
-        .update({ status: payload.status })
-        .eq('id', id)
-        .select()
-        .single();
-        
-      if (error) throw error;
-
-      const { error: eventError } = await supabaseAdmin.from('domain_events').insert({
-        entity_type: 'quotation',
-        entity_id: id,
-        event_type: `quotation_${payload.status.toLowerCase()}`,
-        actor_id: req.auth!.user.id,
-        payload: { status: payload.status },
-      });
-      if (eventError) throw eventError;
-      res.json({ success: true, data });
+      const userId = req.auth!.user.id;
+      const quote = await DealService.updateQuotationStatus(id, payload, userId);
+      res.json({ success: true, data: quote });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });
     }

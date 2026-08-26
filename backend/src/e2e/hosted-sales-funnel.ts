@@ -43,10 +43,10 @@ const deleteWhereIn = async (table: string, column: string, values: (string | un
 };
 
 const cleanup = async () => {
-  await deleteWhereIn('domain_events', 'entity_id', [ids.prospect, ids.warmLead, ids.inquiry, ids.quotation, ids.sale]);
+  await deleteWhereIn('domain_events', 'entity_id', [ids.prospect, ids.warmLead, ids.inquiry, ids.rejectedQuotation, ids.quotation, ids.sale]);
   await deleteWhereIn('sales', 'id', [ids.sale]);
-  await deleteWhereIn('quotation_items', 'quotation_id', [ids.quotation]);
-  await deleteWhereIn('quotations', 'id', [ids.quotation]);
+  await deleteWhereIn('quotation_items', 'quotation_id', [ids.rejectedQuotation, ids.quotation]);
+  await deleteWhereIn('quotations', 'id', [ids.rejectedQuotation, ids.quotation]);
   await deleteWhereIn('inquiries', 'id', [ids.inquiry]);
   await deleteWhereIn('warm_leads', 'id', [ids.warmLead]);
   await deleteWhereIn('prospect_clients', 'id', [ids.prospect]);
@@ -120,6 +120,25 @@ const run = async () => {
   list = await request(token, `/leads/warm-leads?search=${encodeURIComponent(email)}`);
   if (list.data.length) throw new Error('Converted warm lead remained in the active warm-lead list');
 
+  const rejectedQuotation = await request(token, '/deals/quotations', {
+    method: 'POST',
+    body: JSON.stringify({
+      inquiry_id: ids.inquiry,
+      items: [{ description: '40ft E2E test container (first offer)', quantity: 2, unit_price: 5500 }],
+    }),
+  });
+  ids.rejectedQuotation = rejectedQuotation.data.id;
+  list = await request(token, `/leads/inquiries?search=${encodeURIComponent(email)}`);
+  if (list.data.length) throw new Error('Quoted inquiry remained in the active inquiry list');
+
+  await request(token, `/deals/quotations/${ids.rejectedQuotation}/status`, {
+    method: 'PATCH', body: JSON.stringify({ status: 'Rejected' }),
+  });
+  list = await request(token, `/leads/inquiries?search=${encodeURIComponent(email)}`);
+  if (list.data.length !== 1 || list.data[0].id !== ids.inquiry) {
+    throw new Error('Inquiry did not become re-quotable after quotation rejection');
+  }
+
   const quotation = await request(token, '/deals/quotations', {
     method: 'POST',
     body: JSON.stringify({
@@ -128,8 +147,20 @@ const run = async () => {
     }),
   });
   ids.quotation = quotation.data.id;
+  if (ids.quotation === ids.rejectedQuotation) {
+    throw new Error('Requoting returned the rejected quotation instead of creating a new one');
+  }
   list = await request(token, `/leads/inquiries?search=${encodeURIComponent(email)}`);
-  if (list.data.length) throw new Error('Quoted inquiry remained in the active inquiry list');
+  if (list.data.length) throw new Error('Re-quoted inquiry remained in the active inquiry list');
+
+  const convertedStatusRejected = await fetch(`${apiBase}/deals/quotations/${ids.quotation}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ status: 'Converted' }),
+  });
+  if (convertedStatusRejected.ok) {
+    throw new Error('PATCH status accepted an illegal direct transition to Converted');
+  }
 
   await request(token, `/deals/quotations/${ids.quotation}/status`, {
     method: 'PATCH', body: JSON.stringify({ status: 'Accepted' }),
@@ -149,7 +180,16 @@ const run = async () => {
     throw new Error('Recorded sale totals or status are incorrect');
   }
 
-  console.log('PASS hosted API: auth -> duplicate-safe import -> prospect -> warm lead -> inquiry -> quotation -> accepted -> sale');
+  const modifyConvertedRejected = await fetch(`${apiBase}/deals/quotations/${ids.quotation}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ status: 'Sent' }),
+  });
+  if (modifyConvertedRejected.ok) {
+    throw new Error('PATCH status allowed modifying an already-Converted quotation');
+  }
+
+  console.log('PASS hosted API: auth -> duplicate-safe import -> prospect -> warm lead -> inquiry -> reject+requote -> accepted -> sale -> immutability guards');
 };
 
 void (async () => {

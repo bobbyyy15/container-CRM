@@ -12,7 +12,7 @@ export const CreateQuotationSchema = z.object({
 });
 
 export const UpdateQuotationStatusSchema = z.object({
-  status: z.enum(['Draft', 'Sent', 'Viewed', 'Accepted', 'Rejected', 'Converted'])
+  status: z.enum(['Sent', 'Viewed', 'Accepted', 'Rejected'])
 });
 
 export const ConvertToSaleSchema = z.object({
@@ -23,3 +23,4 @@ export const ConvertToSaleSchema = z.object({
 
 export type CreateQuotationPayload = z.infer<typeof CreateQuotationSchema>;
 export type ConvertToSalePayload = z.infer<typeof ConvertToSaleSchema>;
+export type UpdateQuotationStatusPayload = z.infer<typeof UpdateQuotationStatusSchema>;
