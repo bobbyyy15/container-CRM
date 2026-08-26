@@ -530,14 +530,6 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
             <div className="sb-icon-wrap">
               <Ic n={I.sidebar} size={16} style={{ color: 'var(--sb-icon)' }} />
             </div>
-            {expanded && (
-              <div style={{ minWidth: 0, flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="sb-item-label" style={{ fontWeight: 600 }}>Nav Mode</span>
-                <span style={{ fontSize: 10, color: 'var(--brand)', fontWeight: 600, background: 'rgba(49, 94, 246, 0.15)', padding: '2px 6px', borderRadius: 4 }}>
-                  {mode === 'expanded' ? 'Pinned' : mode === 'hover' ? 'Hover' : 'Collapsed'}
-                </span>
-              </div>
-            )}
           </button>
         </div>
       </div>
@@ -658,7 +650,7 @@ const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onT
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
-const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
+const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: any }) => {
   const [chartMetric, setChartMetric] = useState<'profit' | 'revenue' | 'cost'>('profit')
   const chartColor = chartMetric === 'profit' ? '#315EF6' : chartMetric === 'revenue' ? '#059669' : '#6B7280'
   const analytics = useAnalytics()
@@ -666,12 +658,16 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
   const funnel = analytics?.funnel || {}
   const conversion = (value: number, previous: number) => previous > 0 ? `${Math.round((value / previous) * 100)}%` : '0%'
 
+  const hour = new Date().getHours()
+  const timeGreeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  const userName = session?.user?.user_metadata?.full_name?.split(' ')[0] || session?.user?.email?.split('@')[0] || 'User'
+
   return (
     <div className="page-scroll">
       {/* Greeting */}
       <div className="greeting-bar">
         <div>
-          <p className="greeting-title">Good morning, James 👋</p>
+          <p className="greeting-title">{timeGreeting}, {userName} 👋</p>
           <p className="greeting-sub">Here's what's happening across your sales pipeline this month.</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2793,7 +2789,7 @@ export default function App() {
 
   const renderScreen = () => {
     switch (screen) {
-      case 'dashboard':           return <Dashboard onNav={handleNav} />
+      case 'dashboard':           return <Dashboard onNav={handleNav} session={session} />
       case 'outreach-dashboard':  return <OutreachDashboard />
       case 'inquiry-dashboard':   return <InquiryDashboard />
       case 'prospects':           return <ProspectSheet mode="prospect" onNav={handleNav} />
@@ -2817,7 +2813,7 @@ export default function App() {
       case 'pickups':             return <Placeholder label="Pickup Tracking" />
       case 'best-clients':        return <Placeholder label="Best Clients" />
       case 'inquiry-funnel':      return <Placeholder label="Inquiry Funnel" />
-      default:                    return <Dashboard onNav={handleNav} />
+      default:                    return <Dashboard onNav={handleNav} session={session} />
     }
   }
 
