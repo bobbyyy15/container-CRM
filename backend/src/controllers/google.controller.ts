@@ -5,6 +5,23 @@ import { GoogleOAuthService } from '../services/google-oauth.service';
 const queryValue = (value: unknown) => typeof value === 'string' ? value : null;
 
 export class GoogleAuthController {
+  static async syncProvider(req: Request, res: Response) {
+    try {
+      const { refresh_token, email } = req.body;
+      if (!refresh_token || !email) {
+        return res.status(400).json({ success: false, error: { message: 'Missing token or email' } });
+      }
+      
+      await GoogleOAuthService.syncProviderToken(req.auth!.user.id, email, refresh_token);
+      res.json({ success: true, data: { connected: true } });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: { code: 'GOOGLE_SYNC_FAILED', message: error.message },
+        requestId: req.requestId,
+      });
+    }
+  }
   static async status(req: Request, res: Response) {
     try {
       const status = await GoogleOAuthService.getStatus(req.auth!.user.id);
