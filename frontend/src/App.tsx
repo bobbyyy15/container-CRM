@@ -2836,11 +2836,21 @@ export default function App() {
   const isSidebarExpanded = sidebarMode === 'expanded' || (sidebarMode === 'hover' && isHoveringSidebar)
 
   return (
-    <div data-theme={isDark ? 'dark' : undefined} style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
+    <div data-theme={isDark ? 'dark' : undefined} style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)', position: 'relative' }}>
+      
+      {/* Physical spacer for layout so it doesn't push when hovering */}
+      <div style={{ 
+        width: sidebarMode === 'expanded' ? 240 : 68, 
+        minWidth: sidebarMode === 'expanded' ? 240 : 68,
+        flexShrink: 0,
+        transition: 'width 0.2s ease, min-width 0.2s ease' 
+      }} />
+
+      {/* Floating Sidebar */}
       <div 
         onMouseEnter={() => setIsHoveringSidebar(true)} 
         onMouseLeave={() => setIsHoveringSidebar(false)}
-        style={{ display: 'flex' }}
+        style={{ position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 90, display: 'flex' }}
       >
         <Sidebar 
           active={screen} 
@@ -2851,7 +2861,7 @@ export default function App() {
         />
       </div>
 
-      <div className="workspace">
+      <div className="workspace" style={{ flex: 1, minWidth: 0, zIndex: 1 }}>
         <div className="ws-card">
           <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} session={session} onNav={handleNav} />
           {renderScreen()}

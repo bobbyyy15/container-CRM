@@ -227,8 +227,11 @@ body {
 }
 .sidebar.expanded .sb-group-label { opacity: 1; pointer-events: auto; }
 .sidebar:not(.expanded) .sb-group-label {
-  height: 8px;
+  height: 1px;
   padding: 0;
+  margin: 12px 20px;
+  background: var(--sb-border);
+  color: transparent;
   overflow: hidden;
 }
 
