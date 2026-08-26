@@ -50,8 +50,9 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
     try {
       const response = await api.post('/data/imports', { rows: parsed.rows, filename })
       const result = response.data.data
+      const withoutContact = result.withoutContactCount ? ` (${result.withoutContactCount} without a named contact)` : ''
       setMessage(
-        `${result.importedCount} imported · ${result.duplicateCount} duplicates · ${result.removedCount} removed · ${result.conflictCount} conflicts · ${result.errorCount} errors`,
+        `${result.importedCount} imported${withoutContact} · ${result.duplicateCount} duplicates · ${result.removedCount} removed · ${result.conflictCount} conflicts · ${result.errorCount} errors`,
       )
       onImported()
     } catch (error: any) {
@@ -105,7 +106,7 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
               </div>
               {parsed.rows.length > 0 && (
                 <div style={{ padding: 12, fontSize: 12, color: 'var(--t2)' }}>
-                  Preview: {parsed.rows.slice(0, 3).map(row => `${row.company_name} — ${row.contact_person}`).join(' · ')}
+                  Preview: {parsed.rows.slice(0, 3).map(row => `${row.company_name} — ${row.contact_person || 'no contact yet'}`).join(' · ')}
                 </div>
               )}
               {parsed.errors.length > 0 && (

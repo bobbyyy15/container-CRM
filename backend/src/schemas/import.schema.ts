@@ -12,7 +12,7 @@ export const ImportRowSchema = z.object({
   state_province: z.string().optional(),
   city: z.string().optional(),
   company_name: z.string().trim().min(1, "Company Name is required"),
-  contact_person: z.string().trim().min(1, "Contact Person is required"),
+  contact_person: z.string().trim().min(1).optional(),
   contact_number_direct: z.string().optional(),
   contact_number_2: z.string().optional(),
   email_active: z.string().optional(),

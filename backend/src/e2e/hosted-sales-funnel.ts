@@ -11,6 +11,8 @@ const apiBase = process.env.E2E_API_BASE_URL ?? 'http://localhost:3001/api/v1';
 const stamp = Date.now();
 const email = `crm-e2e-${stamp}@example.test`;
 const companyName = `CRM E2E ${stamp}`;
+const noContactEmail = `crm-e2e-nocontact-${stamp}@example.test`;
+const noContactCompanyName = `CRM E2E No Contact ${stamp}`;
 const password = `E2e-${randomBytes(18).toString('base64url')}!`;
 const batchIds = [randomUUID(), randomUUID()];
 const ids: Record<string, string | undefined> = {};
@@ -49,7 +51,7 @@ const cleanup = async () => {
   await deleteWhereIn('quotations', 'id', [ids.rejectedQuotation, ids.quotation]);
   await deleteWhereIn('inquiries', 'id', [ids.inquiry]);
   await deleteWhereIn('warm_leads', 'id', [ids.warmLead]);
-  await deleteWhereIn('prospect_clients', 'id', [ids.prospect]);
+  await deleteWhereIn('prospect_clients', 'id', [ids.prospect, ids.noContactProspect]);
   await deleteWhereIn('import_staging_conflicts', 'batch_id', batchIds);
   await deleteWhereIn('import_rows', 'batch_id', batchIds);
   await deleteWhereIn('import_batches', 'id', batchIds);
@@ -59,7 +61,7 @@ const cleanup = async () => {
     if (error) throw new Error(`Cleanup company_contacts: ${error.message}`);
   }
   await deleteWhereIn('contacts', 'id', [ids.contact]);
-  await deleteWhereIn('companies', 'id', [ids.company]);
+  await deleteWhereIn('companies', 'id', [ids.company, ids.noContactCompany]);
   if (ids.user) {
     const { error } = await supabaseAdmin.auth.admin.deleteUser(ids.user);
     if (error) throw new Error(`Cleanup auth user: ${error.message}`);
@@ -89,23 +91,46 @@ const run = async () => {
   const importBody = (batchId: string) => JSON.stringify({
     batch_id: batchId,
     filename: 'hosted-e2e.xlsx',
-    rows: [{
-      company_name: companyName,
-      contact_person: 'CRM E2E Contact',
-      email_active: email,
-      category: 'Proceed',
-      industry: 'Automated Test',
-    }],
+    rows: [
+      {
+        company_name: companyName,
+        contact_person: 'CRM E2E Contact',
+        email_active: email,
+        category: 'Proceed',
+        industry: 'Automated Test',
+      },
+      // A row with a company name but no named contact (common in raw source data like
+      // carrier registries) must create the company alone, not get rejected outright.
+      {
+        company_name: noContactCompanyName,
+        email_active: noContactEmail,
+        category: 'Proceed',
+        industry: 'Automated Test',
+      },
+    ],
   });
 
-  await request(token, '/data/imports', { method: 'POST', body: importBody(batchIds[0]) });
-  await request(token, '/data/imports', { method: 'POST', body: importBody(batchIds[1]) });
+  const firstImport = await request(token, '/data/imports', { method: 'POST', body: importBody(batchIds[0]) });
+  if (firstImport.data.importedCount !== 2 || firstImport.data.withoutContactCount !== 1) {
+    throw new Error(`Expected 2 imported rows with 1 missing a contact, got ${JSON.stringify(firstImport.data)}`);
+  }
+  const secondImport = await request(token, '/data/imports', { method: 'POST', body: importBody(batchIds[1]) });
+  if (secondImport.data.importedCount !== 0 || secondImport.data.duplicateCount !== 2) {
+    throw new Error(`Re-import expected both rows (including the no-contact one) flagged as duplicates, got ${JSON.stringify(secondImport.data)}`);
+  }
 
   let list = await request(token, `/leads/prospects?search=${encodeURIComponent(email)}`);
   if (list.data.length !== 1) throw new Error(`Duplicate-safe import expected 1 prospect, found ${list.data.length}`);
   ids.prospect = list.data[0].id;
   ids.company = list.data[0].company_id;
   ids.contact = list.data[0].contact_id;
+
+  const noContactList = await request(token, `/leads/prospects?search=${encodeURIComponent(noContactCompanyName)}`);
+  if (noContactList.data.length !== 1 || noContactList.data[0].contact_id) {
+    throw new Error('Company-only prospect (no named contact) was not created correctly');
+  }
+  ids.noContactProspect = noContactList.data[0].id;
+  ids.noContactCompany = noContactList.data[0].company_id;
 
   const warm = await request(token, `/leads/prospects/${ids.prospect}/convert-to-warm-lead`, { method: 'POST' });
   ids.warmLead = warm.data.id;

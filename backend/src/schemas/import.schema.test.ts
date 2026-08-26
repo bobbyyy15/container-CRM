@@ -17,6 +17,14 @@ test('prospect import rejects rows without authoritative identity fields', () =>
   assert.equal(ImportRowSchema.safeParse({ email_active: 'nobody@example.com' }).success, false);
 });
 
+test('prospect import accepts a company with no named contact yet', () => {
+  const result = ImportRowSchema.safeParse({
+    company_name: 'Northwind Containers',
+    email_active: 'info@example.com',
+  });
+  assert.equal(result.success, true);
+});
+
 test('bulk import rejects an invalid batch identifier', () => {
   const result = BulkImportPayloadSchema.safeParse({
     batch_id: 'not-a-uuid',

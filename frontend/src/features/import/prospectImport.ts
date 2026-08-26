@@ -10,7 +10,7 @@ export type ProspectImportRow = {
   state_province?: string
   city?: string
   company_name: string
-  contact_person: string
+  contact_person?: string
   contact_number_direct?: string
   contact_number_2?: string
   email_active?: string
@@ -112,21 +112,24 @@ const validateCandidates = (
   const seenPhones = new Map<string, number>()
 
   candidates.forEach(({ record, rowNumber }) => {
-    if (!record.company_name || !record.contact_person) {
-      errors.push(`Record ${rowNumber}: company name and contact person are required.`)
+    // Company and Contact are separate entities: a company can exist before a named human
+    // contact is known (common in raw data sources like carrier/business registries), so
+    // only a missing company name blocks the row outright.
+    if (!record.company_name) {
+      errors.push(`Excel row ${rowNumber}: missing company name.`)
       return
     }
     const emails = [email(record.email_active), email(record.email_2)].filter(Boolean)
     const phones = [phone(record.contact_number_direct), phone(record.contact_number_2)].filter(Boolean)
     if (!emails.length && !phones.length) {
-      errors.push(`Record ${rowNumber}: at least one email or phone is required.`)
+      errors.push(`Excel row ${rowNumber}: at least one email or phone is required.`)
       return
     }
 
     const duplicateAt = emails.map(value => seenEmails.get(value)).find(value => value !== undefined)
       ?? phones.map(value => seenPhones.get(value)).find(value => value !== undefined)
     if (duplicateAt !== undefined) {
-      errors.push(`Record ${rowNumber}: duplicate contact identity already appears in record ${duplicateAt}.`)
+      errors.push(`Excel row ${rowNumber}: duplicate contact identity already appears in row ${duplicateAt}.`)
       return
     }
     emails.forEach(value => seenEmails.set(value, rowNumber))
@@ -176,7 +179,7 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
     const detail = detected.length ? ` Found: ${detected.join(', ')}.` : ''
     return {
       rows: [],
-      errors: [`Recognizable CRM prospect fields were not found.${detail} The importer needs Company Name, Contact Person, and at least one email or phone; records may run across rows or columns. This file appears to describe a different kind of data, so it was not converted into false prospects.`],
+      errors: [`Recognizable CRM prospect fields were not found.${detail} The importer needs a Company Name and at least one email or phone (Contact Person is optional); records may run across rows or columns. This file appears to describe a different kind of data, so it was not converted into false prospects.`],
       sourceRows: 0,
     }
   }
@@ -201,19 +204,12 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
   })
 
   const result = validateCandidates(candidates, dataRows.length)
-  if (!result.rows.length && result.sourceRows > 0) {
-    const missing = [
-      !mapped.includes('company_name') && 'Company Name',
-      !mapped.includes('contact_person') && 'Contact Person',
-    ].filter(Boolean) as string[]
-    if (missing.length) {
-      const headerText = header.map(clean).filter(Boolean).join(', ')
-      result.errors.unshift(
-        `Couldn't find a ${missing.join(' or ')} column in this sheet's header row (${headerText || 'no header text detected'}). `
-        + `Rename that column to something like "${missing.includes('Company Name') ? 'Company' : 'Contact Person'}", `
-        + `or use the CRM template below, then re-import.`,
-      )
-    }
+  if (!result.rows.length && result.sourceRows > 0 && !mapped.includes('company_name')) {
+    const headerText = header.map(clean).filter(Boolean).join(', ')
+    result.errors.unshift(
+      `Couldn't find a Company Name column in this sheet's header row (${headerText || 'no header text detected'}). `
+      + `Rename that column to something like "Company", or use the CRM template below, then re-import.`,
+    )
   }
   return result
 }
