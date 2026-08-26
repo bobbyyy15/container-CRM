@@ -576,9 +576,16 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
 
 const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onToggleDark: () => void; session: any; onNav: (s: Screen) => void }) => {
   const [showAccountMenu, setShowAccountMenu] = useState(false)
+  const [showNotifs, setShowNotifs] = useState(false)
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User'
   const initials = userName.substring(0, 2).toUpperCase()
   
+  const NOTIFICATIONS = [
+    { id: 1, title: 'New Inquiry Assigned', desc: 'NorthStar Construction submitted a new inquiry.', time: '10m ago', unread: true, icon: I.inquiry, color: 'var(--blue)' },
+    { id: 2, title: 'Outreach Campaign Finished', desc: 'Q3 Prospecting successfully delivered 425 emails.', time: '2h ago', unread: true, icon: I.target, color: 'var(--green)' },
+    { id: 3, title: 'Quote Approved', desc: 'Great Lakes Storage accepted Quotation #QUO-8A2F.', time: '1d ago', unread: false, icon: I.check, color: 'var(--brand)' },
+  ];
+
   return (
     <header className="topbar">
       <div className="search-wrap">
@@ -596,14 +603,44 @@ const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onT
           <Ic n={isDark ? I.sun : I.moon} size={16} />
         </button>
 
-        <button className="tb-btn" style={{ position: 'relative' }}>
-          <Ic n={I.bell} size={17} />
-          <span className="notif-dot" />
-        </button>
-
-        <button className="tb-btn">
-          <Ic n={I.calendar} size={17} />
-        </button>
+        <div style={{ position: 'relative' }}>
+          {showNotifs && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowNotifs(false)} />
+              <div style={{ position: 'absolute', top: 'calc(100% + 10px)', right: -50, width: 320, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 10, zIndex: 100, boxShadow: '0 10px 25px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--s2)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)' }}>Notifications</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--brand)', cursor: 'pointer' }}>Mark all as read</div>
+                </div>
+                
+                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                  {NOTIFICATIONS.map(n => (
+                    <div key={n.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-s)', display: 'flex', gap: 12, cursor: 'pointer', background: n.unread ? 'rgba(49, 94, 246, 0.03)' : 'transparent' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = n.unread ? 'rgba(49, 94, 246, 0.03)' : 'transparent'}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, background: `${n.color}15`, color: n.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <Ic n={n.icon} size={14} />
+                      </div>
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                          <div style={{ fontSize: 13, fontWeight: n.unread ? 700 : 600, color: 'var(--t1)' }}>{n.title}</div>
+                          <div style={{ fontSize: 11, color: 'var(--t4)' }}>{n.time}</div>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--t3)', lineHeight: 1.4 }}>{n.desc}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                <div style={{ padding: '10px', textAlign: 'center', fontSize: 12, fontWeight: 600, color: 'var(--t3)', borderTop: '1px solid var(--border-s)', cursor: 'pointer' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--brand)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--t3)'}>
+                  View all notifications
+                </div>
+              </div>
+            </>
+          )}
+          <button className="tb-btn" onClick={() => setShowNotifs(!showNotifs)} title="Notifications">
+            <Ic n={I.bell} size={17} />
+            {NOTIFICATIONS.some(n => n.unread) && <span className="notif-dot" />}
+          </button>
+        </div>
 
         <div style={{ position: 'relative' }}>
           {showAccountMenu && (
@@ -2706,7 +2743,10 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       if (session?.provider_refresh_token && session?.user) {
-        supabase.from('profiles').update({ google_refresh_token: session.provider_refresh_token, google_email: session.user.email }).eq('id', session.user.id).then();
+        api.post('/auth/google/sync-provider', {
+          refresh_token: session.provider_refresh_token,
+          email: session.user.email
+        }).catch(console.error);
       }
       setAuthChecking(false)
     })
@@ -2716,7 +2756,10 @@ export default function App() {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session?.provider_refresh_token && session?.user) {
-        supabase.from('profiles').update({ google_refresh_token: session.provider_refresh_token, google_email: session.user.email }).eq('id', session.user.id).then();
+        api.post('/auth/google/sync-provider', {
+          refresh_token: session.provider_refresh_token,
+          email: session.user.email
+        }).catch(console.error);
       }
     })
 
