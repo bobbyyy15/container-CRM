@@ -1390,19 +1390,22 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
               <input type="checkbox" className="cb" onChange={e => setSelected(e.target.checked ? filtered.map(r => r.id) : [])} />
             </div>
             {COLS.map(col => (
-              <div key={col.key} style={{ minWidth: col.w, width: col.w, padding: '7px 12px', borderRight: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div 
+                key={col.key} 
+                style={{ minWidth: col.w, width: col.w, padding: '7px 12px', borderRight: '1px solid var(--border)', cursor: 'context-menu', userSelect: 'none', display: 'flex', alignItems: 'center' }} 
+                title={`Right-click to copy all ${col.label}`}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const dataToCopy = filtered.map(r => getVal(r, col.field)).filter(Boolean).join('\n');
+                  navigator.clipboard.writeText(dataToCopy);
+                  alert(`Copied ${filtered.map(r => getVal(r, col.field)).filter(Boolean).length} ${col.label}s to clipboard!`);
+                }}
+              >
                 <div>
                   <span className="col-header-letter">{col.key}</span>
                   <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{col.label}</span>
                 </div>
-                <button className="btn btn-ghost btn-sm btn-icon" style={{ padding: 2, height: 'auto', minHeight: 0, color: 'var(--brand)' }} title={`Copy all ${col.label}`} onClick={(e) => {
-                  e.stopPropagation();
-                  const dataToCopy = filtered.map(r => getVal(r, col.field)).filter(Boolean).join('\n');
-                  navigator.clipboard.writeText(dataToCopy);
-                  alert(`Copied ${filtered.map(r => getVal(r, col.field)).filter(Boolean).length} items to clipboard!`);
-                }}>
-                  <Ic n={I.copy} size={11} />
-                </button>
               </div>
             ))}
             <div style={{ minWidth: 160, width: 160, padding: '7px 12px' }}>
@@ -1581,20 +1584,24 @@ const InquiryList = () => {
             <tr>
               <th className="col-check"><input type="checkbox" className="cb" /></th>
               <th>Inquiry #</th><th>Date / Time</th><th>Channel</th>
-              <th><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>Company
-                <button className="btn btn-ghost btn-sm btn-icon" style={{ padding: 2, height: 'auto', minHeight: 0, color: 'var(--brand)' }} onClick={(e) => {
-                  e.stopPropagation();
+              <th 
+                style={{ cursor: 'context-menu' }} 
+                title="Right-click to copy all companies"
+                onContextMenu={(e) => {
+                  e.preventDefault();
                   navigator.clipboard.writeText(filtered.map(r => r.company).filter(Boolean).join('\n'));
                   alert(`Copied ${filtered.map(r => r.company).filter(Boolean).length} companies!`);
-                }}><Ic n={I.copy} size={11} /></button>
-              </div></th>
-              <th><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>Contact
-                <button className="btn btn-ghost btn-sm btn-icon" style={{ padding: 2, height: 'auto', minHeight: 0, color: 'var(--brand)' }} onClick={(e) => {
-                  e.stopPropagation();
+                }}
+              >Company</th>
+              <th 
+                style={{ cursor: 'context-menu' }} 
+                title="Right-click to copy all contacts"
+                onContextMenu={(e) => {
+                  e.preventDefault();
                   navigator.clipboard.writeText(filtered.map(r => r.contact).filter(Boolean).join('\n'));
                   alert(`Copied ${filtered.map(r => r.contact).filter(Boolean).length} contacts!`);
-                }}><Ic n={I.copy} size={11} /></button>
-              </div></th>
+                }}
+              >Contact</th>
               <th>Category</th><th>Size</th><th className="r">Qty</th><th>Needed By</th><th>Status</th><th>PIC</th>
               <th className="col-actions">Actions</th>
             </tr>
