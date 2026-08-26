@@ -229,10 +229,11 @@ body {
 .sidebar:not(.expanded) .sb-group-label {
   height: 1px;
   padding: 0;
-  margin: 12px 20px;
-  background: var(--sb-border);
+  margin: 12px 16px;
+  background: #1F2336;
   color: transparent;
   overflow: hidden;
+  opacity: 1;
 }
 
 .sb-item {
