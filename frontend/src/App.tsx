@@ -249,6 +249,7 @@ const I = {
   target:      'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4',
   upload:      'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
   menu:        'M3 12h18M3 6h18M3 18h18',
+  sidebar:     'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm5 0v16',
   copy:        'M20 9h-9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 0 2 2v1',
   outreach:    'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm18 2l-8 7-8-7',
   profit:      'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
@@ -500,19 +501,6 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
 
       {/* Bottom */}
       <div className="sb-bottom">
-        <button
-          type="button"
-          className={`sb-item${active === 'system-settings' ? ' active' : ''}`}
-          data-tooltip="System Settings"
-          title={expanded ? undefined : 'System Settings'}
-          aria-current={active === 'system-settings' ? 'page' : undefined}
-          onClick={() => onNav('system-settings')}
-        >
-          <div className="sb-icon-wrap">
-            <Ic n={I.config} size={16} style={{ color: 'var(--sb-icon)' }} />
-          </div>
-          <span className="sb-item-label">Settings</span>
-        </button>
         <div style={{ position: 'relative' }}>
           {showModeMenu && (
             <>
@@ -521,7 +509,7 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
                 <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t4)', padding: '6px 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sidebar Mode</div>
                 {[
                   { m: 'expanded', label: 'Pinned Open', icon: I.chevRight },
-                  { m: 'hover', label: 'Hover to Expand', icon: I.menu },
+                  { m: 'hover', label: 'Hover to Expand', icon: I.sidebar },
                   { m: 'collapsed', label: 'Pinned Closed', icon: I.chevLeft },
                 ].map(opt => (
                   <div key={opt.m} onClick={() => { onModeChange(opt.m as any); setShowModeMenu(false); }} style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6, cursor: 'pointer', background: mode === opt.m ? 'var(--brand-bg)' : 'transparent', color: mode === opt.m ? 'var(--brand)' : 'var(--t2)', fontSize: 13, fontWeight: 500 }}>
@@ -540,7 +528,7 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
             onClick={() => setShowModeMenu(!showModeMenu)}
           >
             <div className="sb-icon-wrap">
-              <Ic n={I.menu} size={16} style={{ color: 'var(--sb-icon)' }} />
+              <Ic n={I.sidebar} size={16} style={{ color: 'var(--sb-icon)' }} />
             </div>
             {expanded && (
               <div style={{ minWidth: 0, flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
