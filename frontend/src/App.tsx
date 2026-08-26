@@ -332,14 +332,6 @@ const NAV: NavGroup[] = [
   },
 ]
 
-const COLLAPSED_NAV_ITEMS = new Set<Screen>([
-  'dashboard',
-  'prospects',
-  'warm-leads',
-  'inquiries',
-  'quotations',
-  'sales-tracker',
-])
 
 const SCREEN_LABELS: Record<Screen, string> = {
   'dashboard': 'Executive Overview',
@@ -464,14 +456,7 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
   mode: 'expanded' | 'collapsed' | 'hover'; onModeChange: (m: 'expanded' | 'collapsed' | 'hover') => void;
 }) => {
   const [showModeMenu, setShowModeMenu] = useState(false)
-  const visibleGroups = expanded
-    ? NAV
-    : NAV
-        .map(group => ({
-          ...group,
-          items: group.items.filter(item => COLLAPSED_NAV_ITEMS.has(item.id)),
-        }))
-        .filter(group => group.items.length > 0)
+  const visibleGroups = NAV
 
   return (
     <aside className={`sidebar${expanded ? ' expanded' : ''}`}>
