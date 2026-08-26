@@ -54,6 +54,33 @@ const key = (value: unknown) => clean(value).toLowerCase().replace(/[^a-z0-9]/g,
 const phone = (value: string | undefined) => clean(value).replace(/\D/g, '')
 const email = (value: string | undefined) => clean(value).toLowerCase()
 
+// Real-world spreadsheets rarely match the alias dictionary exactly (e.g. "Client Name",
+// "PIC Contact", "Attn"). Once the exact-match alias lookup misses, fall back to keyword
+// heuristics so an unfamiliar header still lands on the right field instead of silently
+// dropping Company Name / Contact Person and failing every row with the same error.
+const guessField = (k: string): keyof ProspectImportRow | undefined => {
+  if (!k) return undefined
+  if (k.includes('email')) return /2|alt|secondary/.test(k) ? 'email_2' : 'email_active'
+  if (/phone|mobile|cell|tel|whatsapp|contactno|contactnum/.test(k)) {
+    return /2|alt|secondary/.test(k) ? 'contact_number_2' : 'contact_number_direct'
+  }
+  if (/company|business|client|organi[sz]ation|firm|account|vendor|customer/.test(k)) return 'company_name'
+  if (/contact|person|attn|attention|poc|rep$|representative/.test(k) || k === 'name') return 'contact_person'
+  if (/industry|sector/.test(k)) return 'industry'
+  if (/country/.test(k)) return 'country'
+  if (/state|province/.test(k)) return 'state_province'
+  if (/city|town/.test(k)) return 'city'
+  if (/address|location|street/.test(k)) return 'address'
+  if (/category|status/.test(k)) return 'category'
+  if (/date/.test(k)) return 'date_added'
+  return undefined
+}
+
+const resolveField = (cell: unknown): keyof ProspectImportRow | undefined => {
+  const k = key(cell)
+  return aliases[k] ?? guessField(k)
+}
+
 const validateCandidates = (
   candidates: { record: Record<string, string>; rowNumber: number }[],
   sourceRows = candidates.length,
@@ -99,9 +126,9 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
   // across columns. A two-column key/value form is the one-record version of this.
   const transposed = new Map<number, Record<string, string>>()
   nonEmpty.forEach(({ row }) => {
-    const labelIndex = row.findIndex(cell => Boolean(aliases[key(cell)]))
+    const labelIndex = row.findIndex(cell => Boolean(resolveField(cell)))
     if (labelIndex < 0) return
-    const field = aliases[key(row[labelIndex])]
+    const field = resolveField(row[labelIndex])!
     row.slice(labelIndex + 1).forEach((cell, offset) => {
       const value = clean(cell)
       if (!value) return
@@ -119,7 +146,7 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
 
   const headerCandidate = nonEmpty
     .slice(0, 25)
-    .map(item => ({ ...item, recognized: item.row.filter(cell => aliases[key(cell)]).length }))
+    .map(item => ({ ...item, recognized: item.row.filter(cell => resolveField(cell)).length }))
     .sort((a, b) => b.recognized - a.recognized)[0]
   const hasHeader = headerCandidate.recognized >= 2
   const positional = !hasHeader && nonEmpty[0].row.length >= 11
@@ -134,7 +161,7 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
   }
   const header = hasHeader ? headerCandidate.row : nonEmpty[0].row
   const mapped = hasHeader
-    ? header.map(cell => aliases[key(cell)])
+    ? header.map(cell => resolveField(cell))
     : header.map((_, index) => fields[index])
   const dataRows = hasHeader
     ? nonEmpty.filter(item => item.rowNumber > headerCandidate.rowNumber)
@@ -146,7 +173,22 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
     return { record, rowNumber }
   })
 
-  return validateCandidates(candidates, dataRows.length)
+  const result = validateCandidates(candidates, dataRows.length)
+  if (!result.rows.length && result.sourceRows > 0) {
+    const missing = [
+      !mapped.includes('company_name') && 'Company Name',
+      !mapped.includes('contact_person') && 'Contact Person',
+    ].filter(Boolean) as string[]
+    if (missing.length) {
+      const headerText = header.map(clean).filter(Boolean).join(', ')
+      result.errors.unshift(
+        `Couldn't find a ${missing.join(' or ')} column in this sheet's header row (${headerText || 'no header text detected'}). `
+        + `Rename that column to something like "${missing.includes('Company Name') ? 'Company' : 'Contact Person'}", `
+        + `or use the CRM template below, then re-import.`,
+      )
+    }
+  }
+  return result
 }
 
 export const parseProspectFile = async (file: File) => {
