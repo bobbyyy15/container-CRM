@@ -34,7 +34,7 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
       setFilename(file.name)
       setParsed(await parseProspectFile(file))
     } catch (error: any) {
-      setParsed({ ...empty, errors: [error.message] })
+      setParsed({ ...empty, errors: [{ message: error.message, kind: 'issue' }] })
     }
   }
 
@@ -97,26 +97,38 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
             </div>
           )}
 
-          {(parsed.sourceRows > 0 || parsed.errors.length > 0) && (
-            <div style={{ marginTop: 16, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
-              <div style={{ padding: '10px 12px', background: 'var(--s2)', display: 'flex', gap: 18, fontSize: 12 }}>
-                <span><b>{parsed.sourceRows}</b> source rows</span>
-                <span style={{ color: 'var(--green)' }}><b>{parsed.rows.length}</b> ready</span>
-                <span style={{ color: parsed.errors.length ? 'var(--red)' : 'var(--t3)' }}><b>{parsed.errors.length}</b> skipped</span>
+          {(parsed.sourceRows > 0 || parsed.errors.length > 0) && (() => {
+            const issues = parsed.errors.filter(note => note.kind === 'issue')
+            const skipped = parsed.errors.filter(note => note.kind === 'skipped')
+            return (
+              <div style={{ marginTop: 16, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                <div style={{ padding: '10px 12px', background: 'var(--s2)', display: 'flex', gap: 18, fontSize: 12 }}>
+                  <span><b>{parsed.sourceRows}</b> source rows</span>
+                  <span style={{ color: 'var(--green)' }}><b>{parsed.rows.length}</b> ready</span>
+                  <span style={{ color: 'var(--t3)' }}><b>{skipped.length}</b> skipped (incomplete source data)</span>
+                  {issues.length > 0 && <span style={{ color: 'var(--red)' }}><b>{issues.length}</b> need attention</span>}
+                </div>
+                {parsed.rows.length > 0 && (
+                  <div style={{ padding: 12, fontSize: 12, color: 'var(--t2)' }}>
+                    Preview: {parsed.rows.slice(0, 3).map(row => `${row.company_name} — ${row.contact_person || 'no contact yet'}`).join(' · ')}
+                  </div>
+                )}
+                {issues.length > 0 && (
+                  <div style={{ padding: 12, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12, borderTop: skipped.length ? undefined : '1px solid var(--border)' }}>
+                    {issues.slice(0, 8).map(note => <div key={note.message}>{note.message}</div>)}
+                    {issues.length > 8 && <div>…and {issues.length - 8} more.</div>}
+                  </div>
+                )}
+                {skipped.length > 0 && (
+                  <div style={{ padding: 12, background: 'var(--s2)', color: 'var(--t3)', fontSize: 12, borderTop: '1px solid var(--border)' }}>
+                    <div style={{ fontWeight: 600, color: 'var(--t2)', marginBottom: 4 }}>Skipped — normal for incomplete source rows, nothing to fix</div>
+                    {skipped.slice(0, 8).map(note => <div key={note.message}>{note.message}</div>)}
+                    {skipped.length > 8 && <div>…and {skipped.length - 8} more.</div>}
+                  </div>
+                )}
               </div>
-              {parsed.rows.length > 0 && (
-                <div style={{ padding: 12, fontSize: 12, color: 'var(--t2)' }}>
-                  Preview: {parsed.rows.slice(0, 3).map(row => `${row.company_name} — ${row.contact_person || 'no contact yet'}`).join(' · ')}
-                </div>
-              )}
-              {parsed.errors.length > 0 && (
-                <div style={{ padding: 12, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12 }}>
-                  {parsed.errors.slice(0, 8).map(error => <div key={error}>{error}</div>)}
-                  {parsed.errors.length > 8 && <div>…and {parsed.errors.length - 8} more.</div>}
-                </div>
-              )}
-            </div>
-          )}
+            )
+          })()}
 
           {message && <div style={{ marginTop: 14, padding: 10, borderRadius: 8, background: 'var(--brand-bg)', color: 'var(--t1)', fontSize: 12 }}>{message}</div>}
 

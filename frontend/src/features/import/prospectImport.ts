@@ -18,9 +18,15 @@ export type ProspectImportRow = {
   address?: string
 }
 
+// 'skipped' rows are normal for messy source data (e.g. a carrier census row with no company
+// name attached) -- not a mistake worth alarming over. 'issue' is something actually worth a
+// second look, like a duplicate identity within the same file or a header that couldn't be
+// recognized at all.
+export type ImportNote = { message: string; kind: 'skipped' | 'issue' }
+
 export type ParsedProspectImport = {
   rows: ProspectImportRow[]
-  errors: string[]
+  errors: ImportNote[]
   sourceRows: number
 }
 
@@ -107,29 +113,31 @@ const validateCandidates = (
   sourceRows = candidates.length,
 ): ParsedProspectImport => {
   const rows: ProspectImportRow[] = []
-  const errors: string[] = []
+  const errors: ImportNote[] = []
   const seenEmails = new Map<string, number>()
   const seenPhones = new Map<string, number>()
 
   candidates.forEach(({ record, rowNumber }) => {
     // Company and Contact are separate entities: a company can exist before a named human
     // contact is known (common in raw data sources like carrier/business registries), so
-    // only a missing company name blocks the row outright.
+    // only a missing company name blocks the row outright. A row with no company name and
+    // no contact identity is normal for messy/mixed source data, not a mistake -- skip it
+    // quietly rather than flagging it as something to fix.
     if (!record.company_name) {
-      errors.push(`Excel row ${rowNumber}: missing company name.`)
+      errors.push({ message: `Excel row ${rowNumber}: missing company name.`, kind: 'skipped' })
       return
     }
     const emails = [email(record.email_active), email(record.email_2)].filter(Boolean)
     const phones = [phone(record.contact_number_direct), phone(record.contact_number_2)].filter(Boolean)
     if (!emails.length && !phones.length) {
-      errors.push(`Excel row ${rowNumber}: at least one email or phone is required.`)
+      errors.push({ message: `Excel row ${rowNumber}: no email or phone on file.`, kind: 'skipped' })
       return
     }
 
     const duplicateAt = emails.map(value => seenEmails.get(value)).find(value => value !== undefined)
       ?? phones.map(value => seenPhones.get(value)).find(value => value !== undefined)
     if (duplicateAt !== undefined) {
-      errors.push(`Excel row ${rowNumber}: duplicate contact identity already appears in row ${duplicateAt}.`)
+      errors.push({ message: `Excel row ${rowNumber}: duplicate contact identity already appears in row ${duplicateAt}.`, kind: 'issue' })
       return
     }
     emails.forEach(value => seenEmails.set(value, rowNumber))
@@ -144,7 +152,7 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
   const nonEmpty = matrix
     .map((row, index) => ({ row, rowNumber: index + 1 }))
     .filter(item => item.row.some(cell => clean(cell)))
-  if (nonEmpty.length < 2) return { rows: [], errors: ['The sheet must contain prospect data.'], sourceRows: 0 }
+  if (nonEmpty.length < 2) return { rows: [], errors: [{ message: 'The sheet must contain prospect data.', kind: 'issue' }], sourceRows: 0 }
 
   // Accept transposed sheets too: field labels run downward while prospects run
   // across columns. A two-column key/value form is the one-record version of this.
@@ -179,7 +187,10 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
     const detail = detected.length ? ` Found: ${detected.join(', ')}.` : ''
     return {
       rows: [],
-      errors: [`Recognizable CRM prospect fields were not found.${detail} The importer needs a Company Name and at least one email or phone (Contact Person is optional); records may run across rows or columns. This file appears to describe a different kind of data, so it was not converted into false prospects.`],
+      errors: [{
+        message: `Recognizable CRM prospect fields were not found.${detail} The importer needs a Company Name and at least one email or phone (Contact Person is optional); records may run across rows or columns. This file appears to describe a different kind of data, so it was not converted into false prospects.`,
+        kind: 'issue',
+      }],
       sourceRows: 0,
     }
   }
@@ -206,10 +217,11 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
   const result = validateCandidates(candidates, dataRows.length)
   if (!result.rows.length && result.sourceRows > 0 && !mapped.includes('company_name')) {
     const headerText = header.map(clean).filter(Boolean).join(', ')
-    result.errors.unshift(
-      `Couldn't find a Company Name column in this sheet's header row (${headerText || 'no header text detected'}). `
-      + `Rename that column to something like "Company", or use the CRM template below, then re-import.`,
-    )
+    result.errors.unshift({
+      message: `Couldn't find a Company Name column in this sheet's header row (${headerText || 'no header text detected'}). `
+        + `Rename that column to something like "Company", or use the CRM template below, then re-import.`,
+      kind: 'issue',
+    })
   }
   return result
 }
@@ -226,11 +238,11 @@ export const parseProspectFile = async (file: File) => {
   ))
   return results.find(result => result.rows.length > 0)
     ?? results.sort((a, b) => b.sourceRows - a.sourceRows)[0]
-    ?? { rows: [], errors: ['The workbook does not contain any readable prospect data.'], sourceRows: 0 }
+    ?? { rows: [], errors: [{ message: 'The workbook does not contain any readable prospect data.', kind: 'issue' as const }], sourceRows: 0 }
 }
 
 export const parseProspectPaste = async (value: string) => {
-  if (!value.trim()) return { rows: [], errors: ['Paste copied spreadsheet cells first.'], sourceRows: 0 }
+  if (!value.trim()) return { rows: [], errors: [{ message: 'Paste copied spreadsheet cells first.', kind: 'issue' as const }], sourceRows: 0 }
   const { read, utils } = await import('xlsx')
   const workbook = read(value, { type: 'string' })
   const sheet = workbook.Sheets[workbook.SheetNames[0]]
