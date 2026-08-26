@@ -10,6 +10,10 @@ router.get('/warm-leads', LeadController.getWarmLeads);
 router.get('/inquiries', LeadController.getInquiries);
 router.get('/removed', LeadController.getRemoved);
 
+// Manual Entry
+router.post('/warm-leads/manual', requireRoles('admin', 'manager', 'pic'), LeadController.manualCreateWarmLead);
+router.post('/inquiries/manual', requireRoles('admin', 'manager', 'pic'), LeadController.manualCreateInquiry);
+
 // Prospect -> Warm Lead
 router.post('/prospects/:prospectId/convert-to-warm-lead', requireRoles('admin', 'manager', 'pic'), LeadController.convertProspect);
 

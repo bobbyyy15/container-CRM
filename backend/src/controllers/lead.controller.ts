@@ -5,6 +5,8 @@ import {
   CreateInquirySchema,
   LeadListQuerySchema,
   RemovePipelineEntrySchema,
+  ManualWarmLeadSchema,
+  ManualInquirySchema,
 } from '../schemas/lead.schema';
 import { supabaseAdmin } from '../config/supabase';
 
@@ -127,13 +129,36 @@ export class LeadController {
 
       res.json({
         success: true,
-        data: inquiry
+        data: inquiry,
+        message: 'Inquiry created successfully'
       });
     } catch (error: any) {
       res.status(400).json({
         success: false,
         error: { message: error.message }
       });
+    }
+  }
+
+  static async manualCreateWarmLead(req: Request, res: Response) {
+    try {
+      const payload = ManualWarmLeadSchema.parse(req.body);
+      const actorId = req.auth!.user.id;
+      const data = await LeadService.manualCreateWarmLead(payload, actorId);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async manualCreateInquiry(req: Request, res: Response) {
+    try {
+      const payload = ManualInquirySchema.parse(req.body);
+      const actorId = req.auth!.user.id;
+      const data = await LeadService.manualCreateInquiry(payload, actorId);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
     }
   }
 

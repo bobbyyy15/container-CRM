@@ -10,6 +10,25 @@ export const CreateInquirySchema = z.object({
   containerSizeId: z.string().uuid(),
   containerConditionId: z.string().uuid(),
   quantity: z.number().int().min(1),
+  askingPrice: z.number().optional(),
+  stateProvince: z.string().max(100).optional(),
+  neededByDate: z.string().date().optional(),
+  requirements: z.string().trim().max(2000).optional(),
+});
+
+export const ManualWarmLeadSchema = z.object({
+  companyName: z.string().min(1),
+  contactName: z.string().optional(),
+  email: z.string().email().optional().or(z.literal('')),
+  phone: z.string().optional(),
+});
+
+export const ManualInquirySchema = ManualWarmLeadSchema.extend({
+  containerSizeId: z.string().uuid(),
+  containerConditionId: z.string().uuid(),
+  quantity: z.number().int().min(1),
+  askingPrice: z.number().optional(),
+  stateProvince: z.string().max(100).optional(),
   neededByDate: z.string().date().optional(),
   requirements: z.string().trim().max(2000).optional(),
 });
@@ -31,3 +50,5 @@ export const RemovePipelineEntrySchema = z.object({
 });
 
 export type CreateInquiryPayload = z.infer<typeof CreateInquirySchema>;
+export type ManualWarmLeadPayload = z.infer<typeof ManualWarmLeadSchema>;
+export type ManualInquiryPayload = z.infer<typeof ManualInquirySchema>;
