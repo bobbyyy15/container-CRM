@@ -542,6 +542,33 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
 const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onToggleDark: () => void; session: any; onNav: (s: Screen) => void }) => {
   const [showAccountMenu, setShowAccountMenu] = useState(false)
   const [showNotifs, setShowNotifs] = useState(false)
+  
+  const [syncTime, setSyncTime] = useState(Date.now())
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncText, setSyncText] = useState('Synced just now')
+
+  useEffect(() => {
+    if (isSyncing) {
+      setSyncText('Syncing...')
+      return
+    }
+    const updateText = () => {
+      const mins = Math.floor((Date.now() - syncTime) / 60000)
+      setSyncText(mins === 0 ? 'Synced just now' : `Synced ${mins}m ago`)
+    }
+    updateText()
+    const interval = setInterval(updateText, 30000)
+    return () => clearInterval(interval)
+  }, [syncTime, isSyncing])
+
+  const handleManualSync = () => {
+    if (isSyncing) return
+    setIsSyncing(true)
+    setTimeout(() => {
+      setIsSyncing(false)
+      setSyncTime(Date.now())
+    }, 1200)
+  }
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User'
   const initials = userName.substring(0, 2).toUpperCase()
   
@@ -559,9 +586,13 @@ const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onT
       </div>
 
       <div className="topbar-right">
-        <div className="sync-pill">
-          <Ic n={I.sync} size={11} />
-          Synced 2m ago
+        <div 
+          className="sync-pill" 
+          onClick={handleManualSync} 
+          style={{ cursor: isSyncing ? 'wait' : 'pointer', opacity: isSyncing ? 0.7 : 1 }}
+        >
+          <Ic n={I.sync} size={11} style={{ animation: isSyncing ? 'spin 1s linear infinite' : 'none' }} />
+          {syncText}
         </div>
 
         <button className="tb-btn" onClick={onToggleDark} title={isDark ? 'Light mode' : 'Dark mode'}>
