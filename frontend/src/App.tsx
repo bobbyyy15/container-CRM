@@ -458,8 +458,9 @@ const ChipPIC = ({ label }: { label: string }) => (
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-const Sidebar = ({ active, onNav, expanded, onToggle }: {
-  active: Screen; onNav: (s: Screen) => void; expanded: boolean; onToggle: () => void
+const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
+  active: Screen; onNav: (s: Screen) => void; expanded: boolean;
+  mode: 'expanded' | 'collapsed' | 'hover'; onModeChange: (m: 'expanded' | 'collapsed' | 'hover') => void;
 }) => {
   const visibleGroups = expanded
     ? NAV
@@ -483,23 +484,6 @@ const Sidebar = ({ active, onNav, expanded, onToggle }: {
             <div style={{ fontSize: 10, color: 'var(--sb-text)', fontWeight: 500 }}>Enterprise</div>
           </div>
         )}
-        <button
-          type="button"
-          className="sb-toggle"
-          onClick={onToggle}
-          aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
-          aria-expanded={expanded}
-        >
-          <Ic
-            n={I.chevRight}
-            size={13}
-            style={{
-              color: 'white',
-              transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 0.24s cubic-bezier(0.4,0,0.2,1)',
-            }}
-          />
-        </button>
       </div>
 
       {/* Nav */}
@@ -542,15 +526,29 @@ const Sidebar = ({ active, onNav, expanded, onToggle }: {
           </div>
           <span className="sb-item-label">Settings</span>
         </button>
-        <div className="sb-item" data-tooltip="James Carter">
-          <div className="avatar" style={{ width: 34, height: 34, borderRadius: 9, fontSize: 11 }}>JC</div>
+        <button
+          type="button"
+          className="sb-item"
+          data-tooltip="Toggle Navigation Mode"
+          title={expanded ? undefined : 'Toggle Navigation Mode'}
+          onClick={() => {
+             if (mode === 'expanded') onModeChange('collapsed');
+             else if (mode === 'collapsed') onModeChange('hover');
+             else onModeChange('expanded');
+          }}
+        >
+          <div className="sb-icon-wrap">
+            <Ic n={mode === 'expanded' ? I.chevLeft : mode === 'hover' ? I.chevRight : I.menu} size={16} style={{ color: 'var(--sb-icon)' }} />
+          </div>
           {expanded && (
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--sb-icon-a)', lineHeight: 1.2 }}>James Carter</div>
-              <div style={{ fontSize: 10, color: 'var(--sb-text)' }}>Sales Manager</div>
+            <div style={{ minWidth: 0, flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="sb-item-label" style={{ fontWeight: 600 }}>Nav Mode</span>
+              <span style={{ fontSize: 10, color: 'var(--brand)', fontWeight: 600, background: 'rgba(49, 94, 246, 0.15)', padding: '2px 6px', borderRadius: 4 }}>
+                {mode === 'expanded' ? 'Pinned' : mode === 'hover' ? 'Hover' : 'Collapsed'}
+              </span>
             </div>
           )}
-        </div>
+        </button>
       </div>
     </aside>
   )
@@ -2646,7 +2644,14 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>(() =>
     new URLSearchParams(window.location.search).has('google_sync') ? 'system-settings' : 'dashboard'
   )
-  const [expanded, setExpanded] = useState(false)
+  const [sidebarMode, setSidebarModeState] = useState<'expanded' | 'collapsed' | 'hover'>(() => {
+    return (localStorage.getItem('sidebarMode') as any) || 'expanded'
+  })
+  const setSidebarMode = (mode: 'expanded' | 'collapsed' | 'hover') => {
+    localStorage.setItem('sidebarMode', mode)
+    setSidebarModeState(mode)
+  }
+  const [isHoveringSidebar, setIsHoveringSidebar] = useState(false)
   const [isDark, setIsDark] = useState(false)
 
   const [session, setSession] = useState<any>(null)
@@ -2707,9 +2712,23 @@ export default function App() {
     }
   }
 
+  const isSidebarExpanded = sidebarMode === 'expanded' || (sidebarMode === 'hover' && isHoveringSidebar)
+
   return (
     <div data-theme={isDark ? 'dark' : undefined} style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
-      <Sidebar active={screen} onNav={handleNav} expanded={expanded} onToggle={() => setExpanded(e => !e)} />
+      <div 
+        onMouseEnter={() => setIsHoveringSidebar(true)} 
+        onMouseLeave={() => setIsHoveringSidebar(false)}
+        style={{ display: 'flex' }}
+      >
+        <Sidebar 
+          active={screen} 
+          onNav={handleNav} 
+          expanded={isSidebarExpanded} 
+          mode={sidebarMode}
+          onModeChange={setSidebarMode}
+        />
+      </div>
 
       <div className="workspace">
         <div className="ws-card">
