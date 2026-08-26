@@ -428,7 +428,7 @@ const Trend = ({ val, up, white }: { val: string | number; up?: boolean; white?:
   if (isZero) {
     return (
       <span className={`trend ${white ? 'trend-up-white' : 'trend-neutral'}`}>
-        — {strVal}
+        - {strVal}
       </span>
     )
   }
@@ -712,6 +712,14 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
   const [dateRange, setDateRange] = useState('This month')
   const [showDateMenu, setShowDateMenu] = useState(false)
 
+  const rangePrefixMap: Record<string, string> = {
+    'This month': 'Monthly',
+    'This quarter': 'Quarterly',
+    'This year': 'Annual',
+    'All time': 'All Time'
+  }
+  const prefix = rangePrefixMap[dateRange] || 'Monthly'
+
   return (
     <div className="page-scroll">
       {/* Greeting */}
@@ -730,7 +738,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
             <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowDateMenu(false)} />
               <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, width: 160, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-                {['Today', 'This week', 'This month', 'This quarter', 'This year', 'All time'].map(opt => (
+                {['This month', 'This quarter', 'This year', 'All time'].map(opt => (
                   <div key={opt} onClick={() => { setDateRange(opt); setShowDateMenu(false); }} style={{ padding: '8px 12px', borderRadius: 4, cursor: 'pointer', background: dateRange === opt ? 'var(--s2)' : 'transparent', color: dateRange === opt ? 'var(--brand)' : 'var(--t2)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = dateRange === opt ? 'var(--s2)' : 'transparent'}>
                     {opt}
                   </div>
@@ -738,7 +746,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
               </div>
             </>
           )}
-          <Btn variant="ghost" sm onClick={() => exportToCSV([], 'dashboard')}><Ic n={I.export} size={13} /> Export</Btn>
+          <Btn variant="ghost" sm onClick={() => window.print()}><Ic n={I.export} size={13} /> Export PDF</Btn>
         </div>
       </div>
 
@@ -749,7 +757,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           {/* Featured KPI */}
           <div className="kpi-featured" style={{ background: 'linear-gradient(145deg, #2D4FE0 0%, #4C6FFF 100%)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 500 }}>Monthly Gross Profit</span>
+              <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 500 }}>{prefix} Gross Profit</span>
               <button style={{ background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 8, width: 28, height: 28, cursor: 'pointer', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Ic n={I.arrowRight} size={13} />
               </button>
@@ -767,7 +775,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           {/* Secondary KPIs stacked */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">Monthly Revenue</div>
+              <div className="kpi-label">{prefix} Revenue</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>${m.total_revenue?.toLocaleString() || 0}</div>
               <Trend val="0"/>
               <div className="kpi-sub">vs last month</div>
@@ -776,7 +784,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
               <div className="kpi-label">Units Sold</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{m.total_units || 0}</div>
               <Trend val="0"/>
-              <div className="kpi-sub">containers this month</div>
+              <div className="kpi-sub">containers {dateRange.toLowerCase()}</div>
             </div>
           </div>
 
@@ -785,13 +793,13 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
               <div className="kpi-label">Active Clients</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{m.active_clients || 0}</div>
               <Trend val="0"/>
-              <div className="kpi-sub">purchased in last 90 days</div>
+              <div className="kpi-sub">purchased {dateRange.toLowerCase()}</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">Profit Margin</div>
+              <div className="kpi-label">{prefix} Profit Margin</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{m.profit_margin?.toFixed(1) || 0}%</div>
               <Trend val="0"/>
-              <div className="kpi-sub">vs last month average</div>
+              <div className="kpi-sub">vs previous {dateRange.replace('This ', '')}</div>
             </div>
           </div>
 
@@ -800,7 +808,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
             <div className="chart-header">
               <div>
                 <div className="chart-title">Gross Profit Performance</div>
-                <div className="chart-sub">Monthly trend — all PICs combined</div>
+                <div className="chart-sub">{prefix} trend — all PICs combined</div>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
                 {(['profit', 'revenue', 'cost'] as const).map(m => (
@@ -905,7 +913,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           {/* Category donut */}
           <div className="chart-card">
             <div className="chart-title">Sales by Container Category</div>
-            <div className="chart-sub">This month · units</div>
+            <div className="chart-sub">{dateRange} · units</div>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <ResponsiveContainer width={110} height={110}>
                 <PieChart>
