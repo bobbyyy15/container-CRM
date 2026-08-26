@@ -3,6 +3,7 @@ import { supabase } from './config/supabase'
 import { api } from './lib/api'
 import Login from './Login'
 import ProspectImportDialog from './features/import/ProspectImportDialog'
+import { ManualWarmLeadDialog, ManualInquiryDialog } from './features/pipeline/ManualAddDialogs'
 import {
   NewInquiryDialog,
   QuotationDialog,
@@ -1223,8 +1224,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {mode === 'prospect' && <Btn variant="primary" sm onClick={() => setImportMode('file')}><Ic n={I.upload} size={13} /> Import Excel</Btn>}
-          <Btn variant="ghost" sm onClick={() => exportToCSV(filtered, 'pipeline_data')}><Ic n={I.export} size={13} /> Export</Btn>
           {mode === 'prospect' && <Btn variant="secondary" sm onClick={() => setImportMode('paste')}><Ic n={I.copy} size={13} /> Paste Bulk</Btn>}
+          {mode === 'warm' && <Btn variant="primary" sm onClick={() => setImportMode('manual')}><Ic n={I.plus} size={13} /> Add Warm Lead</Btn>}
+          <Btn variant="ghost" sm onClick={() => exportToCSV(filtered, 'pipeline_data')}><Ic n={I.export} size={13} /> Export</Btn>
         </div>
       </div>
 
@@ -1308,9 +1310,19 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
               <input type="checkbox" className="cb" onChange={e => setSelected(e.target.checked ? filtered.map(r => r.id) : [])} />
             </div>
             {COLS.map(col => (
-              <div key={col.key} style={{ minWidth: col.w, width: col.w, padding: '7px 12px', borderRight: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none' }}>
-                <span className="col-header-letter">{col.key}</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{col.label}</span>
+              <div key={col.key} style={{ minWidth: col.w, width: col.w, padding: '7px 12px', borderRight: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <span className="col-header-letter">{col.key}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{col.label}</span>
+                </div>
+                <button className="btn btn-ghost btn-sm btn-icon" style={{ padding: 2, height: 'auto', minHeight: 0, color: 'var(--brand)' }} title={`Copy all ${col.label}`} onClick={(e) => {
+                  e.stopPropagation();
+                  const dataToCopy = filtered.map(r => getVal(r, col.field)).filter(Boolean).join('\n');
+                  navigator.clipboard.writeText(dataToCopy);
+                  alert(`Copied ${filtered.map(r => getVal(r, col.field)).filter(Boolean).length} items to clipboard!`);
+                }}>
+                  <Ic n={I.copy} size={11} />
+                </button>
               </div>
             ))}
             <div style={{ minWidth: 160, width: 160, padding: '7px 12px' }}>
@@ -1396,7 +1408,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 
 const InquiryList = () => {
   const [revision, setRevision] = useState(0)
-  const [showNewInquiry, setShowNewInquiry] = useState(false)
+  const [showNewInquiry, setShowNewInquiry] = useState<'manual' | 'existing' | false>(false)
   const [quotationInquiryId, setQuotationInquiryId] = useState<string | null>(null)
   const INQUIRIES = useInquiries(revision)
   const warmLeads = useWarmLeads(revision)
@@ -1412,11 +1424,17 @@ const InquiryList = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {showNewInquiry && (
+      {showNewInquiry === 'manual' && (
+        <ManualInquiryDialog
+          onClose={() => setShowNewInquiry(false)}
+          onSuccess={() => { setShowNewInquiry(false); setRevision(value => value + 1); }}
+        />
+      )}
+      {showNewInquiry === 'existing' && (
         <NewInquiryDialog
           warmLeads={warmLeads as WarmLeadOption[]}
           onClose={() => setShowNewInquiry(false)}
-          onSaved={() => setRevision(value => value + 1)}
+          onSaved={() => { setShowNewInquiry(false); setRevision(value => value + 1); }}
         />
       )}
       {quotationInquiryId && (
@@ -1433,7 +1451,8 @@ const InquiryList = () => {
         <div style={{ display: 'flex', gap: 8, maxWidth: 480 }}>
           <input className="inp sm" placeholder="Enter phone number or email address…" value={lookup} onChange={e => setLookup(e.target.value)} style={{ flex: 1 }} />
           <Btn variant="primary" sm><Ic n={I.search} size={13} /> Lookup</Btn>
-          <Btn variant="secondary" sm onClick={() => setShowNewInquiry(true)}><Ic n={I.plus} size={13} /> New Inquiry</Btn>
+          <Btn variant="secondary" sm onClick={() => setShowNewInquiry('existing')}><Ic n={I.plus} size={13} /> From Warm Lead</Btn>
+          <Btn variant="primary" sm onClick={() => setShowNewInquiry('manual')}><Ic n={I.plus} size={13} /> Add Manual Inquiry</Btn>
         </div>
       </div>
 
@@ -1481,7 +1500,21 @@ const InquiryList = () => {
           <thead>
             <tr>
               <th className="col-check"><input type="checkbox" className="cb" /></th>
-              <th>Inquiry #</th><th>Date / Time</th><th>Channel</th><th>Company</th><th>Contact</th>
+              <th>Inquiry #</th><th>Date / Time</th><th>Channel</th>
+              <th><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>Company
+                <button className="btn btn-ghost btn-sm btn-icon" style={{ padding: 2, height: 'auto', minHeight: 0, color: 'var(--brand)' }} onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard.writeText(filtered.map(r => r.company).filter(Boolean).join('\n'));
+                  alert(`Copied ${filtered.map(r => r.company).filter(Boolean).length} companies!`);
+                }}><Ic n={I.copy} size={11} /></button>
+              </div></th>
+              <th><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>Contact
+                <button className="btn btn-ghost btn-sm btn-icon" style={{ padding: 2, height: 'auto', minHeight: 0, color: 'var(--brand)' }} onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard.writeText(filtered.map(r => r.contact).filter(Boolean).join('\n'));
+                  alert(`Copied ${filtered.map(r => r.contact).filter(Boolean).length} contacts!`);
+                }}><Ic n={I.copy} size={11} /></button>
+              </div></th>
               <th>Category</th><th>Size</th><th className="r">Qty</th><th>Needed By</th><th>Status</th><th>PIC</th>
               <th className="col-actions">Actions</th>
             </tr>
