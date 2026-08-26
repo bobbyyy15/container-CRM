@@ -573,7 +573,11 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
 
 // ─── TopBar ───────────────────────────────────────────────────────────────────
 
-const TopBar = ({ isDark, onToggleDark }: { isDark: boolean; onToggleDark: () => void }) => {
+const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onToggleDark: () => void; session: any; onNav: (s: Screen) => void }) => {
+  const [showAccountMenu, setShowAccountMenu] = useState(false)
+  const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User'
+  const initials = userName.substring(0, 2).toUpperCase()
+  
   return (
     <header className="topbar">
       <div className="search-wrap">
@@ -586,11 +590,6 @@ const TopBar = ({ isDark, onToggleDark }: { isDark: boolean; onToggleDark: () =>
           <Ic n={I.sync} size={11} />
           Synced 2m ago
         </div>
-
-        
-        <button className="tb-btn" onClick={() => supabase.auth.signOut()} title="Logout" style={{ color: 'var(--red)' }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-        </button>
 
         <button className="tb-btn" onClick={onToggleDark} title={isDark ? 'Light mode' : 'Dark mode'}>
           <Ic n={isDark ? I.sun : I.moon} size={16} />
@@ -605,13 +604,37 @@ const TopBar = ({ isDark, onToggleDark }: { isDark: boolean; onToggleDark: () =>
           <Ic n={I.calendar} size={17} />
         </button>
 
-        <div className="avatar-btn">
-          <div className="avatar">JC</div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t1)', lineHeight: 1.2 }}>James Carter</span>
-            <span style={{ fontSize: 10.5, color: 'var(--t3)' }}>Sales Manager</span>
+        <div style={{ position: 'relative' }}>
+          {showAccountMenu && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowAccountMenu(false)} />
+              <div style={{ position: 'absolute', top: 'calc(100% + 10px)', right: 0, width: 220, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 10, padding: '6px 0', zIndex: 100, boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
+                <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border-s)', marginBottom: 4 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>{userName}</div>
+                  <div style={{ fontSize: 11, color: 'var(--t3)' }}>{session?.user?.email}</div>
+                </div>
+                
+                <div style={{ padding: '4px' }}>
+                  <div onClick={() => { onNav('system-settings'); setShowAccountMenu(false); }} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6, cursor: 'pointer', color: 'var(--t2)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <Ic n={I.config} size={14} style={{ color: 'var(--t3)' }} />
+                    Settings
+                  </div>
+                  <div onClick={() => supabase.auth.signOut()} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6, cursor: 'pointer', color: 'var(--red)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--red-light, #FEE2E2)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                    Logout
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+          <div className="avatar-btn" onClick={() => setShowAccountMenu(!showAccountMenu)} style={{ cursor: 'pointer' }}>
+            <div className="avatar">{initials}</div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t1)', lineHeight: 1.2 }}>{userName}</span>
+              <span style={{ fontSize: 10.5, color: 'var(--t3)' }}>Sales Manager</span>
+            </div>
+            <Ic n={I.chevDown} size={12} style={{ color: 'var(--t4)', marginLeft: 2 }} />
           </div>
-          <Ic n={I.chevDown} size={12} style={{ color: 'var(--t4)', marginLeft: 2 }} />
         </div>
       </div>
     </header>
@@ -2749,7 +2772,7 @@ export default function App() {
 
       <div className="workspace">
         <div className="ws-card">
-          <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} />
+          <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} session={session} onNav={handleNav} />
           {renderScreen()}
         </div>
       </div>
