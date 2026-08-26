@@ -591,11 +591,7 @@ const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onT
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User'
   const initials = userName.substring(0, 2).toUpperCase()
   
-  const NOTIFICATIONS = [
-    { id: 1, title: 'New Inquiry Assigned', desc: 'NorthStar Construction submitted a new inquiry.', time: '10m ago', unread: true, icon: I.inquiry, color: 'var(--blue)' },
-    { id: 2, title: 'Outreach Campaign Finished', desc: 'Q3 Prospecting successfully delivered 425 emails.', time: '2h ago', unread: true, icon: I.target, color: 'var(--green)' },
-    { id: 3, title: 'Quote Approved', desc: 'Great Lakes Storage accepted Quotation #QUO-8A2F.', time: '1d ago', unread: false, icon: I.check, color: 'var(--brand)' },
-  ];
+  const NOTIFICATIONS: any[] = [];
 
   return (
     <header className="topbar">
@@ -629,20 +625,27 @@ const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onT
                 </div>
                 
                 <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-                  {NOTIFICATIONS.map(n => (
-                    <div key={n.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-s)', display: 'flex', gap: 12, cursor: 'pointer', background: n.unread ? 'rgba(49, 94, 246, 0.03)' : 'transparent' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = n.unread ? 'rgba(49, 94, 246, 0.03)' : 'transparent'}>
-                      <div style={{ width: 32, height: 32, borderRadius: 8, background: `${n.color}15`, color: n.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        <Ic n={n.icon} size={14} />
-                      </div>
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                          <div style={{ fontSize: 13, fontWeight: n.unread ? 700 : 600, color: 'var(--t1)' }}>{n.title}</div>
-                          <div style={{ fontSize: 11, color: 'var(--t4)' }}>{n.time}</div>
-                        </div>
-                        <div style={{ fontSize: 12, color: 'var(--t3)', lineHeight: 1.4 }}>{n.desc}</div>
-                      </div>
+                  {NOTIFICATIONS.length === 0 ? (
+                    <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--t3)', fontSize: 12.5 }}>
+                      <Ic n={I.bell} size={24} style={{ opacity: 0.3, marginBottom: 8 }} />
+                      <div>You have no new notifications.</div>
                     </div>
-                  ))}
+                  ) : (
+                    NOTIFICATIONS.map(n => (
+                      <div key={n.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-s)', display: 'flex', gap: 12, cursor: 'pointer', background: n.unread ? 'rgba(49, 94, 246, 0.03)' : 'transparent' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = n.unread ? 'rgba(49, 94, 246, 0.03)' : 'transparent'}>
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${n.color}15`, color: n.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Ic n={n.icon} size={14} />
+                        </div>
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                            <div style={{ fontSize: 13, fontWeight: n.unread ? 700 : 600, color: 'var(--t1)' }}>{n.title}</div>
+                            <div style={{ fontSize: 11, color: 'var(--t4)' }}>{n.time}</div>
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--t3)', lineHeight: 1.4 }}>{n.desc}</div>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
                 
                 <div style={{ padding: '10px', textAlign: 'center', fontSize: 12, fontWeight: 600, color: 'var(--t3)', borderTop: '1px solid var(--border-s)', cursor: 'pointer' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--brand)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--t3)'}>
