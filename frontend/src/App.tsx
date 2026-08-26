@@ -844,11 +844,11 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           </div>
           <div className="pipeline-row">
             {[
-              { label: 'Prospects', count: funnel.prospects || 0, pct: '100%', change: 'active', up: true, screen: 'prospects' as Screen, color: '#315EF6' },
-              { label: 'Warm Leads', count: funnel.warm_leads || 0, pct: conversion(funnel.warm_leads || 0, funnel.prospects || 0), change: 'active', up: true, screen: 'warm-leads' as Screen, color: '#7C3AED' },
-              { label: 'Inquiries', count: funnel.inquiries || 0, pct: conversion(funnel.inquiries || 0, funnel.warm_leads || 0), change: 'active', up: true, screen: 'inquiries' as Screen, color: '#D97706' },
-              { label: 'Quotations', count: funnel.quotations || 0, pct: conversion(funnel.quotations || 0, funnel.inquiries || 0), change: 'active', up: true, screen: 'quotations' as Screen, color: '#EA580C' },
-              { label: 'Sales', count: funnel.sales || 0, pct: conversion(funnel.sales || 0, funnel.quotations || 0), change: 'won', up: true, screen: 'sales-tracker' as Screen, color: '#059669' },
+              { label: 'Prospects', count: funnel.prospects || 0, pct: '100%', change: '0%', screen: 'prospects' as Screen, color: '#315EF6' },
+              { label: 'Warm Leads', count: funnel.warm_leads || 0, pct: conversion(funnel.warm_leads || 0, funnel.prospects || 0), change: '0%', screen: 'warm-leads' as Screen, color: '#7C3AED' },
+              { label: 'Inquiries', count: funnel.inquiries || 0, pct: conversion(funnel.inquiries || 0, funnel.warm_leads || 0), change: '0%', screen: 'inquiries' as Screen, color: '#D97706' },
+              { label: 'Quotations', count: funnel.quotations || 0, pct: conversion(funnel.quotations || 0, funnel.inquiries || 0), change: '0%', screen: 'quotations' as Screen, color: '#EA580C' },
+              { label: 'Sales', count: funnel.sales || 0, pct: conversion(funnel.sales || 0, funnel.quotations || 0), change: '0%', screen: 'sales-tracker' as Screen, color: '#059669' },
             ].map((s, i) => (
               <div key={s.label} className="pipeline-stage" onClick={() => onNav(s.screen)}>
                 {i > 0 && (
@@ -857,7 +857,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
                 <div style={{ width: 36, height: 36, borderRadius: 10, background: `${s.color}18`, color: s.color, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8, fontSize: 15, fontWeight: 800 }}>{s.count}</div>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t1)', marginBottom: 4 }}>{s.label}</div>
                 <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 4 }}>{s.pct} conversion</div>
-                <Trend val={s.change} up={s.up} />
+                <Trend val={s.change} />
               </div>
             ))}
           </div>
