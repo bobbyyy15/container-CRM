@@ -4,6 +4,7 @@ import { api } from './lib/api'
 import Login from './Login'
 import ProspectImportDialog from './features/import/ProspectImportDialog'
 import { ManualWarmLeadDialog, ManualInquiryDialog } from './features/pipeline/ManualAddDialogs'
+import { UserProfileSettings } from './features/settings/UserProfileSettings'
 import {
   NewInquiryDialog,
   QuotationDialog,
@@ -263,7 +264,7 @@ type Screen =
   | 'daily-tasks' | 'removed' | 'deliverability'
   | 'container-catalog'
   | 'pic-performance' | 'best-clients' | 'profit-analytics' | 'inquiry-funnel'
-  | 'service-territories' | 'daily-targets' | 'system-settings'
+  | 'service-territories' | 'daily-targets' | 'system-settings' | 'profile-settings'
 
 // ─── Navigation ──────────────────────────────────────────────────────────────
 
@@ -615,9 +616,13 @@ const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onT
                 </div>
                 
                 <div style={{ padding: '4px' }}>
+                  <div onClick={() => { onNav('profile-settings'); setShowAccountMenu(false); }} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6, cursor: 'pointer', color: 'var(--t2)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <Ic n={I.customer} size={14} style={{ color: 'var(--t3)' }} />
+                    My Profile
+                  </div>
                   <div onClick={() => { onNav('system-settings'); setShowAccountMenu(false); }} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6, cursor: 'pointer', color: 'var(--t2)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                     <Ic n={I.config} size={14} style={{ color: 'var(--t3)' }} />
-                    Settings
+                    System Settings
                   </div>
                   <div onClick={() => supabase.auth.signOut()} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6, cursor: 'pointer', color: 'var(--red)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--red-light, #FEE2E2)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
@@ -2745,6 +2750,7 @@ export default function App() {
       case 'daily-targets':       return <DailyTargets />
       case 'service-territories': return <ServiceTerritories />
       case 'system-settings':     return <SystemSettings />
+      case 'profile-settings':    return <UserProfileSettings session={session} />
       case 'pickups':             return <Placeholder label="Pickup Tracking" />
       case 'best-clients':        return <Placeholder label="Best Clients" />
       case 'inquiry-funnel':      return <Placeholder label="Inquiry Funnel" />
