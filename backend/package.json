@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "tsx --test src/**/*.test.ts",
+    "test:e2e:hosted": "tsx src/e2e/hosted-sales-funnel.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "check": "npm run build && npm test"

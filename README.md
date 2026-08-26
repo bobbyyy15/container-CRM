@@ -31,7 +31,7 @@ Container CRM is a React, Express, and Supabase application for the connected sa
 
 ## Database development
 
-Database changes are migration-driven. Migrations `007` through `010` introduce the security foundation, transactional pipeline conversions through Sale, active-stage lifecycle rules, suppression records, and audited duplicate-safe imports.
+Database changes are migration-driven. Migrations `007` through `011` introduce the security foundation, transactional pipeline conversions through Sale, active-stage lifecycle rules, suppression records, audited duplicate-safe imports, and explicit backend service-role privileges.
 
 Before applying anything to hosted Supabase:
 
@@ -58,7 +58,7 @@ OAuth refresh tokens and authorization states are backend-only. They must never 
 
 ## Local database validation
 
-Migrations `007` through `010` have been applied and linted against local Supabase. The rollback-only lifecycle test in `supabase/tests/deal_lifecycle_smoke.sql` verifies idempotent Inquiry -> Quotation -> Sale transitions without leaving test data behind.
+Migrations `007` through `011` have been applied and linted against local Supabase. The rollback-only lifecycle test in `supabase/tests/deal_lifecycle_smoke.sql` verifies idempotent Inquiry -> Quotation -> Sale transitions without leaving test data behind.
 
 ## Spreadsheet imports
 

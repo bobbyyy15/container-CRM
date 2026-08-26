@@ -133,7 +133,7 @@ CREATE INDEX IF NOT EXISTS warm_leads_active_idx
     ON public.warm_leads (created_at DESC) WHERE status = 'active';
 
 CREATE TABLE public.removed_entries (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID REFERENCES public.companies(id) ON DELETE SET NULL,
     contact_id UUID REFERENCES public.contacts(id) ON DELETE SET NULL,
     identity_type TEXT NOT NULL CHECK (identity_type IN ('company', 'contact', 'email', 'phone')),
@@ -152,7 +152,7 @@ CREATE INDEX removed_entries_company_idx ON public.removed_entries (company_id) 
 CREATE INDEX removed_entries_contact_idx ON public.removed_entries (contact_id) WHERE contact_id IS NOT NULL;
 
 CREATE TABLE public.import_batches (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     filename TEXT,
     status TEXT NOT NULL DEFAULT 'processing' CHECK (status IN ('processing', 'completed', 'failed')),
     total_rows INTEGER NOT NULL DEFAULT 0,
@@ -167,7 +167,7 @@ CREATE TABLE public.import_batches (
 );
 
 CREATE TABLE public.import_rows (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     batch_id UUID NOT NULL REFERENCES public.import_batches(id) ON DELETE CASCADE,
     row_number INTEGER NOT NULL,
     raw_data JSONB NOT NULL,
