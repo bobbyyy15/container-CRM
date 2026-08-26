@@ -539,6 +539,7 @@ body {
 .trend-up-white { background: rgba(255,255,255,0.2); color: white; }
 .trend-up   { background: var(--green-bg); color: var(--green); }
 .trend-down { background: var(--red-bg); color: var(--red); }
+.trend-neutral { background: var(--border); color: var(--t2); }
 
 /* ─── Status Badges ─────────────────────────────────────────────────── */
 .badge {
@@ -952,3 +953,5 @@ tr:hover .row-actions { opacity: 1; }
 }
 
 @keyframes spin { 100% { transform: rotate(360deg); } }
+.trend-neutral { background: #E5E7EB; color: #4B5563; }
+[data-theme="dark"] .trend-neutral { background: #374151; color: #9CA3AF; }

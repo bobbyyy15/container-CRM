@@ -418,11 +418,27 @@ const Badge = ({ status }: { status: string }) => (
   <span className={`badge ${BADGE_MAP[status] || 'b-gray'}`}>{status}</span>
 )
 
-const Trend = ({ val, up, white }: { val: string; up: boolean; white?: boolean }) => (
-  <span className={`trend ${white ? 'trend-up-white' : up ? 'trend-up' : 'trend-down'}`}>
-    {up ? '↑' : '↓'} {val}
-  </span>
-)
+const Trend = ({ val, up, white }: { val: string | number; up?: boolean; white?: boolean }) => {
+  const strVal = String(val)
+  const isZero = strVal === '0' || strVal === '0%'
+  const numericVal = parseFloat(strVal.replace(/[^0-9.-]+/g, "") || "0")
+  const isUp = up !== undefined ? up : numericVal > 0
+  const isDown = !isUp && numericVal < 0
+
+  if (isZero) {
+    return (
+      <span className={`trend ${white ? 'trend-up-white' : 'trend-neutral'}`}>
+        — {strVal}
+      </span>
+    )
+  }
+
+  return (
+    <span className={`trend ${white ? 'trend-up-white' : isUp ? 'trend-up' : 'trend-down'}`}>
+      {isUp ? '↑' : '↓'} {strVal}
+    </span>
+  )
+}
 
 const Prog = ({ pct, color = '#315EF6', tall }: { pct: number; color?: string; tall?: boolean }) => (
   <div className={`prog${tall ? ' tall' : ''}`}>
@@ -693,20 +709,35 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
   const timeGreeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
   const userName = session?.user?.user_metadata?.full_name?.split(' ')[0] || session?.user?.email?.split('@')[0] || 'User'
 
+  const [dateRange, setDateRange] = useState('This month')
+  const [showDateMenu, setShowDateMenu] = useState(false)
+
   return (
     <div className="page-scroll">
       {/* Greeting */}
       <div className="greeting-bar">
         <div>
           <p className="greeting-title">{timeGreeting}, {userName} 👋</p>
-          <p className="greeting-sub">Here's what's happening across your sales pipeline this month.</p>
+          <p className="greeting-sub">Here's what's happening across your sales pipeline {dateRange.toLowerCase()}.</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div className="date-range">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
+          <div className="date-range" onClick={() => setShowDateMenu(!showDateMenu)}>
             <Ic n={I.calendar} size={13} />
-            <span>This month</span>
+            <span>{dateRange}</span>
             <Ic n={I.chevDown} size={12} />
           </div>
+          {showDateMenu && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowDateMenu(false)} />
+              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, width: 160, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+                {['Today', 'This week', 'This month', 'This quarter', 'This year', 'All time'].map(opt => (
+                  <div key={opt} onClick={() => { setDateRange(opt); setShowDateMenu(false); }} style={{ padding: '8px 12px', borderRadius: 4, cursor: 'pointer', background: dateRange === opt ? 'var(--s2)' : 'transparent', color: dateRange === opt ? 'var(--brand)' : 'var(--t2)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = dateRange === opt ? 'var(--s2)' : 'transparent'}>
+                    {opt}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
           <Btn variant="ghost" sm onClick={() => exportToCSV([], 'dashboard')}><Ic n={I.export} size={13} /> Export</Btn>
         </div>
       </div>
@@ -725,7 +756,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
             </div>
             <div>
               <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginBottom: 6 }}>${m.total_gross_profit?.toLocaleString() || 0}</div>
-              <Trend val="0" up white />
+              <Trend val="0" white />
               <div style={{ fontSize: 11, opacity: 0.65, marginTop: 6 }}>Target: $0 · 0%</div>
               <div style={{ marginTop: 10, height: 5, background: 'rgba(255,255,255,0.2)', borderRadius: 99, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: '0%', background: 'rgba(255,255,255,0.8)', borderRadius: 99 }} />
@@ -738,13 +769,13 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
             <div className="kpi-card" style={{ flex: 1 }}>
               <div className="kpi-label">Monthly Revenue</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>${m.total_revenue?.toLocaleString() || 0}</div>
-              <Trend val="0" up />
+              <Trend val="0"/>
               <div className="kpi-sub">vs last month</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
               <div className="kpi-label">Units Sold</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{m.total_units || 0}</div>
-              <Trend val="0" up />
+              <Trend val="0"/>
               <div className="kpi-sub">containers this month</div>
             </div>
           </div>
@@ -753,13 +784,13 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
             <div className="kpi-card" style={{ flex: 1 }}>
               <div className="kpi-label">Active Clients</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{m.active_clients || 0}</div>
-              <Trend val="0" up />
+              <Trend val="0"/>
               <div className="kpi-sub">purchased in last 90 days</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
               <div className="kpi-label">Profit Margin</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{m.profit_margin?.toFixed(1) || 0}%</div>
-              <Trend val="0" up />
+              <Trend val="0"/>
               <div className="kpi-sub">vs last month average</div>
             </div>
           </div>
@@ -1008,7 +1039,7 @@ const OutreachDashboard = () => {
             </div>
             <div>
               <div style={{ fontSize: 30, fontWeight: 800, marginBottom: 5 }}>${profitDone.toLocaleString()}</div>
-              <Trend val="0" up white />
+              <Trend val="0" white />
               <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>Target: ${profitTarget.toLocaleString()} · {Math.round(profitDone/profitTarget*100)}%</div>
               <div style={{ marginTop: 10, height: 5, background: 'rgba(255,255,255,0.25)', borderRadius: 99, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${Math.round(profitDone/profitTarget*100)}%`, background: 'rgba(255,255,255,0.85)', borderRadius: 99 }} />
@@ -1025,7 +1056,7 @@ const OutreachDashboard = () => {
           <div className="kpi-card">
             <div className="kpi-label">Units Sold — Month</div>
             <div className="kpi-value" style={{ fontSize: 22 }}>0</div>
-            <Trend val="0" up /><div className="kpi-sub">vs last month</div>
+            <Trend val="0"/><div className="kpi-sub">vs last month</div>
           </div>
           <div className="kpi-card">
             <div className="kpi-label">Eligible Contacts</div>
