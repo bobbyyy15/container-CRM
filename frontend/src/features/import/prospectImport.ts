@@ -39,7 +39,7 @@ const aliases: Record<string, keyof ProspectImportRow> = {
   country: 'country', state: 'state_province', province: 'state_province', stateprovince: 'state_province',
   city: 'city', company: 'company_name', companyname: 'company_name', businessname: 'company_name',
   companylegalname: 'company_name', organization: 'company_name', organisation: 'company_name', client: 'company_name',
-  contact: 'contact_person', contactperson: 'contact_person', contactname: 'contact_person', fullname: 'contact_person', name: 'contact_person',
+  contact: 'contact_person', contactperson: 'contact_person', contactname: 'contact_person', fullname: 'contact_person',
   directline: 'contact_number_direct', phone: 'contact_number_direct', phonenumber: 'contact_number_direct',
   mobile: 'contact_number_direct', mobilenumber: 'contact_number_direct', cellphone: 'contact_number_direct',
   telephone: 'contact_number_direct', contactno: 'contact_number_direct', contactnumber: 'contact_number_direct',
@@ -55,17 +55,20 @@ const phone = (value: string | undefined) => clean(value).replace(/\D/g, '')
 const email = (value: string | undefined) => clean(value).toLowerCase()
 
 // Real-world spreadsheets rarely match the alias dictionary exactly (e.g. "Client Name",
-// "PIC Contact", "Attn"). Once the exact-match alias lookup misses, fall back to keyword
-// heuristics so an unfamiliar header still lands on the right field instead of silently
-// dropping Company Name / Contact Person and failing every row with the same error.
-const guessField = (k: string): keyof ProspectImportRow | undefined => {
+// "PIC Contact", "Company Officer"). Once the exact-match alias lookup misses, fall back to
+// keyword heuristics so an unfamiliar header still lands on the right field instead of
+// silently dropping Company Name / Contact Person and failing every row with the same error.
+// Person-role words are checked before the generic "company" pattern on purpose: a header
+// like "company_officer" or "company_contact" names a PERSON, even though it contains the
+// word "company".
+const strongGuess = (k: string): keyof ProspectImportRow | undefined => {
   if (!k) return undefined
   if (k.includes('email')) return /2|alt|secondary/.test(k) ? 'email_2' : 'email_active'
   if (/phone|mobile|cell|tel|whatsapp|contactno|contactnum/.test(k)) {
     return /2|alt|secondary/.test(k) ? 'contact_number_2' : 'contact_number_direct'
   }
+  if (/officer|owner|principal|manager|agent|representative|president|attn|attention|poc|contact|person/.test(k)) return 'contact_person'
   if (/company|business|client|organi[sz]ation|firm|account|vendor|customer/.test(k)) return 'company_name'
-  if (/contact|person|attn|attention|poc|rep$|representative/.test(k) || k === 'name') return 'contact_person'
   if (/industry|sector/.test(k)) return 'industry'
   if (/country/.test(k)) return 'country'
   if (/state|province/.test(k)) return 'state_province'
@@ -76,9 +79,27 @@ const guessField = (k: string): keyof ProspectImportRow | undefined => {
   return undefined
 }
 
+// Single-cell resolution used for header detection, where a lone "Name" cell is treated as
+// the (common) contact-person case by default.
 const resolveField = (cell: unknown): keyof ProspectImportRow | undefined => {
   const k = key(cell)
-  return aliases[k] ?? guessField(k)
+  return aliases[k] ?? strongGuess(k) ?? (k === 'name' ? 'contact_person' : undefined)
+}
+
+// Full-row header resolution: strong signals first, then let a lone generic "Name" column
+// fill in whichever of Company Name / Contact Person a stronger column (like "Company
+// Officer") didn't already claim, instead of defaulting it and colliding with that column.
+const resolveHeaderFields = (header: unknown[]): (keyof ProspectImportRow | undefined)[] => {
+  const strong = header.map(cell => {
+    const k = key(cell)
+    return aliases[k] ?? strongGuess(k)
+  })
+  const claimed = new Set(strong.filter(Boolean))
+  return header.map((cell, index) => {
+    if (strong[index]) return strong[index]
+    if (key(cell) === 'name') return claimed.has('company_name') ? 'contact_person' : 'company_name'
+    return undefined
+  })
 }
 
 const validateCandidates = (
@@ -161,7 +182,7 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
   }
   const header = hasHeader ? headerCandidate.row : nonEmpty[0].row
   const mapped = hasHeader
-    ? header.map(cell => resolveField(cell))
+    ? resolveHeaderFields(header)
     : header.map((_, index) => fields[index])
   const dataRows = hasHeader
     ? nonEmpty.filter(item => item.rowNumber > headerCandidate.rowNumber)
@@ -169,7 +190,13 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
 
   const candidates = dataRows.map(({ row: source, rowNumber }) => {
     const record: Record<string, string> = {}
-    mapped.forEach((field, index) => { if (field) record[field] = clean(source[index]) })
+    // First non-empty match for a field wins, so a duplicate/overlapping column mapping
+    // (e.g. two phone-like headers) can't blank out an already-populated field.
+    mapped.forEach((field, index) => {
+      if (!field || record[field]) return
+      const value = clean(source[index])
+      if (value) record[field] = value
+    })
     return { record, rowNumber }
   })
 
