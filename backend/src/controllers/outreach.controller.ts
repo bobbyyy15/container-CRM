@@ -14,7 +14,7 @@ export class OutreachController {
   static async sendEmail(req: Request, res: Response) {
     try {
       const payload = SendEmailSchema.parse(req.body);
-      const userId = (req as any).user.id;
+      const userId = req.auth!.user.id;
 
       const result = await MailService.sendColdEmail(
         payload.to, 

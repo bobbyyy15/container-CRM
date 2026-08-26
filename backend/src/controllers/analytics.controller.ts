@@ -29,11 +29,14 @@ export class AnalyticsController {
       const profit_margin = total_revenue > 0 ? (total_gross_profit / total_revenue) * 100 : 0;
 
       // 2. Funnel metrics (Counts)
-      const [{ count: prospectsCount }, { count: warmLeadsCount }, { count: inquiriesCount }] = await Promise.all([
-        supabaseAdmin.from('prospect_clients').select('*', { count: 'exact', head: true }),
-        supabaseAdmin.from('warm_leads').select('*', { count: 'exact', head: true }),
-        supabaseAdmin.from('inquiries').select('*', { count: 'exact', head: true })
+      const [prospects, warmLeads, inquiries, quotations] = await Promise.all([
+        supabaseAdmin.from('prospect_clients').select('*', { count: 'exact', head: true }).eq('lifecycle_status', 'active'),
+        supabaseAdmin.from('warm_leads').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+        supabaseAdmin.from('inquiries').select('*', { count: 'exact', head: true }).not('status', 'in', '(Removed,Lost,Quotation Created,Converted to Sale)'),
+        supabaseAdmin.from('quotations').select('*', { count: 'exact', head: true }).not('status', 'in', '(Converted,Rejected)'),
       ]);
+      const countError = prospects.error || warmLeads.error || inquiries.error || quotations.error;
+      if (countError) throw countError;
 
       res.json({
         success: true,
@@ -46,9 +49,10 @@ export class AnalyticsController {
             profit_margin,
           },
           funnel: {
-            prospects: prospectsCount || 0,
-            warm_leads: warmLeadsCount || 0,
-            inquiries: inquiriesCount || 0,
+            prospects: prospects.count || 0,
+            warm_leads: warmLeads.count || 0,
+            inquiries: inquiries.count || 0,
+            quotations: quotations.count || 0,
             sales: sales?.length || 0
           }
         }

@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 import leadRoutes from './routes/lead.routes';
 import companyRoutes from './routes/company.routes';
 import contactRoutes from './routes/contact.routes';
@@ -11,23 +10,23 @@ import analyticsRoutes from './routes/analytics.routes';
 import outreachRoutes from './routes/outreach.routes';
 import authRoutes from './routes/auth.routes';
 import { requireAuth } from './middleware/auth.middleware';
-
-dotenv.config();
+import { requestContext } from './middleware/request-context.middleware';
+import { env } from './config/env';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
 
 // Middleware
+app.use(requestContext);
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CORS_ORIGINS?.split(',') || 'http://localhost:5173',
+  origin: env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean),
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
 
 // Routes
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Backend is running' });
+  res.json({ status: 'ok', message: 'Backend is running', requestId: req.requestId });
 });
 
 // Auth Routes (some don't require JWT, like the Google callback)
@@ -43,6 +42,6 @@ app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/outreach', outreachRoutes);
 
 // Start Server
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+app.listen(env.PORT, () => {
+  console.log(`Server is running on port ${env.PORT}`);
 });

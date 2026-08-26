@@ -3,7 +3,7 @@ import { supabase } from './config/supabase';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [isRegistering, setIsRegistering] = useState(false);
-  const [identifier, setIdentifier] = useState(''); // email or username for login
+  const [identifier, setIdentifier] = useState('');
   
   // Registration fields
   const [email, setEmail] = useState('');
@@ -43,27 +43,11 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
 
       } else {
         if (!identifier || !password) {
-          throw new Error("Please enter your email or username, and password.");
-        }
-
-        let loginEmail = identifier;
-
-        // If it's a username (no @), look up the email in profiles
-        if (!identifier.includes('@')) {
-          const { data, error: profileErr } = await supabase
-            .from('profiles')
-            .select('email')
-            .eq('username', identifier)
-            .single();
-            
-          if (profileErr || !data) {
-            throw new Error("Username not found.");
-          }
-          loginEmail = data.email;
+          throw new Error("Please enter your email and password.");
         }
 
         const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: loginEmail,
+          email: identifier,
           password
         });
 
@@ -112,8 +96,8 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
             </>
           ) : (
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Email or Username</label>
-              <input type="text" value={identifier} onChange={e => setIdentifier(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--t1)', boxSizing: 'border-box' }} required />
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Email</label>
+              <input type="email" value={identifier} onChange={e => setIdentifier(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--t1)', boxSizing: 'border-box' }} required />
             </div>
           )}
 

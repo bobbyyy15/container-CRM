@@ -1,27 +1,71 @@
-import { Request, Response, NextFunction } from 'express';
+import { NextFunction, Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
+
+type OperationalRole = 'admin' | 'manager' | 'pic';
+
+const authError = (
+  req: Request,
+  res: Response,
+  status: number,
+  code: string,
+  message: string,
+) => res.status(status).json({
+  success: false,
+  error: { code, message },
+  requestId: req.requestId,
+});
 
 export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ success: false, error: { message: 'Missing or invalid authorization header' } });
+    const match = req.headers.authorization?.match(/^Bearer\s+(\S+)$/i);
+    if (!match) {
+      return authError(req, res, 401, 'AUTH_HEADER_MISSING', 'Missing or invalid authorization header.');
     }
 
-    const token = authHeader.split(' ')[1];
-
-    // Verify token using Supabase Auth
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-
-    if (error || !user) {
-      return res.status(401).json({ success: false, error: { message: 'Invalid or expired token' } });
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(match[1]);
+    if (userError || !user) {
+      return authError(req, res, 401, 'AUTH_TOKEN_INVALID', 'Invalid or expired access token.');
     }
 
-    // Attach user to request
-    (req as any).user = user;
-    
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, role, status')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      return authError(req, res, 403, 'PROFILE_NOT_FOUND', 'No CRM profile is associated with this account.');
+    }
+
+    if (profile.status !== 'active') {
+      return authError(req, res, 403, 'PROFILE_INACTIVE', 'This CRM account is inactive.');
+    }
+
+    // Backward compatibility until migration 007 normalizes the original "user" role to "pic".
+    const role = profile.role === 'user' ? 'pic' : profile.role;
+    if (!['admin', 'manager', 'pic'].includes(role)) {
+      return authError(req, res, 403, 'ROLE_INVALID', 'This account does not have a supported CRM role.');
+    }
+
+    req.auth = {
+      user,
+      profile: {
+        id: profile.id,
+        role: role as OperationalRole,
+        status: 'active',
+      },
+    };
+
     next();
-  } catch (error: any) {
-    return res.status(401).json({ success: false, error: { message: 'Unauthorized' } });
+  } catch {
+    return authError(req, res, 401, 'AUTH_FAILED', 'Unable to authenticate this request.');
   }
 };
+
+export const requireRoles = (...roles: OperationalRole[]) =>
+  (req: Request, res: Response, next: NextFunction) => {
+    if (!req.auth || !roles.includes(req.auth.profile.role)) {
+      return authError(req, res, 403, 'ROLE_FORBIDDEN', 'You do not have permission to perform this action.');
+    }
+    next();
+  };
