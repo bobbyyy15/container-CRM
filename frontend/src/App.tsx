@@ -462,6 +462,7 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
   active: Screen; onNav: (s: Screen) => void; expanded: boolean;
   mode: 'expanded' | 'collapsed' | 'hover'; onModeChange: (m: 'expanded' | 'collapsed' | 'hover') => void;
 }) => {
+  const [showModeMenu, setShowModeMenu] = useState(false)
   const visibleGroups = expanded
     ? NAV
     : NAV
@@ -526,29 +527,45 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
           </div>
           <span className="sb-item-label">Settings</span>
         </button>
-        <button
-          type="button"
-          className="sb-item"
-          data-tooltip="Toggle Navigation Mode"
-          title={expanded ? undefined : 'Toggle Navigation Mode'}
-          onClick={() => {
-             if (mode === 'expanded') onModeChange('collapsed');
-             else if (mode === 'collapsed') onModeChange('hover');
-             else onModeChange('expanded');
-          }}
-        >
-          <div className="sb-icon-wrap">
-            <Ic n={mode === 'expanded' ? I.chevLeft : mode === 'hover' ? I.chevRight : I.menu} size={16} style={{ color: 'var(--sb-icon)' }} />
-          </div>
-          {expanded && (
-            <div style={{ minWidth: 0, flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="sb-item-label" style={{ fontWeight: 600 }}>Nav Mode</span>
-              <span style={{ fontSize: 10, color: 'var(--brand)', fontWeight: 600, background: 'rgba(49, 94, 246, 0.15)', padding: '2px 6px', borderRadius: 4 }}>
-                {mode === 'expanded' ? 'Pinned' : mode === 'hover' ? 'Hover' : 'Collapsed'}
-              </span>
-            </div>
+        <div style={{ position: 'relative' }}>
+          {showModeMenu && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowModeMenu(false)} />
+              <div style={{ position: 'absolute', bottom: 'calc(100% + 10px)', left: expanded ? 0 : 4, width: 200, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 10, padding: 6, zIndex: 100, boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t4)', padding: '6px 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sidebar Mode</div>
+                {[
+                  { m: 'expanded', label: 'Pinned Open', icon: I.chevRight },
+                  { m: 'hover', label: 'Hover to Expand', icon: I.menu },
+                  { m: 'collapsed', label: 'Pinned Closed', icon: I.chevLeft },
+                ].map(opt => (
+                  <div key={opt.m} onClick={() => { onModeChange(opt.m as any); setShowModeMenu(false); }} style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6, cursor: 'pointer', background: mode === opt.m ? 'var(--brand-bg)' : 'transparent', color: mode === opt.m ? 'var(--brand)' : 'var(--t2)', fontSize: 13, fontWeight: 500 }}>
+                    <Ic n={opt.icon} size={14} style={{ color: mode === opt.m ? 'var(--brand)' : 'var(--t3)' }} />
+                    {opt.label}
+                  </div>
+                ))}
+              </div>
+            </>
           )}
-        </button>
+          <button
+            type="button"
+            className="sb-item"
+            data-tooltip="Toggle Navigation Mode"
+            title={expanded ? undefined : 'Toggle Navigation Mode'}
+            onClick={() => setShowModeMenu(!showModeMenu)}
+          >
+            <div className="sb-icon-wrap">
+              <Ic n={I.menu} size={16} style={{ color: 'var(--sb-icon)' }} />
+            </div>
+            {expanded && (
+              <div style={{ minWidth: 0, flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="sb-item-label" style={{ fontWeight: 600 }}>Nav Mode</span>
+                <span style={{ fontSize: 10, color: 'var(--brand)', fontWeight: 600, background: 'rgba(49, 94, 246, 0.15)', padding: '2px 6px', borderRadius: 4 }}>
+                  {mode === 'expanded' ? 'Pinned' : mode === 'hover' ? 'Hover' : 'Collapsed'}
+                </span>
+              </div>
+            )}
+          </button>
+        </div>
       </div>
     </aside>
   )
