@@ -440,11 +440,14 @@ const Trend = ({ val, up, white }: { val: string | number; up?: boolean; white?:
   )
 }
 
-const Prog = ({ pct, color = '#315EF6', tall }: { pct: number; color?: string; tall?: boolean }) => (
-  <div className={`prog${tall ? ' tall' : ''}`}>
-    <div className="prog-fill" style={{ width: `${Math.min(100, pct)}%`, background: color }} />
-  </div>
-)
+const Prog = ({ pct, color = '#315EF6', tall }: { pct: number; color?: string; tall?: boolean }) => {
+  const safePct = isNaN(pct) ? 0 : Math.max(0, Math.min(100, pct))
+  return (
+    <div className={`prog${tall ? ' tall' : ''}`}>
+      <div className="prog-fill" style={{ width: `${safePct}%`, background: color }} />
+    </div>
+  )
+}
 
 const Divider = () => <div className="divider" />
 
@@ -870,9 +873,9 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
             <div className="chart-title">Outreach Progress — Today</div>
             <div className="chart-sub">Daily targets vs completed</div>
             {[
-              { label: 'Emails', done: 375, target: 500, color: '#315EF6' },
-              { label: 'Calls', done: 12, target: 15, color: '#0D9488' },
-              { label: 'Texts / SMS', done: 220, target: 300, color: '#7C3AED' },
+              { label: 'Emails', done: 0, target: 500, color: '#315EF6' },
+              { label: 'Calls', done: 0, target: 15, color: '#0D9488' },
+              { label: 'Texts / SMS', done: 0, target: 300, color: '#7C3AED' },
             ].map(o => (
               <div key={o.label} style={{ marginBottom: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
@@ -991,10 +994,10 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
             <div style={{ padding: '14px 18px 10px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div className="chart-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Ic n={I.warning} size={13} style={{ color: 'var(--red)' }} />
+                  <Ic n={I.warning} size={13} style={{ color: OVERDUE_PICKUPS.length > 0 ? 'var(--red)' : 'var(--t4)' }} />
                   Overdue Pickups
                 </div>
-                <div className="chart-sub" style={{ marginBottom: 0 }}>Requires immediate action</div>
+                <div className="chart-sub" style={{ marginBottom: 0 }}>{OVERDUE_PICKUPS.length > 0 ? 'Requires immediate action' : 'All clear'}</div>
               </div>
               <Btn variant="ghost" sm onClick={() => onNav('pickups')}>View All →</Btn>
             </div>
@@ -1008,8 +1011,10 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
                   <div style={{ fontSize: 11.5, color: 'var(--t3)' }}>{r.contract} · {r.qty}× {r.size}</div>
                 </div>
               ))}
-              <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--red-bg)', borderRadius: 8, fontSize: 12, color: 'var(--red)', fontWeight: 500 }}>
-                2 overdue · Total delay risk on 4 containers
+              <div style={{ marginTop: 10, padding: '8px 12px', background: OVERDUE_PICKUPS.length > 0 ? 'var(--red-bg)' : 'var(--s2)', borderRadius: 8, fontSize: 12, color: OVERDUE_PICKUPS.length > 0 ? 'var(--red)' : 'var(--t3)', fontWeight: 500 }}>
+                {OVERDUE_PICKUPS.length > 0 
+                  ? `${OVERDUE_PICKUPS.length} overdue · Total delay risk on ${OVERDUE_PICKUPS.reduce((acc, curr) => acc + curr.qty, 0)} containers`
+                  : '0 overdue pickups · No current delay risk'}
               </div>
             </div>
           </div>
@@ -1023,19 +1028,59 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
 // ─── Outreach Dashboard ───────────────────────────────────────────────────────
 
 const OutreachDashboard = () => {
-  const emailDone = 0, emailTarget = 0
-  const callsDone = 0, callsMin = 0, callsPref = 0
-  const textsDone = 0, textsTarget = 0
-  const profitDone = 0, profitTarget = 0
+  const analytics = useAnalytics()
+  const m = analytics?.metrics || {}
+  const prospects = useProspects() || []
+  
+  const eligibleContacts = prospects.filter((p: any) => p.status !== 'Removed').length
+  const excludedContacts = prospects.length - eligibleContacts
+
+  const profitDone = m.total_gross_profit || 0
+  const profitTarget = 50000 // Placeholder target
+  const projectedProfit = profitDone * 1.15 // Placeholder projection multiplier
+  const projectedPct = Math.round((projectedProfit / profitTarget) * 100) || 0
+  
+  const emailDone = 0, emailTarget = 500
+  const callsDone = 0, callsPref = 20
+  const textsDone = 0, textsTarget = 150
+
+  const safePct = (done: number, tgt: number) => tgt > 0 ? Math.round((done / tgt) * 100) : 0
+
+  const [dateRange, setDateRange] = useState('This month')
+  const [showDateMenu, setShowDateMenu] = useState(false)
+  const rangePrefixMap: Record<string, string> = { 'This month': 'Monthly', 'This quarter': 'Quarterly', 'This year': 'Annual', 'All time': 'All Time' }
+  const prefix = rangePrefixMap[dateRange] || 'Monthly'
+
+  const dateOptions: Intl.DateTimeFormatOptions = { weekday: 'long', month: 'short', day: 'numeric' };
+  const todayStr = new Date().toLocaleDateString('en-US', dateOptions);
 
   return (
     <div className="page-scroll">
       <div className="greeting-bar">
         <div>
           <p className="greeting-title">Outreach Dashboard</p>
-          <p className="greeting-sub">Daily targets, outreach completion, and profit progress — Monday, Jul 29</p>
+          <p className="greeting-sub">Daily targets, outreach completion, and profit progress — {todayStr}</p>
         </div>
-        <div className="date-range"><Ic n={I.calendar} size={13} /><span>Today</span><Ic n={I.chevDown} size={12} /></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
+          <div className="date-range" onClick={() => setShowDateMenu(!showDateMenu)}>
+            <Ic n={I.calendar} size={13} />
+            <span>{dateRange}</span>
+            <Ic n={I.chevDown} size={12} />
+          </div>
+          {showDateMenu && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowDateMenu(false)} />
+              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, width: 160, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+                {['This month', 'This quarter', 'This year', 'All time'].map(opt => (
+                  <div key={opt} onClick={() => { setDateRange(opt); setShowDateMenu(false); }} style={{ padding: '8px 12px', borderRadius: 4, cursor: 'pointer', background: dateRange === opt ? 'var(--s2)' : 'transparent', color: dateRange === opt ? 'var(--brand)' : 'var(--t2)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = dateRange === opt ? 'var(--s2)' : 'transparent'}>
+                    {opt}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          <Btn variant="ghost" sm onClick={() => window.print()}><Ic n={I.export} size={13} /> Export PDF</Btn>
+        </div>
       </div>
       <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
@@ -1043,34 +1088,34 @@ const OutreachDashboard = () => {
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr', gap: 12 }}>
           <div className="kpi-featured" style={{ background: 'linear-gradient(145deg,#059669,#10B981)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 12, opacity: 0.85, fontWeight: 500 }}>Monthly Gross Profit</span>
+              <span style={{ fontSize: 12, opacity: 0.85, fontWeight: 500 }}>{prefix} Gross Profit</span>
             </div>
             <div>
               <div style={{ fontSize: 30, fontWeight: 800, marginBottom: 5 }}>${profitDone.toLocaleString()}</div>
               <Trend val="0" white />
-              <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>Target: ${profitTarget.toLocaleString()} · {Math.round(profitDone/profitTarget*100)}%</div>
+              <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>Target: ${profitTarget.toLocaleString()} · {safePct(profitDone, profitTarget)}%</div>
               <div style={{ marginTop: 10, height: 5, background: 'rgba(255,255,255,0.25)', borderRadius: 99, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${Math.round(profitDone/profitTarget*100)}%`, background: 'rgba(255,255,255,0.85)', borderRadius: 99 }} />
+                <div style={{ height: '100%', width: `${Math.min(100, safePct(profitDone, profitTarget))}%`, background: 'rgba(255,255,255,0.85)', borderRadius: 99 }} />
               </div>
-              <div style={{ marginTop: 6, fontSize: 11, opacity: 0.7 }}>Remaining: ${(profitTarget-profitDone).toLocaleString()}</div>
+              <div style={{ marginTop: 6, fontSize: 11, opacity: 0.7 }}>Remaining: ${(profitTarget-profitDone > 0 ? profitTarget-profitDone : 0).toLocaleString()}</div>
             </div>
           </div>
           <div className="kpi-card">
-            <div className="kpi-label">Projected Month-End</div>
-            <div className="kpi-value" style={{ fontSize: 22, color: 'var(--green)' }}>$48,200</div>
-            <div className="kpi-sub">Based on current daily pace</div>
-            <span className="badge b-green" style={{ marginTop: 8 }}>96% of target</span>
+            <div className="kpi-label">Projected Period-End</div>
+            <div className="kpi-value" style={{ fontSize: 22, color: 'var(--green)' }}>${projectedProfit.toLocaleString()}</div>
+            <div className="kpi-sub">Based on current pace</div>
+            <span className={`badge ${projectedPct >= 100 ? 'b-green' : 'b-amber'}`} style={{ marginTop: 8 }}>{projectedPct}% of target</span>
           </div>
           <div className="kpi-card">
-            <div className="kpi-label">Units Sold — Month</div>
-            <div className="kpi-value" style={{ fontSize: 22 }}>0</div>
-            <Trend val="0"/><div className="kpi-sub">vs last month</div>
+            <div className="kpi-label">Units Sold — {prefix.replace('ly', '')}</div>
+            <div className="kpi-value" style={{ fontSize: 22 }}>{m.total_units || 0}</div>
+            <Trend val="0"/><div className="kpi-sub">vs previous {dateRange.replace('This ', '')}</div>
           </div>
           <div className="kpi-card">
             <div className="kpi-label">Eligible Contacts</div>
-            <div className="kpi-value" style={{ fontSize: 22 }}>286</div>
+            <div className="kpi-value" style={{ fontSize: 22 }}>{eligibleContacts}</div>
             <div className="kpi-sub">For email, call, or text</div>
-            <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>24 excluded (Removed)</div>
+            <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>{excludedContacts} excluded (Removed)</div>
           </div>
         </div>
 
@@ -1081,11 +1126,11 @@ const OutreachDashboard = () => {
               label: 'Email Target', icon: I.mail, color: '#315EF6', done: emailDone, target: emailTarget,
               details: [
                 { k: 'Remaining', v: emailTarget - emailDone, color: 'var(--amber)' },
-                { k: 'Completion', v: `${Math.round(emailDone/emailTarget*100)}%`, color: 'var(--brand)' },
-                { k: 'Valid Available', v: 0, color: 'var(--green)' },
-                { k: 'Excluded', v: 0, color: 'var(--red)' },
+                { k: 'Completion', v: `${safePct(emailDone, emailTarget)}%`, color: 'var(--brand)' },
+                { k: 'Valid Available', v: eligibleContacts, color: 'var(--green)' },
+                { k: 'Excluded', v: excludedContacts, color: 'var(--red)' },
               ],
-              status: 'On Track', statusCls: 'b-blue',
+              status: safePct(emailDone, emailTarget) >= 100 ? 'Completed' : 'On Track', statusCls: 'b-blue',
             },
             {
               label: 'Call Target', icon: I.phone, color: '#0D9488', done: callsDone, target: callsPref,
@@ -1095,7 +1140,7 @@ const OutreachDashboard = () => {
                 { k: '→ Inquiry', v: 0, color: 'var(--brand)' },
                 { k: '→ Sale', v: 0, color: 'var(--green)' },
               ],
-              status: 'Min Achieved', statusCls: 'b-green',
+              status: safePct(callsDone, callsPref) >= 100 ? 'Target Achieved' : 'Min Achieved', statusCls: 'b-green',
             },
             {
               label: 'Text / SMS Target', icon: I.inquiry, color: '#7C3AED', done: textsDone, target: textsTarget,
@@ -1105,7 +1150,7 @@ const OutreachDashboard = () => {
                 { k: '→ Warm Leads', v: 0, color: 'var(--brand)' },
                 { k: '→ Inquiries', v: 0, color: 'var(--purple)' },
               ],
-              status: 'Nearly Complete', statusCls: 'b-teal',
+              status: safePct(textsDone, textsTarget) >= 100 ? 'Completed' : 'On Track', statusCls: 'b-teal',
             },
           ].map(t => (
             <div key={t.label} className="chart-card">
@@ -1138,15 +1183,15 @@ const OutreachDashboard = () => {
         {/* Combined summary table */}
         <div className="card" style={{ overflow: 'hidden' }}>
           <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border-s)' }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>Combined Outreach Summary — Today</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>Combined Outreach Summary — {dateRange}</span>
           </div>
           <table className="crm">
             <thead><tr><th>Channel</th><th>Target</th><th className="r">Completed</th><th className="r">Remaining</th><th>Progress</th><th>Status</th></tr></thead>
             <tbody>
               {[
-                { ch: 'Email', target: '500', done: 375, rem: 125, pct: 75, status: 'On Track', cls: 'b-blue' },
-                { ch: 'Calls', target: '10 min · 15 pref', done: 12, rem: 3, pct: 80, status: 'Min Achieved', cls: 'b-green' },
-                { ch: 'Texts (SMS)', target: '300 declared', done: 220, rem: 80, pct: 73, status: 'Nearly Complete', cls: 'b-teal' },
+                { ch: 'Email', target: emailTarget.toString(), done: emailDone, rem: emailTarget - emailDone, pct: safePct(emailDone, emailTarget), status: safePct(emailDone, emailTarget) >= 100 ? 'Completed' : 'On Track', cls: 'b-blue' },
+                { ch: 'Calls', target: `${callsPref} pref`, done: callsDone, rem: callsPref - callsDone > 0 ? callsPref - callsDone : 0, pct: safePct(callsDone, callsPref), status: safePct(callsDone, callsPref) >= 100 ? 'Completed' : 'Min Achieved', cls: 'b-green' },
+                { ch: 'Texts (SMS)', target: textsTarget.toString(), done: textsDone, rem: textsTarget - textsDone, pct: safePct(textsDone, textsTarget), status: safePct(textsDone, textsTarget) >= 100 ? 'Completed' : 'Nearly Complete', cls: 'b-teal' },
               ].map(r => (
                 <tr key={r.ch}>
                   <td style={{ fontWeight: 600 }}>{r.ch}</td>
