@@ -1,73 +1,78 @@
 import { Request, Response } from 'express';
-import { google } from 'googleapis';
-import { supabaseAdmin } from '../config/supabase';
+import { getGoogleOAuthConfig } from '../config/env';
+import { GoogleOAuthService } from '../services/google-oauth.service';
 
-// In production, these should come from process.env
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'dummy_client_id';
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || 'dummy_client_secret';
-const REDIRECT_URI = 'http://localhost:3001/api/v1/auth/google/callback';
-
-const oauth2Client = new google.auth.OAuth2(
-  GOOGLE_CLIENT_ID,
-  GOOGLE_CLIENT_SECRET,
-  REDIRECT_URI
-);
+const queryValue = (value: unknown) => typeof value === 'string' ? value : null;
 
 export class GoogleAuthController {
-  
+  static async status(req: Request, res: Response) {
+    try {
+      const status = await GoogleOAuthService.getStatus(req.auth!.user.id);
+      res.json({ success: true, data: status, requestId: req.requestId });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: { code: 'GOOGLE_STATUS_FAILED', message: error.message },
+        requestId: req.requestId,
+      });
+    }
+  }
+
   static async getAuthUrl(req: Request, res: Response) {
-    const userId = (req as any).user.id;
-    
-    const scopes = [
-      'https://www.googleapis.com/auth/gmail.send',
-      'https://www.googleapis.com/auth/userinfo.email'
-    ];
-
-    const url = oauth2Client.generateAuthUrl({
-      access_type: 'offline', // Required to get a refresh token
-      prompt: 'consent', // Force consent screen to ensure we get a refresh token
-      scope: scopes,
-      state: userId // Pass the CRM user ID in state so we know who they are when they return
-    });
-
-    res.json({ success: true, url });
+    try {
+      const url = await GoogleOAuthService.createAuthorizationUrl(req.auth!.user.id);
+      res.json({ success: true, data: { url }, requestId: req.requestId });
+    } catch (error: any) {
+      res.status(503).json({
+        success: false,
+        error: { code: 'GOOGLE_OAUTH_UNAVAILABLE', message: error.message },
+        requestId: req.requestId,
+      });
+    }
   }
 
   static async callback(req: Request, res: Response) {
+    const code = queryValue(req.query.code);
+    const state = queryValue(req.query.state);
+    const googleError = queryValue(req.query.error);
+
     try {
-      const { code, state } = req.query;
-      const userId = state as string;
+      const { frontendUrl } = getGoogleOAuthConfig();
+      const redirect = new URL(frontendUrl);
 
-      if (!code || !userId) {
-        return res.status(400).send("Missing code or user state");
+      if (googleError) {
+        redirect.searchParams.set('google_sync', 'cancelled');
+        return res.redirect(redirect.toString());
       }
 
-      // Exchange code for tokens
-      const { tokens } = await oauth2Client.getToken(code as string);
-      
-      if (!tokens.refresh_token) {
-        return res.status(400).send("No refresh token received. You may need to revoke access and try again.");
+      if (!code || !state) {
+        return res.status(400).send('Missing Google authorization code or state.');
       }
 
-      // Set credentials to get the user's email
-      oauth2Client.setCredentials(tokens);
-      const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
-      const userInfo = await oauth2.userinfo.get();
-
-      // Save refresh token and email to Supabase profiles
-      await supabaseAdmin
-        .from('profiles')
-        .update({
-          google_refresh_token: tokens.refresh_token,
-          google_email: userInfo.data.email
-        })
-        .eq('id', userId);
-
-      // Redirect back to the CRM frontend
-      res.redirect('http://localhost:8443?google_sync=success');
+      await GoogleOAuthService.completeAuthorization(code, state);
+      redirect.searchParams.set('google_sync', 'success');
+      return res.redirect(redirect.toString());
     } catch (error: any) {
-      console.error('Google Auth Error:', error);
-      res.status(500).send("Failed to connect Google account.");
+      console.error(JSON.stringify({
+        level: 'error',
+        event: 'google_oauth_callback_failed',
+        requestId: req.requestId,
+        message: error.message,
+      }));
+      return res.status(400).send(`Google connection failed. Request ID: ${req.requestId}`);
+    }
+  }
+
+  static async disconnect(req: Request, res: Response) {
+    try {
+      await GoogleOAuthService.disconnect(req.auth!.user.id);
+      res.json({ success: true, data: { connected: false }, requestId: req.requestId });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: { code: 'GOOGLE_DISCONNECT_FAILED', message: error.message },
+        requestId: req.requestId,
+      });
     }
   }
 }

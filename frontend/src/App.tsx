@@ -1,15 +1,16 @@
 import { useState, useCallback, useEffect } from 'react'
-import axios from 'axios'
 import { supabase } from './config/supabase'
+import { api } from './lib/api'
 import Login from './Login'
-
-axios.interceptors.request.use(async (config) => {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session?.access_token) {
-    config.headers.Authorization = `Bearer ${session.access_token}`;
-  }
-  return config;
-});
+import ProspectImportDialog from './features/import/ProspectImportDialog'
+import {
+  NewInquiryDialog,
+  QuotationDialog,
+  SaleDialog,
+  type InquiryOption,
+  type QuotationOption,
+  type WarmLeadOption,
+} from './features/pipeline/PipelineDialogs'
 
 import {
   BarChart, Bar, AreaChart, Area,
@@ -42,85 +43,153 @@ const exportToCSV = (data: any[], filename: string) => {
   document.body.removeChild(a);
 };
 
-export 
-const useWarmLeads = () => {
+const mapPipelineRow = (p: any) => ({
+  id: p.id,
+  added: new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+  pic: p.pics?.name || 'Unassigned',
+  cat: p.category || (p.status === 'active' ? 'Proceed' : p.status) || 'Proceed',
+  sms: p.source_data?.sms_deliverability || 'Call/Text',
+  email: p.source_data?.email_deliverability || (p.contacts?.email_active ? 'Available' : 'Unavailable'),
+  industry: p.companies?.industry || '',
+  territory: p.source_data?.service_locations || '',
+  country: p.companies?.address_country || '',
+  state: p.companies?.address_state || '',
+  city: p.companies?.address_city || '',
+  company: p.companies?.name || '',
+  contact: p.contacts ? `${p.contacts.first_name || ''} ${p.contacts.last_name || ''}`.trim() : '',
+  contactMissing: !p.contact_id,
+  phone: p.contacts?.phone_direct || '',
+  phone2: p.contacts?.phone_2 || '',
+  emailAddr: p.contacts?.email_active || '',
+  email2: p.contacts?.email_2 || '',
+  address: p.companies?.address_street || '',
+})
+
+export const useWarmLeads = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
   useEffect(() => {
-    axios.get('http://localhost:3001/api/v1/leads/warm-leads').then(res => {
-      if (res.data.success) setData(res.data.data)
+    api.get('/leads/warm-leads', { params: { limit: 500 } }).then(res => {
+      if (res.data.success) setData((res.data.data || []).map(mapPipelineRow))
     }).catch(console.error)
-  }, [])
+  }, [revision])
   return data
 }
 
-const useInquiries = () => {
+const useInquiries = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
   useEffect(() => {
-    axios.get('http://localhost:3001/api/v1/leads/inquiries').then(res => {
-      if (res.data.success) setData(res.data.data)
+    api.get('/leads/inquiries', { params: { limit: 500 } }).then(res => {
+      if (res.data.success) setData((res.data.data || []).map((row: any) => {
+        const created = new Date(row.created_at)
+        return {
+          id: row.id,
+          companyId: row.company_id,
+          contactId: row.contact_id,
+          ref: `INQ-${row.id.slice(0, 8).toUpperCase()}`,
+          date: created.toLocaleDateString(),
+          time: created.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          channel: row.requirements?.match(/email/i) ? 'Email' : 'Direct',
+          company: row.companies?.name || '',
+          contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
+          category: row.requirements || 'To be qualified',
+          size: row.container_sizes?.name || '—',
+          condition: row.container_conditions?.name || '—',
+          qty: row.quantity ?? '—',
+          neededBy: row.needed_by_date ? new Date(row.needed_by_date).toLocaleDateString() : '—',
+          status: row.status || 'Under Review',
+          pic: row.pics?.name || 'Unassigned',
+        }
+      }))
     }).catch(console.error)
-  }, [])
+  }, [revision])
   return data
 }
 
-const useQuotations = () => {
+const useQuotations = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
   useEffect(() => {
-    axios.get('http://localhost:3001/api/v1/deals/quotations').then(res => {
-      if (res.data.success) setData(res.data.data)
+    api.get('/deals/quotations').then(res => {
+      if (res.data.success) setData((res.data.data || []).map((row: any) => {
+        const items = row.quotation_items || []
+        const quantity = items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0)
+        const total = Number(row.total_amount || 0)
+        return {
+          id: row.id,
+          inquiryId: row.inquiry_id,
+          ref: `QUO-${row.id.slice(0, 8).toUpperCase()}`,
+          date: new Date(row.created_at).toLocaleDateString(),
+          co: row.companies?.name || '',
+          contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
+          category: items[0]?.description || 'Container',
+          size: '—',
+          qty: quantity,
+          sellTotal: total,
+          profit: 0,
+          margin: 0,
+          status: row.status,
+          source: row.inquiry_id ? `INQ-${row.inquiry_id.slice(0, 8).toUpperCase()}` : 'Direct',
+          pic: row.pics?.name || 'Unassigned',
+        }
+      }))
     }).catch(console.error)
-  }, [])
+  }, [revision])
   return data
 }
 
-const useSales = () => {
+const useSales = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
   useEffect(() => {
-    axios.get('http://localhost:3001/api/v1/deals/sales').then(res => {
-      if (res.data.success) setData(res.data.data)
+    api.get('/deals/sales').then(res => {
+      if (res.data.success) setData((res.data.data || []).map((row: any) => {
+        const units = Number(row.total_units || 0)
+        const buyingCost = Number(row.buying_cost || 0)
+        const revenue = Number(row.revenue || 0)
+        const profit = Number(row.gross_profit || 0)
+        const quote = row.quotations || {}
+        const item = quote.quotation_items?.[0]
+        return {
+          id: row.id,
+          ref: `SAL-${row.id.slice(0, 8).toUpperCase()}`,
+          date: new Date(row.created_at).toLocaleDateString(),
+          company: row.companies?.name || '',
+          contact: quote.contacts ? `${quote.contacts.first_name || ''} ${quote.contacts.last_name || ''}`.trim() : '',
+          category: item?.description || 'Container',
+          size: '—',
+          condition: '—',
+          qty: units,
+          buyPU: units ? buyingCost / units : 0,
+          sellPU: units ? revenue / units : 0,
+          totalBuy: buyingCost,
+          totalSell: revenue,
+          profit,
+          margin: revenue ? (profit / revenue) * 100 : 0,
+          pic: row.pics?.name || 'Unassigned',
+          status: row.status,
+        }
+      }))
     }).catch(console.error)
-  }, [])
+  }, [revision])
   return data
 }
 
 const useAnalytics = () => {
   const [data, setData] = useState<any>(null)
   useEffect(() => {
-    axios.get('http://localhost:3001/api/v1/analytics/dashboard').then(res => {
+    api.get('/analytics/dashboard').then(res => {
       if (res.data.success) setData(res.data.data)
     }).catch(console.error)
   }, [])
   return data
 }
 
-const useProspects = () => {
+const useProspects = (revision = 0) => {
   const [prospects, setProspects] = useState<any[]>([]);
   useEffect(() => {
-    axios.get('http://localhost:3001/api/v1/leads/prospects').then(res => {
-      if (!res.data.data || res.data.data.length === 0) return;
-      const data = res.data.data.map((p: any) => ({
-        id: p.id,
-        added: new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        pic: 'API',
-        cat: p.category || 'Proceed',
-        sms: 'Call/Text',
-        email: 'Mail Delivery Report',
-        industry: p.companies?.industry || '',
-        territory: 'API Territory',
-        country: p.companies?.address_country || '',
-        state: p.companies?.address_state || '',
-        city: p.companies?.address_city || '',
-        company: p.companies?.name || '',
-        contact: p.contacts ? `${p.contacts.first_name || ''} ${p.contacts.last_name || ''}`.trim() : '',
-        phone: p.contacts?.phone_direct || '',
-        phone2: p.contacts?.phone_2 || '',
-        emailAddr: p.contacts?.email_active || '',
-        email2: p.contacts?.email_2 || '',
-        address: p.companies?.address_street || ''
-      }));
+    api.get('/leads/prospects', { params: { limit: 500 } }).then(res => {
+      const data = (res.data.data || []).map(mapPipelineRow);
       setProspects(data);
     }).catch(e => console.error("Failed to fetch API data", e));
-  }, []);
+  }, [revision]);
   return prospects;
 }
 
@@ -261,6 +330,15 @@ const NAV: NavGroup[] = [
   },
 ]
 
+const COLLAPSED_NAV_ITEMS = new Set<Screen>([
+  'dashboard',
+  'prospects',
+  'warm-leads',
+  'inquiries',
+  'quotations',
+  'sales-tracker',
+])
+
 const SCREEN_LABELS: Record<Screen, string> = {
   'dashboard': 'Executive Overview',
   'outreach-dashboard': 'Outreach Dashboard',
@@ -289,29 +367,33 @@ const SCREEN_LABELS: Record<Screen, string> = {
 
 // ─── Sample Data ──────────────────────────────────────────────────────────────
 
-const profitChartData = [
-]
+type ProfitChartPoint = { m: string; profit: number; revenue: number; cost: number }
+type ChartSlice = { name: string; value: number; color: string }
+type PicPerformanceRow = {
+  name: string
+  initials: string
+  profit: number
+  sales: number
+  units: number
+  calls: number
+  emails: number
+  texts: number
+  leads: number
+  inquiries: number
+  quotes: number
+  revenue: number
+}
+type BestClientRow = { r: number; co: string; u: number; p: number }
+type OverduePickupRow = { contract: string; co: string; days: number; qty: number; size: string }
+type LossReasonRow = { reason: string; color: string; count: number }
 
-const categoryData = [
-]
-
-const inquiryStatusData = [
-]
-
-const weekData = [
-]
-
-const PROSPECTS = [
-]
-
-const SALES = [
-]
-
-const INQUIRIES = [
-]
-
-const PIC_DATA = [
-]
+const profitChartData: ProfitChartPoint[] = []
+const categoryData: ChartSlice[] = []
+const inquiryStatusData: ChartSlice[] = []
+const PIC_DATA: PicPerformanceRow[] = []
+const BEST_CLIENTS: BestClientRow[] = []
+const OVERDUE_PICKUPS: OverduePickupRow[] = []
+const LOSS_REASONS: LossReasonRow[] = []
 
 // ─── Utility components ───────────────────────────────────────────────────────
 
@@ -357,7 +439,7 @@ const Divider = () => <div className="divider" />
 
 const Btn = ({ children, variant = 'secondary', sm, className = '', onClick, style }: {
   children: React.ReactNode; variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
-  sm?: boolean; className?: string; onClick?: () => void; style?: React.CSSProperties
+  sm?: boolean; className?: string; onClick?: React.MouseEventHandler<HTMLButtonElement>; style?: React.CSSProperties
 }) => (
   <button
     className={`btn btn-${variant}${sm ? ' btn-sm' : ''} ${className}`}
@@ -378,7 +460,14 @@ const ChipPIC = ({ label }: { label: string }) => (
 const Sidebar = ({ active, onNav, expanded, onToggle }: {
   active: Screen; onNav: (s: Screen) => void; expanded: boolean; onToggle: () => void
 }) => {
-  const all = NAV.flatMap(g => g.items)
+  const visibleGroups = expanded
+    ? NAV
+    : NAV
+        .map(group => ({
+          ...group,
+          items: group.items.filter(item => COLLAPSED_NAV_ITEMS.has(item.id)),
+        }))
+        .filter(group => group.items.length > 0)
 
   return (
     <aside className={`sidebar${expanded ? ' expanded' : ''}`}>
@@ -394,30 +483,44 @@ const Sidebar = ({ active, onNav, expanded, onToggle }: {
           </div>
         )}
         <button
+          type="button"
+          className="sb-toggle"
           onClick={onToggle}
-          style={{ marginLeft: expanded ? 'auto' : 0, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sb-text)', padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center' }}
+          aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+          aria-expanded={expanded}
         >
-          <Ic n={expanded ? I.chevRight : I.menu} size={14} style={{ color: 'var(--sb-text)' }} />
+          <Ic
+            n={I.chevRight}
+            size={13}
+            style={{
+              color: 'white',
+              transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.24s cubic-bezier(0.4,0,0.2,1)',
+            }}
+          />
         </button>
       </div>
 
       {/* Nav */}
       <nav className="sb-nav">
-        {NAV.map(group => (
+        {visibleGroups.map(group => (
           <div key={group.label}>
             <div className="sb-group-label">{group.label}</div>
             {group.items.map(item => (
-              <div
+              <button
+                type="button"
                 key={item.id}
                 className={`sb-item${active === item.id ? ' active' : ''}`}
                 onClick={() => onNav(item.id)}
                 data-tooltip={item.label}
+                title={expanded ? undefined : item.label}
+                aria-current={active === item.id ? 'page' : undefined}
               >
                 <div className="sb-icon-wrap">
                   <Ic n={item.icon} size={16} style={{ color: active === item.id ? 'white' : 'var(--sb-icon)' }} />
                 </div>
                 <span className="sb-item-label">{item.label}</span>
-              </div>
+              </button>
             ))}
           </div>
         ))}
@@ -425,12 +528,19 @@ const Sidebar = ({ active, onNav, expanded, onToggle }: {
 
       {/* Bottom */}
       <div className="sb-bottom">
-        <div className="sb-item" data-tooltip="System Settings" onClick={() => onNav('system-settings')}>
+        <button
+          type="button"
+          className={`sb-item${active === 'system-settings' ? ' active' : ''}`}
+          data-tooltip="System Settings"
+          title={expanded ? undefined : 'System Settings'}
+          aria-current={active === 'system-settings' ? 'page' : undefined}
+          onClick={() => onNav('system-settings')}
+        >
           <div className="sb-icon-wrap">
             <Ic n={I.config} size={16} style={{ color: 'var(--sb-icon)' }} />
           </div>
           <span className="sb-item-label">Settings</span>
-        </div>
+        </button>
         <div className="sb-item" data-tooltip="James Carter">
           <div className="avatar" style={{ width: 34, height: 34, borderRadius: 9, fontSize: 11 }}>JC</div>
           {expanded && (
@@ -499,6 +609,8 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
   const chartColor = chartMetric === 'profit' ? '#315EF6' : chartMetric === 'revenue' ? '#059669' : '#6B7280'
   const analytics = useAnalytics()
   const m = analytics?.metrics || {}
+  const funnel = analytics?.funnel || {}
+  const conversion = (value: number, previous: number) => previous > 0 ? `${Math.round((value / previous) * 100)}%` : '0%'
 
   return (
     <div className="page-scroll">
@@ -612,11 +724,11 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
           </div>
           <div className="pipeline-row">
             {[
-              { label: 'Prospects', count: 0, pct: '0%', change: '0%', up: true, screen: 'prospects' as Screen, color: '#315EF6' },
-              { label: 'Warm Leads', count: 0, pct: '0%', change: '0%', up: true, screen: 'warm-leads' as Screen, color: '#7C3AED' },
-              { label: 'Inquiries', count: 0, pct: '0%', change: '0%', up: true, screen: 'inquiries' as Screen, color: '#D97706' },
-              { label: 'Quotations', count: 0, pct: '0%', change: '0%', up: false, screen: 'quotations' as Screen, color: '#EA580C' },
-              { label: 'Sales', count: 0, pct: '0%', change: '0%', up: true, screen: 'sales-tracker' as Screen, color: '#059669' },
+              { label: 'Prospects', count: funnel.prospects || 0, pct: '100%', change: 'active', up: true, screen: 'prospects' as Screen, color: '#315EF6' },
+              { label: 'Warm Leads', count: funnel.warm_leads || 0, pct: conversion(funnel.warm_leads || 0, funnel.prospects || 0), change: 'active', up: true, screen: 'warm-leads' as Screen, color: '#7C3AED' },
+              { label: 'Inquiries', count: funnel.inquiries || 0, pct: conversion(funnel.inquiries || 0, funnel.warm_leads || 0), change: 'active', up: true, screen: 'inquiries' as Screen, color: '#D97706' },
+              { label: 'Quotations', count: funnel.quotations || 0, pct: conversion(funnel.quotations || 0, funnel.inquiries || 0), change: 'active', up: true, screen: 'quotations' as Screen, color: '#EA580C' },
+              { label: 'Sales', count: funnel.sales || 0, pct: conversion(funnel.sales || 0, funnel.quotations || 0), change: 'won', up: true, screen: 'sales-tracker' as Screen, color: '#059669' },
             ].map((s, i) => (
               <div key={s.label} className="pipeline-stage" onClick={() => onNav(s.screen)}>
                 {i > 0 && (
@@ -717,7 +829,7 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
             <table className="crm" style={{ width: '100%' }}>
               <thead><tr><th>#</th><th>Company</th><th className="r">Units</th><th className="r">Profit</th></tr></thead>
               <tbody>
-                {[].map(row => (
+                {BEST_CLIENTS.map(row => (
                   <tr key={row.r}>
                     <td style={{ width: 36 }}>
                       <span style={{ width: 22, height: 22, borderRadius: 6, background: row.r === 1 ? '#FEF3C7' : 'var(--s3)', color: row.r === 1 ? '#D97706' : 'var(--t4)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{row.r}</span>
@@ -767,7 +879,7 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
               <Btn variant="ghost" sm onClick={() => onNav('pickups')}>View All →</Btn>
             </div>
             <div style={{ padding: '12px 18px' }}>
-              {[].map(r => (
+              {OVERDUE_PICKUPS.map(r => (
                 <div key={r.contract} style={{ padding: '10px 0', borderBottom: '1px solid var(--border-s)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                     <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--t1)' }}>{r.co}</span>
@@ -988,7 +1100,7 @@ const InquiryDashboard = () => (
         <div className="chart-card">
           <div className="chart-title">Loss Reason Analysis</div>
           <div className="chart-sub" style={{ marginBottom: 14 }}>Why inquiries were lost</div>
-          {[].map(r => (
+          {LOSS_REASONS.map(r => (
             <div key={r.reason} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border-s)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ width: 8, height: 8, borderRadius: 2, background: r.color, flexShrink: 0 }} />
@@ -1006,46 +1118,51 @@ const InquiryDashboard = () => (
 // ─── Prospect / Warm Lead Sheet ───────────────────────────────────────────────
 
 const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm'; onNav?: (s: Screen) => void }) => {
-  const [selected, setSelected] = useState<number[]>([])
+  const [selected, setSelected] = useState<string[]>([])
   const [search, setSearch] = useState('')
+  const [category, setCategory] = useState('')
+  const [country, setCountry] = useState('')
+  const [industry, setIndustry] = useState('')
+  const [missingContactOnly, setMissingContactOnly] = useState(false)
   const [view, setView] = useState('grid')
   const [tab, setTab] = useState('Standard A–Q View')
 
-  const _prospectsData = useProspects()
-  const _warmData = useWarmLeads()
-  const prospectsData = mode === 'warm' ? _warmData : _prospectsData
+  const [revision, setRevision] = useState(0)
+  const [importMode, setImportMode] = useState<'file' | 'paste' | null>(null)
 
-  const handleImportMock = async () => {
-    try {
-      const mockPayload = PROSPECTS.map(p => ({
-        company_name: p.company,
-        contact_person: p.contact,
-        contact_number_direct: p.phone,
-        email_active: p.emailAddr,
-        city: p.city,
-        state_province: p.state,
-        country: p.country,
-        address: p.address,
-        industry: p.industry,
-        category: p.cat
-      }));
-      await axios.post('http://localhost:3001/api/v1/data/imports', { rows: mockPayload });
-      alert("Successfully imported mock data into your live database! Refreshing...");
-      window.location.reload();
-    } catch (e) {
-      console.error(e);
-      alert("Import failed!");
-    }
-  }
+  const _prospectsData = useProspects(revision)
+  const _warmData = useWarmLeads(revision)
+  const prospectsData = mode === 'warm' ? _warmData : _prospectsData
 
   const handleConvert = async (id: string) => {
     try {
-      await axios.post(`http://localhost:3001/api/v1/leads/prospects/${id}/convert-to-warm-lead`);
-      alert("Converted to Warm Lead!");
-      window.location.reload();
-    } catch (e) {
-      console.error(e);
-      alert("Conversion failed!");
+      await api.post(`/leads/prospects/${id}/convert-to-warm-lead`);
+      setSelected(current => current.filter(value => value !== id))
+      setRevision(value => value + 1)
+    } catch (e: any) {
+      alert(e.response?.data?.error?.message ?? 'Conversion failed.')
+    }
+  }
+
+  const handleCreateInquiry = async (id: string) => {
+    try {
+      await api.post(`/leads/warm-leads/${id}/create-inquiry`, {});
+      setSelected(current => current.filter(value => value !== id))
+      setRevision(value => value + 1)
+    } catch (e: any) {
+      alert(e.response?.data?.error?.message ?? 'Inquiry creation failed.')
+    }
+  }
+
+  const handleRemove = async (id: string) => {
+    const reason = window.prompt('Why should this contact be removed from active CRM lists?')?.trim()
+    if (!reason) return
+    try {
+      await api.post(`/leads/${mode === 'prospect' ? 'prospect' : 'warm_lead'}/${id}/remove`, { reason })
+      setSelected(current => current.filter(value => value !== id))
+      setRevision(value => value + 1)
+    } catch (e: any) {
+      alert(e.response?.data?.error?.message ?? 'Removal failed.')
     }
   }
 
@@ -1054,16 +1171,24 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     ? 'Companies identified for outreach who have not yet replied or requested pricing.'
     : 'Prospects who replied, showed interest, or requested a quotation.'
 
-  const filtered = prospectsData.filter(r =>
-    r.company.toLowerCase().includes(search.toLowerCase()) ||
-    r.city.toLowerCase().includes(search.toLowerCase()) ||
-    r.contact.toLowerCase().includes(search.toLowerCase())
-  )
+  const countries = [...new Set(prospectsData.map(r => r.country).filter(Boolean))].sort() as string[]
+  const industries = [...new Set(prospectsData.map(r => r.industry).filter(Boolean))].sort() as string[]
+  const filtered = prospectsData.filter(r => {
+    const term = search.trim().toLowerCase()
+    const matchesSearch = !term || [r.company, r.city, r.contact, r.emailAddr, r.phone]
+      .some(value => String(value || '').toLowerCase().includes(term))
+    return matchesSearch
+      && (!category || r.cat === category)
+      && (!country || r.country === country)
+      && (!industry || r.industry === industry)
+      && (!missingContactOnly || r.contactMissing)
+  })
 
   const proceed = filtered.filter(r => r.cat === 'Proceed').length
   const callElig = filtered.filter(r => r.cat === 'Proceed' && (r.sms === 'Call/Text' || r.sms === 'Calls Only')).length
   const textElig = filtered.filter(r => r.cat === 'Proceed' && (r.sms === 'Call/Text' || r.sms === 'Text Only')).length
   const emailElig = filtered.filter(r => r.cat === 'Proceed' && r.emailAddr).length
+  const missingContact = prospectsData.filter(r => r.contactMissing).length
 
   const COLS = [
     { key: 'A', label: 'Date Added', field: 'added', w: 108 },
@@ -1085,7 +1210,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     { key: 'Q', label: 'Address', field: 'address', w: 260 },
   ]
 
-  const getVal = (row: typeof PROSPECTS[0], field: string): string =>
+  const getVal = (row: ReturnType<typeof mapPipelineRow>, field: string): string =>
     (row as any)[field] || ''
 
   return (
@@ -1097,10 +1222,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           <div className="page-desc">{desc}</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn variant="primary" sm onClick={handleImportMock}><Ic n={I.upload} size={13} /> Import Mock Data</Btn>
+          {mode === 'prospect' && <Btn variant="primary" sm onClick={() => setImportMode('file')}><Ic n={I.upload} size={13} /> Import Excel</Btn>}
           <Btn variant="ghost" sm onClick={() => exportToCSV(filtered, 'pipeline_data')}><Ic n={I.export} size={13} /> Export</Btn>
-          <Btn variant="secondary" sm><Ic n={I.copy} size={13} /> Paste Bulk</Btn>
-          <Btn variant="primary" sm><Ic n={I.plus} size={13} /> Add {mode === 'prospect' ? 'Prospect' : 'Lead'}</Btn>
+          {mode === 'prospect' && <Btn variant="secondary" sm onClick={() => setImportMode('paste')}><Ic n={I.copy} size={13} /> Paste Bulk</Btn>}
         </div>
       </div>
 
@@ -1112,13 +1236,27 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           { label: 'Call Eligible', val: callElig, color: '#0D9488' },
           { label: 'Text Eligible', val: textElig, color: 'var(--purple)' },
           { label: 'Email Eligible', val: emailElig, color: 'var(--brand)' },
-          { label: 'Removed', val: filtered.filter(r => r.cat === 'Removed').length, color: 'var(--red)' },
         ].map((s, i) => (
-          <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 14, borderRight: i < 5 ? '1px solid var(--border-s)' : 'none' }}>
+          <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 14, borderRight: '1px solid var(--border-s)' }}>
             <span style={{ fontSize: 18, fontWeight: 700, color: s.color, fontFamily: 'var(--mono)' }}>{s.val}</span>
             <span style={{ fontSize: 11.5, color: 'var(--t3)' }}>{s.label}</span>
           </div>
         ))}
+        {mode === 'prospect' && missingContact > 0 && (
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setMissingContactOnly(value => !value)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '2px 10px', borderRadius: 999,
+              background: missingContactOnly ? 'var(--amber-bg, #FEF3C7)' : 'transparent',
+              border: '1px solid var(--amber, #D97706)', color: 'var(--amber, #D97706)',
+            }}
+            title="Companies imported without a named contact yet"
+          >
+            <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--mono)' }}>{missingContact}</span>
+            <span style={{ fontSize: 11.5 }}>Missing Contact{missingContactOnly ? ' — showing only these' : ''}</span>
+          </button>
+        )}
       </div>
 
       {/* Toolbar */}
@@ -1127,9 +1265,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           <Ic n={I.search} size={13} />
           <input placeholder={`Search ${label}…`} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <select className="sel"><option>All Categories</option><option>Proceed</option><option>Removed</option></select>
-        <select className="sel"><option>All Countries</option><option>United States</option><option>Canada</option></select>
-        <select className="sel"><option>All PICs</option><option>James Carter</option><option>Maria Santos</option></select>
+        <select className="sel" value={category} onChange={e => setCategory(e.target.value)}><option value="">All Categories</option><option value="Proceed">Proceed</option></select>
+        <select className="sel" value={country} onChange={e => setCountry(e.target.value)}><option value="">All Countries</option>{countries.map(value => <option key={value}>{value}</option>)}</select>
+        <select className="sel" value={industry} onChange={e => setIndustry(e.target.value)}><option value="">All Industries</option>{industries.map(value => <option key={value}>{value}</option>)}</select>
 
         {selected.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', background: 'var(--brand-bg)', borderRadius: 7, fontSize: 12, fontWeight: 600, color: 'var(--brand)' }}>
@@ -1137,8 +1275,8 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
             <Btn variant="ghost" sm>Assign PIC</Btn>
             <Btn variant="ghost" sm>Change Category</Btn>
             {mode === 'prospect'
-              ? <Btn variant="ghost" sm onClick={() => onNav?.('warm-leads')}>→ Warm Lead</Btn>
-              : <Btn variant="ghost" sm onClick={() => onNav?.('inquiries')}>Create Inquiry</Btn>
+              ? <Btn variant="ghost" sm onClick={() => Promise.all(selected.map(handleConvert))}>→ Warm Lead</Btn>
+              : <Btn variant="ghost" sm onClick={() => Promise.all(selected.map(handleCreateInquiry))}>Create Inquiry</Btn>
             }
           </div>
         )}
@@ -1175,7 +1313,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                 <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{col.label}</span>
               </div>
             ))}
-            <div style={{ minWidth: 100, width: 100, padding: '7px 12px' }}>
+            <div style={{ minWidth: 160, width: 160, padding: '7px 12px' }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)' }}>ACTIONS</span>
             </div>
           </div>
@@ -1192,14 +1330,22 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
               >
                 {/* Checkbox + row num */}
                 <div style={{ width: 44, minWidth: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--border-s)', background: 'var(--s2)', position: 'sticky', left: 0, zIndex: 1, gap: 4 }}>
-                  <input type="checkbox" className="cb" checked={isSel} onChange={() => {}} onClick={e => e.stopPropagation()} />
+                  <input
+                    type="checkbox"
+                    className="cb"
+                    checked={isSel}
+                    onChange={() => setSelected(current => current.includes(row.id) ? current.filter(id => id !== row.id) : [...current, row.id])}
+                    onClick={e => e.stopPropagation()}
+                  />
                   <span style={{ fontSize: 10, color: 'var(--t4)', fontFamily: 'var(--mono)' }}>{ri + 1}</span>
                 </div>
                 {COLS.map(col => {
                   const val = getVal(row, col.field)
                   return (
                     <div key={col.key} style={{ minWidth: col.w, width: col.w, padding: '0 12px', height: 38, display: 'flex', alignItems: 'center', borderRight: '1px solid var(--border-s)', overflow: 'hidden' }}>
-                      {col.badge && val ? (
+                      {col.field === 'contact' && row.contactMissing ? (
+                        <span style={{ fontSize: 11.5, color: 'var(--amber, #D97706)', fontStyle: 'italic' }}>No contact yet</span>
+                      ) : col.badge && val ? (
                         <Badge status={val as BadgeStatus} />
                       ) : col.mono ? (
                         <span className="mono truncate" style={{ fontSize: 12, color: col.field === 'emailAddr' ? 'var(--brand)' : 'var(--t2)' }}>{val || <span style={{ color: 'var(--border)' }}>—</span>}</span>
@@ -1211,10 +1357,12 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                     </div>
                   )
                 })}
-                <div style={{ minWidth: 100, width: 100, padding: '0 12px', display: 'flex', alignItems: 'center' }}>
-                  {mode === 'prospect' && (
-                    <Btn variant="ghost" sm style={{ color: 'var(--brand)' }} onClick={(e) => { e.stopPropagation(); handleConvert(row.id); }}>→ Warm</Btn>
-                  )}
+                <div style={{ minWidth: 160, width: 160, padding: '0 8px', display: 'flex', alignItems: 'center', gap: 2 }}>
+                  {mode === 'prospect'
+                    ? <Btn variant="ghost" sm style={{ color: 'var(--brand)' }} onClick={(e) => { e.stopPropagation(); handleConvert(row.id); }}>→ Warm</Btn>
+                    : <Btn variant="ghost" sm style={{ color: 'var(--brand)' }} onClick={(e) => { e.stopPropagation(); handleCreateInquiry(row.id); }}>Inquiry</Btn>
+                  }
+                  <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={(e) => { e.stopPropagation(); handleRemove(row.id); }}>Remove</Btn>
                 </div>
               </div>
             )
@@ -1224,13 +1372,22 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 
       {/* Footer */}
       <div style={{ padding: '7px 20px', background: 'var(--s2)', borderTop: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11.5, color: 'var(--t4)', flexShrink: 0 }}>
-        <span>Showing {filtered.length} of {PROSPECTS.length} records</span>
+        <span>Showing {filtered.length} of {prospectsData.length} active records</span>
         <div style={{ display: 'flex', gap: 4 }}>
           {['Compact', 'Standard', 'Comfortable'].map(d => (
             <button key={d} className="btn btn-ghost btn-xs" style={{ fontWeight: d === 'Standard' ? 600 : 400, color: d === 'Standard' ? 'var(--brand)' : undefined }}>{d}</button>
           ))}
         </div>
       </div>
+      {importMode && (
+        <ProspectImportDialog
+          key={importMode}
+          open
+          initialMode={importMode}
+          onClose={() => setImportMode(null)}
+          onImported={() => setRevision(value => value + 1)}
+        />
+      )}
     </div>
   )
 }
@@ -1238,33 +1395,56 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 // ─── Inquiry List ─────────────────────────────────────────────────────────────
 
 const InquiryList = () => {
-  const INQUIRIES = useInquiries()
+  const [revision, setRevision] = useState(0)
+  const [showNewInquiry, setShowNewInquiry] = useState(false)
+  const [quotationInquiryId, setQuotationInquiryId] = useState<string | null>(null)
+  const INQUIRIES = useInquiries(revision)
+  const warmLeads = useWarmLeads(revision)
   const [tab, setTab] = useState('All')
   const [lookup, setLookup] = useState('')
   const tabs = ['All', 'New', 'Quotation Required', 'Awaiting Response', 'Negotiating', 'Converted', 'Lost']
 
-  const filtered = tab === 'All' ? INQUIRIES : INQUIRIES.filter(r => r.status === tab || (tab === 'Converted' && r.status === 'Converted to Sale'))
+  const filtered = INQUIRIES.filter(r => {
+    const tabMatch = tab === 'All' || r.status === tab || (tab === 'Converted' && r.status === 'Converted to Sale')
+    const term = lookup.trim().toLowerCase()
+    return tabMatch && (!term || [r.company, r.contact, r.ref, r.category].some(value => String(value).toLowerCase().includes(term)))
+  })
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {showNewInquiry && (
+        <NewInquiryDialog
+          warmLeads={warmLeads as WarmLeadOption[]}
+          onClose={() => setShowNewInquiry(false)}
+          onSaved={() => setRevision(value => value + 1)}
+        />
+      )}
+      {quotationInquiryId && (
+        <QuotationDialog
+          inquiries={INQUIRIES as InquiryOption[]}
+          initialId={quotationInquiryId}
+          onClose={() => setQuotationInquiryId(null)}
+          onSaved={() => setRevision(value => value + 1)}
+        />
+      )}
       {/* Lookup bar */}
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-s)', background: 'var(--ws)', flexShrink: 0 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Quick Contact Lookup</div>
         <div style={{ display: 'flex', gap: 8, maxWidth: 480 }}>
           <input className="inp sm" placeholder="Enter phone number or email address…" value={lookup} onChange={e => setLookup(e.target.value)} style={{ flex: 1 }} />
           <Btn variant="primary" sm><Ic n={I.search} size={13} /> Lookup</Btn>
-          <Btn variant="secondary" sm><Ic n={I.plus} size={13} /> New Inquiry</Btn>
+          <Btn variant="secondary" sm onClick={() => setShowNewInquiry(true)}><Ic n={I.plus} size={13} /> New Inquiry</Btn>
         </div>
       </div>
 
       {/* Status cards */}
       <div className="status-strip" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
         {[
-          { label: 'New Inquiries', val: 0, color: '#315EF6' },
-          { label: 'Need Quotation', val: 0, color: '#D97706' },
-          { label: 'Awaiting Response', val: 0, color: '#7C3AED' },
-          { label: 'Negotiating', val: 0, color: '#EA580C' },
-          { label: 'Converted', val: 0, color: '#059669' },
+          { label: 'New Inquiries', val: INQUIRIES.filter(r => ['New', 'Under Review'].includes(r.status)).length, color: '#315EF6' },
+          { label: 'Need Quotation', val: INQUIRIES.filter(r => r.status === 'Quotation Required').length, color: '#D97706' },
+          { label: 'Awaiting Response', val: INQUIRIES.filter(r => r.status === 'Awaiting Response').length, color: '#7C3AED' },
+          { label: 'Negotiating', val: INQUIRIES.filter(r => r.status === 'Negotiating').length, color: '#EA580C' },
+          { label: 'Converted', val: INQUIRIES.filter(r => ['Converted', 'Converted to Sale'].includes(r.status)).length, color: '#059669' },
         ].map(s => (
           <div key={s.label} className="status-card" style={{ background: s.color }}>
             <div className="sc-label">{s.label}</div>
@@ -1285,7 +1465,7 @@ const InquiryList = () => {
       <div className="toolbar">
         <div className="search-field">
           <Ic n={I.search} size={13} />
-          <input placeholder="Search inquiries…" />
+          <input placeholder="Search inquiries…" value={lookup} onChange={e => setLookup(e.target.value)} />
         </div>
         <select className="sel"><option>All Channels</option><option>Phone</option><option>Email</option><option>SMS</option></select>
         <select className="sel"><option>All PICs</option></select>
@@ -1302,7 +1482,7 @@ const InquiryList = () => {
             <tr>
               <th className="col-check"><input type="checkbox" className="cb" /></th>
               <th>Inquiry #</th><th>Date / Time</th><th>Channel</th><th>Company</th><th>Contact</th>
-              <th>Category</th><th>Size</th><th className="r">Qty</th><th>Status</th><th>PIC</th>
+              <th>Category</th><th>Size</th><th className="r">Qty</th><th>Needed By</th><th>Status</th><th>PIC</th>
               <th className="col-actions">Actions</th>
             </tr>
           </thead>
@@ -1317,7 +1497,7 @@ const InquiryList = () => {
                 </td>
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5 }}>
-                    <Ic n={{ Phone: I.phone, Email: I.mail, SMS: I.inquiry, RingCentral: I.phone }[row.channel] || I.inquiry} size={12} style={{ color: 'var(--t3)' }} />
+                    <Ic n={( { Phone: I.phone, Email: I.mail, SMS: I.inquiry, RingCentral: I.phone } as Record<string, string>)[String(row.channel)] || I.inquiry} size={12} style={{ color: 'var(--t3)' }} />
                     {row.channel}
                   </div>
                 </td>
@@ -1326,12 +1506,13 @@ const InquiryList = () => {
                 <td style={{ fontSize: 12 }}>{row.category}</td>
                 <td className="mono">{row.size}</td>
                 <td className="r mono bold">{row.qty}</td>
+                <td className="mono">{row.neededBy}</td>
                 <td><Badge status={row.status as BadgeStatus} /></td>
                 <td><ChipPIC label={row.pic} /></td>
                 <td className="col-actions">
                   <div className="row-actions">
                     <Btn variant="ghost" sm>View</Btn>
-                    <Btn variant="ghost" sm style={{ color: 'var(--purple)' }}>→ Quote</Btn>
+                    <Btn variant="ghost" sm style={{ color: 'var(--purple)' }} onClick={() => setQuotationInquiryId(row.id)}>→ Quote</Btn>
                   </div>
                 </td>
               </tr>
@@ -1346,17 +1527,48 @@ const InquiryList = () => {
 // ─── Quotation List ───────────────────────────────────────────────────────────
 
 const QuotationList = () => {
-  const quotes = useQuotations()
+  const [revision, setRevision] = useState(0)
+  const [showQuotation, setShowQuotation] = useState(false)
+  const [saleQuotationId, setSaleQuotationId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState('')
+  const quotes = useQuotations(revision)
+  const inquiries = useInquiries(revision)
+
+  const acceptQuotation = async (id: string) => {
+    setActionError('')
+    try {
+      await api.patch(`/deals/quotations/${id}/status`, { status: 'Accepted' })
+      setRevision(value => value + 1)
+    } catch (error: any) {
+      setActionError(error.response?.data?.error?.message ?? error.message ?? 'Could not accept the quotation.')
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {showQuotation && (
+        <QuotationDialog
+          inquiries={inquiries as InquiryOption[]}
+          onClose={() => setShowQuotation(false)}
+          onSaved={() => setRevision(value => value + 1)}
+        />
+      )}
+      {saleQuotationId && (
+        <SaleDialog
+          quotations={quotes as QuotationOption[]}
+          initialId={saleQuotationId}
+          onClose={() => setSaleQuotationId(null)}
+          onSaved={() => setRevision(value => value + 1)}
+        />
+      )}
       <div className="status-strip" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
         {[
-          { label: 'Draft', val: 0, color: '#6B7280' },
-          { label: 'Sent', val: 0, color: '#315EF6' },
-          { label: 'Viewed', val: 0, color: '#7C3AED' },
-          { label: 'Accepted', val: 0, color: '#059669' },
-          { label: 'Rejected', val: 0, color: '#DC2626' },
-          { label: 'Converted', val: 0, color: '#0D9488' },
+          { label: 'Draft', val: quotes.filter(q => q.status === 'Draft').length, color: '#6B7280' },
+          { label: 'Sent', val: quotes.filter(q => q.status === 'Sent').length, color: '#315EF6' },
+          { label: 'Viewed', val: quotes.filter(q => q.status === 'Viewed').length, color: '#7C3AED' },
+          { label: 'Accepted', val: quotes.filter(q => q.status === 'Accepted').length, color: '#059669' },
+          { label: 'Rejected', val: quotes.filter(q => q.status === 'Rejected').length, color: '#DC2626' },
+          { label: 'Converted', val: quotes.filter(q => q.status === 'Converted').length, color: '#0D9488' },
         ].map(s => (
           <div key={s.label} className="status-card" style={{ background: s.color }}>
             <div className="sc-label">{s.label}</div><div className="sc-value">{s.val}</div>
@@ -1369,9 +1581,10 @@ const QuotationList = () => {
         <select className="sel"><option>All PICs</option></select>
         <div className="toolbar-right">
           <Btn variant="ghost" sm onClick={() => exportToCSV(quotes, 'quotations')}><Ic n={I.export} size={13} /> Export</Btn>
-          <Btn variant="primary" sm><Ic n={I.plus} size={13} /> Create Quotation</Btn>
+          <Btn variant="primary" sm onClick={() => setShowQuotation(true)}><Ic n={I.plus} size={13} /> Create Quotation</Btn>
         </div>
       </div>
+      {actionError && <div style={{ margin: '0 20px 10px', padding: 9, borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12 }}>{actionError}</div>}
       <div className="table-wrap">
         <table className="crm">
           <thead><tr>
@@ -1402,7 +1615,8 @@ const QuotationList = () => {
                 <td className="col-actions">
                   <div className="row-actions">
                     <Btn variant="ghost" sm>View</Btn>
-                    {q.status === 'Accepted' && <Btn variant="ghost" sm style={{ color: 'var(--green)' }}>→ Sale</Btn>}
+                    {['Draft', 'Sent', 'Viewed'].includes(q.status) && <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => acceptQuotation(q.id)}>Accept</Btn>}
+                    {q.status === 'Accepted' && <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => setSaleQuotationId(q.id)}>→ Sale</Btn>}
                   </div>
                 </td>
               </tr>
@@ -1417,7 +1631,10 @@ const QuotationList = () => {
 // ─── Sales Tracker ────────────────────────────────────────────────────────────
 
 const SalesTracker = () => {
-  const SALES = useSales()
+  const [revision, setRevision] = useState(0)
+  const [showSale, setShowSale] = useState(false)
+  const SALES = useSales(revision)
+  const quotations = useQuotations(revision)
   const totalBuy = SALES.reduce((s, r) => s + r.totalBuy, 0)
   const totalSell = SALES.reduce((s, r) => s + r.totalSell, 0)
   const totalProfit = SALES.reduce((s, r) => s + r.profit, 0)
@@ -1425,6 +1642,13 @@ const SalesTracker = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {showSale && (
+        <SaleDialog
+          quotations={quotations as QuotationOption[]}
+          onClose={() => setShowSale(false)}
+          onSaved={() => setRevision(value => value + 1)}
+        />
+      )}
       {/* Financial KPI strip */}
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-s)', display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, flexShrink: 0 }}>
         {[
@@ -1432,7 +1656,7 @@ const SalesTracker = () => {
           { label: 'Buying Cost', val: `$${totalBuy.toLocaleString()}`, color: 'var(--t3)', fmt: false },
           { label: 'Total Revenue', val: `$${totalSell.toLocaleString()}`, color: 'var(--brand)', fmt: false },
           { label: 'Gross Profit', val: `$${totalProfit.toLocaleString()}`, color: 'var(--green)', fmt: false },
-          { label: 'Avg Margin', val: `${(totalProfit / totalSell * 100).toFixed(1)}%`, color: '#0D9488', fmt: false },
+          { label: 'Avg Margin', val: `${(totalSell ? totalProfit / totalSell * 100 : 0).toFixed(1)}%`, color: '#0D9488', fmt: false },
         ].map(k => (
           <div key={k.label} style={{ textAlign: 'center', padding: '8px 0', borderRight: '1px solid var(--border-s)' }}>
             <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{k.label}</div>
@@ -1448,7 +1672,7 @@ const SalesTracker = () => {
         <select className="sel"><option>This Month</option><option>Last Month</option><option>All Time</option></select>
         <div className="toolbar-right">
           <Btn variant="ghost" sm onClick={() => exportToCSV(SALES, 'sales')}><Ic n={I.export} size={13} /> Export</Btn>
-          <Btn variant="primary" sm><Ic n={I.plus} size={13} /> Record Sale</Btn>
+          <Btn variant="primary" sm onClick={() => setShowSale(true)}><Ic n={I.plus} size={13} /> Record Sale</Btn>
         </div>
       </div>
 
@@ -1498,7 +1722,7 @@ const SalesTracker = () => {
               <td className="r cost-cell" style={{ fontWeight: 700 }}>${totalBuy.toLocaleString()}</td>
               <td className="r revenue-cell" style={{ fontWeight: 700 }}>${totalSell.toLocaleString()}</td>
               <td className="r profit-cell" style={{ fontWeight: 800, fontSize: 14 }}>${totalProfit.toLocaleString()}</td>
-              <td className="r mono" style={{ fontWeight: 700, color: 'var(--green)' }}>{(totalProfit / totalSell * 100).toFixed(1)}%</td>
+              <td className="r mono" style={{ fontWeight: 700, color: 'var(--green)' }}>{(totalSell ? totalProfit / totalSell * 100 : 0).toFixed(1)}%</td>
               <td colSpan={3} />
             </tr>
           </tfoot>
@@ -1826,12 +2050,31 @@ const DailyTasks = () => (
 
 const RemovedSheet = () => {
   const [showPaste, setShowPaste] = useState(false)
-  const data = [
-    { date: 'Jul 28', type: 'Phone and Email', phone: '+1-206-555-0088', email: '', co: 'Pacific Equipment Rentals', contact: 'Linda Chang', reason: 'Do Not Contact', channel: 'SMS', by: 'James Carter', prevStatus: 'Proceed', currStatus: 'Removed' },
-    { date: 'Jul 26', type: 'Email Only', phone: '', email: 'bounce@oldco.net', co: 'Sunset Trading Co', contact: 'Mike Ward', reason: 'Repeated Bounce', channel: 'Email', by: 'System', prevStatus: 'Proceed', currStatus: 'Removed' },
-    { date: 'Jul 25', type: 'Phone Only', phone: '+1-218-555-0998', email: '', co: 'Ironwood Freight', contact: 'Pat Larson', reason: 'Invalid Phone Number', channel: 'SMS', by: 'System', prevStatus: 'Proceed', currStatus: 'Removed' },
-    { date: 'Jul 23', type: 'Entire Contact', phone: '+1-907-555-0142', email: 'jake@alaska-ops.com', co: 'Alaska Ops LLC', contact: 'Jake Tremblay', reason: 'Opted Out', channel: 'SMS', by: 'Maria Santos', prevStatus: 'Proceed', currStatus: 'Removed' },
-  ]
+  const [data, setData] = useState<any[]>([])
+  const [search, setSearch] = useState('')
+  useEffect(() => {
+    api.get('/leads/removed').then(response => {
+      if (response.data.success) setData((response.data.data || []).map((row: any) => ({
+        id: row.id,
+        date: new Date(row.created_at).toLocaleDateString(),
+        type: row.identity_type,
+        phone: row.identity_type === 'phone' ? row.normalized_value : row.contacts?.phone_direct || row.contacts?.phone_2 || '',
+        email: row.identity_type === 'email' ? row.normalized_value : row.contacts?.email_active || row.contacts?.email_2 || '',
+        co: row.companies?.name || '',
+        contact: `${row.contacts?.first_name || ''} ${row.contacts?.last_name || ''}`.trim(),
+        reason: row.reason,
+        channel: row.source,
+        by: row.profiles?.full_name || row.profiles?.email || 'System',
+        prevStatus: 'Proceed',
+        currStatus: 'Removed',
+      })))
+    }).catch(console.error)
+  }, [])
+  const filtered = data.filter(row => {
+    const term = search.trim().toLowerCase()
+    return !term || [row.co, row.contact, row.phone, row.email, row.reason]
+      .some(value => String(value || '').toLowerCase().includes(term))
+  })
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ padding: '10px 20px', background: '#FFF1F2', borderBottom: '1px solid #FECDD3', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
@@ -1839,7 +2082,7 @@ const RemovedSheet = () => {
         <span style={{ fontSize: 12.5, fontWeight: 600, color: '#9F1239' }}>All records here are excluded from call, text, and email outreach automatically.</span>
       </div>
       <div className="toolbar">
-        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search removed records…" /></div>
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search removed records…" value={search} onChange={e => setSearch(e.target.value)} /></div>
         <select className="sel"><option>All Types</option><option>Phone Only</option><option>Email Only</option><option>Entire Contact</option></select>
         <select className="sel"><option>All Reasons</option><option>Opted Out</option><option>Bounced</option></select>
         <div className="toolbar-right">
@@ -1857,8 +2100,8 @@ const RemovedSheet = () => {
             <th>Prev Status</th><th>Curr Status</th><th>Added By</th>
           </tr></thead>
           <tbody>
-            {data.map((r, i) => (
-              <tr key={i} style={{ background: 'var(--red-bg)' }}>
+            {filtered.map((r, i) => (
+              <tr key={r.id || i} style={{ background: 'var(--red-bg)' }}>
                 <td className="col-check"><input type="checkbox" className="cb" /></td>
                 <td className="mono" style={{ fontSize: 12 }}>{r.date}</td>
                 <td><span className="badge b-red">{r.type}</span></td>
@@ -2207,7 +2450,61 @@ const ServiceTerritories = () => (
   </div>
 )
 
-const SystemSettings = () => (
+type GoogleConnectionStatus = {
+  configured: boolean
+  connected: boolean
+  email: string | null
+}
+
+const SystemSettings = () => {
+  const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null)
+  const [googleBusy, setGoogleBusy] = useState(false)
+  const [googleError, setGoogleError] = useState('')
+  const [callbackStatus] = useState(() => new URLSearchParams(window.location.search).get('google_sync'))
+
+  const loadGoogleStatus = useCallback(async () => {
+    try {
+      const response = await api.get('/auth/google/status')
+      setGoogleStatus(response.data.data)
+      setGoogleError('')
+    } catch (error: any) {
+      setGoogleError(error.response?.data?.error?.message || 'Unable to load the Gmail connection status.')
+    }
+  }, [])
+
+  useEffect(() => {
+    loadGoogleStatus()
+    if (callbackStatus) {
+      window.history.replaceState({}, document.title, window.location.pathname)
+    }
+  }, [callbackStatus, loadGoogleStatus])
+
+  const connectGoogle = async () => {
+    setGoogleBusy(true)
+    setGoogleError('')
+    try {
+      const response = await api.get('/auth/google')
+      window.location.assign(response.data.data.url)
+    } catch (error: any) {
+      setGoogleError(error.response?.data?.error?.message || 'Unable to start Google authorization.')
+      setGoogleBusy(false)
+    }
+  }
+
+  const disconnectGoogle = async () => {
+    setGoogleBusy(true)
+    setGoogleError('')
+    try {
+      await api.delete('/auth/google')
+      await loadGoogleStatus()
+    } catch (error: any) {
+      setGoogleError(error.response?.data?.error?.message || 'Unable to disconnect the Google account.')
+    } finally {
+      setGoogleBusy(false)
+    }
+  }
+
+  return (
   <div className="page-scroll">
     <div className="page-content" style={{ maxWidth: 700 }}>
       <div style={{ marginBottom: 20 }}>
@@ -2218,9 +2515,48 @@ const SystemSettings = () => (
         {/* Integrations */}
         <div className="card" style={{ padding: 20 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)', marginBottom: 14 }}>Integrations</div>
+          {callbackStatus === 'success' && (
+            <div style={{ padding: '10px 12px', marginBottom: 10, borderRadius: 8, background: 'var(--green-bg)', color: 'var(--green-text)', fontSize: 12 }}>
+              Gmail connected successfully.
+            </div>
+          )}
+          {callbackStatus === 'cancelled' && (
+            <div style={{ padding: '10px 12px', marginBottom: 10, borderRadius: 8, background: 'var(--amber-bg)', color: 'var(--amber-text)', fontSize: 12 }}>
+              Google authorization was cancelled.
+            </div>
+          )}
+          {googleError && (
+            <div style={{ padding: '10px 12px', marginBottom: 10, borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 12 }}>
+              {googleError}
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 0', borderBottom: '1px solid var(--border-s)' }}>
+            <div style={{ width: 36, height: 36, borderRadius: 9, background: 'var(--brand-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand)' }}>
+              <Ic n={I.mail} size={15} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>Gmail Outreach</div>
+              <div style={{ fontSize: 12, color: 'var(--t4)' }}>
+                {!googleStatus
+                  ? 'Checking connection...'
+                  : !googleStatus.configured
+                    ? 'Google OAuth credentials are not configured on the backend.'
+                    : googleStatus.connected
+                      ? `Connected as ${googleStatus.email}`
+                      : 'Connect a Google account to send approved prospect outreach.'}
+              </div>
+            </div>
+            {googleStatus?.connected ? (
+              <button type="button" className="btn btn-secondary btn-sm" disabled={googleBusy} onClick={disconnectGoogle}>Disconnect</button>
+            ) : (
+              <button type="button" className="btn btn-primary btn-sm" disabled={googleBusy || !googleStatus?.configured} onClick={connectGoogle}>
+                {googleBusy ? 'Connecting...' : 'Connect'}
+              </button>
+            )}
+          </div>
           {[
-            { name: 'Google Sheets API', status: 'Connected', desc: 'Bidirectional sync · Last sync 2 min ago', color: 'var(--green)' },
-            { name: 'RingCentral', status: 'Connected', desc: 'Phone and SMS outreach · Copy-to-dial enabled', color: 'var(--green)' },
+            { name: 'Google Sheets API', status: 'Planned', desc: 'Bidirectional synchronization is not implemented yet', color: 'var(--t4)' },
+            { name: 'RingCentral', status: 'Planned', desc: 'Phone and SMS integration is not implemented yet', color: 'var(--t4)' },
             { name: 'Excel / CSV Import', status: 'Available', desc: 'Manual import via upload or paste', color: 'var(--brand)' },
           ].map(i => (
             <div key={i.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 0', borderBottom: '1px solid var(--border-s)' }}>
@@ -2257,7 +2593,8 @@ const SystemSettings = () => (
       </div>
     </div>
   </div>
-)
+  )
+}
 
 // ─── Generic placeholder ──────────────────────────────────────────────────────
 
@@ -2273,7 +2610,9 @@ const Placeholder = ({ label }: { label: string }) => (
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>('dashboard')
+  const [screen, setScreen] = useState<Screen>(() =>
+    new URLSearchParams(window.location.search).has('google_sync') ? 'system-settings' : 'dashboard'
+  )
   const [expanded, setExpanded] = useState(false)
   const [isDark, setIsDark] = useState(false)
 

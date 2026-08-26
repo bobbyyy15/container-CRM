@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { LeadController } from '../controllers/lead.controller';
+import { requireRoles } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -7,11 +8,14 @@ const router = Router();
 router.get('/prospects', LeadController.getProspects);
 router.get('/warm-leads', LeadController.getWarmLeads);
 router.get('/inquiries', LeadController.getInquiries);
+router.get('/removed', LeadController.getRemoved);
 
 // Prospect -> Warm Lead
-router.post('/prospects/:prospectId/convert-to-warm-lead', LeadController.convertProspect);
+router.post('/prospects/:prospectId/convert-to-warm-lead', requireRoles('admin', 'manager', 'pic'), LeadController.convertProspect);
 
 // Warm Lead -> Inquiry
-router.post('/warm-leads/:warmLeadId/create-inquiry', LeadController.createInquiry);
+router.post('/warm-leads/:warmLeadId/create-inquiry', requireRoles('admin', 'manager', 'pic'), LeadController.createInquiry);
+
+router.post('/:stage/:entityId/remove', requireRoles('admin', 'manager', 'pic'), LeadController.removeEntry);
 
 export default router;

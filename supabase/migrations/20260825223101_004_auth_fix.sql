@@ -4,11 +4,11 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'profiles' AND column_name = 'username') THEN
         ALTER TABLE public.profiles ADD COLUMN username TEXT UNIQUE;
     END IF;
-    
+
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'profiles' AND column_name = 'email') THEN
         ALTER TABLE public.profiles ADD COLUMN email TEXT UNIQUE;
     END IF;
-    
+
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'profiles' AND column_name = 'full_name') THEN
         ALTER TABLE public.profiles ADD COLUMN full_name TEXT;
     END IF;

@@ -8,7 +8,12 @@ export class ImportController {
     try {
       const payload = BulkImportPayloadSchema.parse(req.body);
       
-      const results = await ImportService.processBulkImport(payload.rows, payload.batch_id);
+      const results = await ImportService.processBulkImport(
+        payload.rows,
+        req.auth!.user.id,
+        payload.batch_id,
+        payload.filename,
+      );
 
       res.json({
         success: true,
@@ -25,9 +30,9 @@ export class ImportController {
   static async getConflicts(req: Request, res: Response) {
     try {
       const { data, error } = await supabaseAdmin
-        .from('import_staging_conflicts')
+        .from('import_rows')
         .select('*')
-        .eq('status', 'pending')
+        .in('status', ['conflict', 'error'])
         .order('created_at', { ascending: false });
 
       if (error) throw error;

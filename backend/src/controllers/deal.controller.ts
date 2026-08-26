@@ -9,7 +9,8 @@ export class DealController {
     try {
       const { data, error } = await supabaseAdmin
         .from('quotations')
-        .select('*, companies(*), contacts(*), quotation_items(*)')
+        .select('*, companies(*), contacts(*), pics(name), quotation_items(*)')
+        .not('status', 'in', '(Converted,Rejected)')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -23,10 +24,11 @@ export class DealController {
     try {
       const { data, error } = await supabaseAdmin
         .from('sales')
-        .select('*, companies(*), quotations(*)')
+        .select('*, companies(*), pics(name), quotations(*, contacts(*), quotation_items(*))')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
+
       res.json({ success: true, data });
     } catch (error: any) {
       res.status(500).json({ success: false, error: { message: error.message } });
@@ -36,7 +38,7 @@ export class DealController {
   static async createQuotation(req: Request, res: Response) {
     try {
       const payload = CreateQuotationSchema.parse(req.body);
-      const userId = (req as any).user.id;
+      const userId = req.auth!.user.id;
       const quote = await DealService.createQuotation(payload, userId);
       res.status(201).json({ success: true, data: quote });
     } catch (error: any) {
@@ -46,18 +48,11 @@ export class DealController {
 
   static async updateQuotationStatus(req: Request, res: Response) {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const payload = UpdateQuotationStatusSchema.parse(req.body);
-      
-      const { data, error } = await supabaseAdmin
-        .from('quotations')
-        .update({ status: payload.status })
-        .eq('id', id)
-        .select()
-        .single();
-        
-      if (error) throw error;
-      res.json({ success: true, data });
+      const userId = req.auth!.user.id;
+      const quote = await DealService.updateQuotationStatus(id, payload, userId);
+      res.json({ success: true, data: quote });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });
     }
@@ -65,9 +60,9 @@ export class DealController {
 
   static async convertToSale(req: Request, res: Response) {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const payload = ConvertToSaleSchema.parse(req.body);
-      const userId = (req as any).user.id;
+      const userId = req.auth!.user.id;
       const sale = await DealService.convertToSale(id, payload, userId);
       res.status(201).json({ success: true, data: sale });
     } catch (error: any) {
