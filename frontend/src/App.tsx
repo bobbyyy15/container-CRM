@@ -57,6 +57,7 @@ const mapPipelineRow = (p: any) => ({
   city: p.companies?.address_city || '',
   company: p.companies?.name || '',
   contact: p.contacts ? `${p.contacts.first_name || ''} ${p.contacts.last_name || ''}`.trim() : '',
+  contactMissing: !p.contact_id,
   phone: p.contacts?.phone_direct || '',
   phone2: p.contacts?.phone_2 || '',
   emailAddr: p.contacts?.email_active || '',
@@ -1122,6 +1123,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [category, setCategory] = useState('')
   const [country, setCountry] = useState('')
   const [industry, setIndustry] = useState('')
+  const [missingContactOnly, setMissingContactOnly] = useState(false)
   const [view, setView] = useState('grid')
   const [tab, setTab] = useState('Standard A–Q View')
 
@@ -1179,12 +1181,14 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
       && (!category || r.cat === category)
       && (!country || r.country === country)
       && (!industry || r.industry === industry)
+      && (!missingContactOnly || r.contactMissing)
   })
 
   const proceed = filtered.filter(r => r.cat === 'Proceed').length
   const callElig = filtered.filter(r => r.cat === 'Proceed' && (r.sms === 'Call/Text' || r.sms === 'Calls Only')).length
   const textElig = filtered.filter(r => r.cat === 'Proceed' && (r.sms === 'Call/Text' || r.sms === 'Text Only')).length
   const emailElig = filtered.filter(r => r.cat === 'Proceed' && r.emailAddr).length
+  const missingContact = prospectsData.filter(r => r.contactMissing).length
 
   const COLS = [
     { key: 'A', label: 'Date Added', field: 'added', w: 108 },
@@ -1233,11 +1237,26 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           { label: 'Text Eligible', val: textElig, color: 'var(--purple)' },
           { label: 'Email Eligible', val: emailElig, color: 'var(--brand)' },
         ].map((s, i) => (
-          <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 14, borderRight: i < 4 ? '1px solid var(--border-s)' : 'none' }}>
+          <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 14, borderRight: '1px solid var(--border-s)' }}>
             <span style={{ fontSize: 18, fontWeight: 700, color: s.color, fontFamily: 'var(--mono)' }}>{s.val}</span>
             <span style={{ fontSize: 11.5, color: 'var(--t3)' }}>{s.label}</span>
           </div>
         ))}
+        {mode === 'prospect' && missingContact > 0 && (
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setMissingContactOnly(value => !value)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '2px 10px', borderRadius: 999,
+              background: missingContactOnly ? 'var(--amber-bg, #FEF3C7)' : 'transparent',
+              border: '1px solid var(--amber, #D97706)', color: 'var(--amber, #D97706)',
+            }}
+            title="Companies imported without a named contact yet"
+          >
+            <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--mono)' }}>{missingContact}</span>
+            <span style={{ fontSize: 11.5 }}>Missing Contact{missingContactOnly ? ' — showing only these' : ''}</span>
+          </button>
+        )}
       </div>
 
       {/* Toolbar */}
@@ -1324,7 +1343,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                   const val = getVal(row, col.field)
                   return (
                     <div key={col.key} style={{ minWidth: col.w, width: col.w, padding: '0 12px', height: 38, display: 'flex', alignItems: 'center', borderRight: '1px solid var(--border-s)', overflow: 'hidden' }}>
-                      {col.badge && val ? (
+                      {col.field === 'contact' && row.contactMissing ? (
+                        <span style={{ fontSize: 11.5, color: 'var(--amber, #D97706)', fontStyle: 'italic' }}>No contact yet</span>
+                      ) : col.badge && val ? (
                         <Badge status={val as BadgeStatus} />
                       ) : col.mono ? (
                         <span className="mono truncate" style={{ fontSize: 12, color: col.field === 'emailAddr' ? 'var(--brand)' : 'var(--t2)' }}>{val || <span style={{ color: 'var(--border)' }}>—</span>}</span>
