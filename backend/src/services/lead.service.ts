@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../config/supabase';
+import { CreateInquiryPayload } from '../schemas/lead.schema';
 
 export class LeadService {
   static async convertProspectToWarmLead(prospectId: string, actorId: string) {
@@ -13,12 +14,16 @@ export class LeadService {
     return data;
   }
 
-  static async createInquiry(warmLeadId: string, actorId: string, requirements?: string) {
+  static async createInquiry(payload: CreateInquiryPayload, actorId: string) {
     const { data, error } = await supabaseAdmin
       .rpc('create_inquiry_from_warm_lead', {
-        p_warm_lead_id: warmLeadId,
+        p_warm_lead_id: payload.warmLeadId,
         p_actor_id: actorId,
-        p_requirements: requirements ?? null,
+        p_container_size_id: payload.containerSizeId,
+        p_container_condition_id: payload.containerConditionId,
+        p_quantity: payload.quantity,
+        p_needed_by_date: payload.neededByDate ?? null,
+        p_requirements: payload.requirements ?? null,
       })
       .single();
 

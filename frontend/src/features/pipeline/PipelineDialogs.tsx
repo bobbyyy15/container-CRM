@@ -1,5 +1,17 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../../lib/api'
+
+type CatalogOption = { id: string; name: string }
+
+const useCatalog = (path: string) => {
+  const [options, setOptions] = useState<CatalogOption[]>([])
+  useEffect(() => {
+    let cancelled = false
+    api.get(path).then(response => { if (!cancelled) setOptions(response.data.data ?? []) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [path])
+  return options
+}
 
 export type WarmLeadOption = { id: string; company: string; contact: string }
 export type InquiryOption = { id: string; ref: string; company: string; contact: string }
@@ -37,18 +49,33 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   onClose: () => void
   onSaved: () => void
 }) => {
+  const sizes = useCatalog('/catalog/sizes')
+  const conditions = useCatalog('/catalog/conditions')
   const [warmLeadId, setWarmLeadId] = useState(initialId ?? warmLeads[0]?.id ?? '')
+  const [containerSizeId, setContainerSizeId] = useState('')
+  const [containerConditionId, setContainerConditionId] = useState('')
+  const [quantity, setQuantity] = useState(1)
+  const [neededByDate, setNeededByDate] = useState('')
   const [requirements, setRequirements] = useState('')
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
 
+  useEffect(() => { if (!containerSizeId && sizes.length) setContainerSizeId(sizes[0].id) }, [sizes, containerSizeId])
+  useEffect(() => { if (!containerConditionId && conditions.length) setContainerConditionId(conditions[0].id) }, [conditions, containerConditionId])
+
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (!warmLeadId) return
+    if (!warmLeadId || !containerSizeId || !containerConditionId) return
     setWorking(true)
     setError('')
     try {
-      await api.post(`/leads/warm-leads/${warmLeadId}/create-inquiry`, { requirements: requirements.trim() || undefined })
+      await api.post(`/leads/warm-leads/${warmLeadId}/create-inquiry`, {
+        containerSizeId,
+        containerConditionId,
+        quantity,
+        neededByDate: neededByDate || undefined,
+        requirements: requirements.trim() || undefined,
+      })
       onSaved()
       onClose()
     } catch (caught) {
@@ -61,24 +88,44 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   return (
     <Modal title="Create inquiry" description="An inquiry must come from an active warm lead." onClose={onClose}>
       <form onSubmit={submit}>
-        <div className="modal-body" style={{ display: 'grid', gap: 12 }}>
+        <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           {warmLeads.length ? <>
-            <label style={{ fontSize: 12, fontWeight: 600 }}>Warm lead</label>
-            <select className="inp" value={warmLeadId} onChange={event => setWarmLeadId(event.target.value)} required>
+            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Warm lead</label>
+            <select className="inp" style={{ gridColumn: '1 / -1' }} value={warmLeadId} onChange={event => setWarmLeadId(event.target.value)} required>
               {warmLeads.map(lead => <option key={lead.id} value={lead.id}>{lead.company} — {lead.contact}</option>)}
             </select>
-            <label style={{ fontSize: 12, fontWeight: 600 }}>Requirements</label>
-            <textarea className="inp" rows={4} value={requirements} onChange={event => setRequirements(event.target.value)} placeholder="Container type, size, quantity, location, timing…" />
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Container size</label>
+              <select className="inp" value={containerSizeId} onChange={event => setContainerSizeId(event.target.value)} required>
+                {sizes.map(size => <option key={size.id} value={size.id}>{size.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Condition</label>
+              <select className="inp" value={containerConditionId} onChange={event => setContainerConditionId(event.target.value)} required>
+                {conditions.map(condition => <option key={condition.id} value={condition.id}>{condition.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Quantity</label>
+              <input className="inp" type="number" min="1" value={quantity} onChange={event => setQuantity(Number(event.target.value))} required />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Needed by</label>
+              <input className="inp" type="date" value={neededByDate} onChange={event => setNeededByDate(event.target.value)} />
+            </div>
+            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Requirements</label>
+            <textarea className="inp" style={{ gridColumn: '1 / -1' }} rows={4} value={requirements} onChange={event => setRequirements(event.target.value)} placeholder="Location, logistics, follow-up notes…" />
           </> : (
-            <div style={{ padding: 12, background: 'var(--brand-bg)', borderRadius: 8, fontSize: 12 }}>
+            <div style={{ gridColumn: '1 / -1', padding: 12, background: 'var(--brand-bg)', borderRadius: 8, fontSize: 12 }}>
               There are no active warm leads. Convert a Prospect to Warm Lead first.
             </div>
           )}
-          <ErrorMessage message={error} />
+          <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={working || !warmLeadId}>{working ? 'Creating…' : 'Create Inquiry'}</button>
+          <button className="btn btn-primary" disabled={working || !warmLeadId || !containerSizeId || !containerConditionId}>{working ? 'Creating…' : 'Create Inquiry'}</button>
         </div>
       </form>
     </Modal>

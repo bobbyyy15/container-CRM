@@ -7,7 +7,11 @@ export const ConvertProspectSchema = z.object({
 
 export const CreateInquirySchema = z.object({
   warmLeadId: z.string().uuid(),
-  requirements: z.string().optional(),
+  containerSizeId: z.string().uuid(),
+  containerConditionId: z.string().uuid(),
+  quantity: z.number().int().min(1),
+  neededByDate: z.string().date().optional(),
+  requirements: z.string().trim().max(2000).optional(),
 });
 
 export const LeadListQuerySchema = z.object({
@@ -25,3 +29,5 @@ export const RemovePipelineEntrySchema = z.object({
   entityId: z.string().uuid(),
   reason: z.string().trim().min(3).max(500),
 });
+
+export type CreateInquiryPayload = z.infer<typeof CreateInquirySchema>;

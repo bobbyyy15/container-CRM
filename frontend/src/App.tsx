@@ -91,8 +91,10 @@ const useInquiries = (revision = 0) => {
           company: row.companies?.name || '',
           contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
           category: row.requirements || 'To be qualified',
-          size: '—',
-          qty: '—',
+          size: row.container_sizes?.name || '—',
+          condition: row.container_conditions?.name || '—',
+          qty: row.quantity ?? '—',
+          neededBy: row.needed_by_date ? new Date(row.needed_by_date).toLocaleDateString() : '—',
           status: row.status || 'Under Review',
           pic: row.pics?.name || 'Unassigned',
         }
@@ -1459,7 +1461,7 @@ const InquiryList = () => {
             <tr>
               <th className="col-check"><input type="checkbox" className="cb" /></th>
               <th>Inquiry #</th><th>Date / Time</th><th>Channel</th><th>Company</th><th>Contact</th>
-              <th>Category</th><th>Size</th><th className="r">Qty</th><th>Status</th><th>PIC</th>
+              <th>Category</th><th>Size</th><th className="r">Qty</th><th>Needed By</th><th>Status</th><th>PIC</th>
               <th className="col-actions">Actions</th>
             </tr>
           </thead>
@@ -1483,6 +1485,7 @@ const InquiryList = () => {
                 <td style={{ fontSize: 12 }}>{row.category}</td>
                 <td className="mono">{row.size}</td>
                 <td className="r mono bold">{row.qty}</td>
+                <td className="mono">{row.neededBy}</td>
                 <td><Badge status={row.status as BadgeStatus} /></td>
                 <td><ChipPIC label={row.pic} /></td>
                 <td className="col-actions">

@@ -16,9 +16,12 @@ const listActiveLeads = async (
   req: Request,
 ) => {
   const query = LeadListQuerySchema.parse(req.query);
+  const select = table === 'inquiries'
+    ? '*, companies(*), contacts(*), pics(name), container_sizes(id, name), container_conditions(id, name)'
+    : '*, companies(*), contacts(*), pics(name)';
   let dbQuery = supabaseAdmin
     .from(table)
-    .select('*, companies(*), contacts(*), pics(name)')
+    .select(select)
     .order('created_at', { ascending: false })
     .limit(5000);
 
@@ -116,13 +119,11 @@ export class LeadController {
   static async createInquiry(req: Request, res: Response) {
     try {
       const warmLeadId = req.params.warmLeadId as string;
-      const { requirements } = req.body;
-
-      CreateInquirySchema.parse({ warmLeadId, requirements });
+      const payload = CreateInquirySchema.parse({ ...req.body, warmLeadId });
 
       const actorId = req.auth!.user.id;
 
-      const inquiry = await LeadService.createInquiry(warmLeadId, actorId, requirements);
+      const inquiry = await LeadService.createInquiry(payload, actorId);
 
       res.json({
         success: true,

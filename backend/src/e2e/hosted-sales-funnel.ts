@@ -112,13 +112,34 @@ const run = async () => {
   list = await request(token, `/leads/prospects?search=${encodeURIComponent(email)}`);
   if (list.data.length) throw new Error('Converted prospect remained in the active prospect list');
 
+  const sizes = await request(token, '/catalog/sizes');
+  const conditions = await request(token, '/catalog/conditions');
+  if (!sizes.data.length || !conditions.data.length) throw new Error('Container catalog is not seeded');
+
   const inquiry = await request(token, `/leads/warm-leads/${ids.warmLead}/create-inquiry`, {
     method: 'POST',
-    body: JSON.stringify({ requirements: 'Two 40ft E2E test containers' }),
+    body: JSON.stringify({
+      containerSizeId: sizes.data[0].id,
+      containerConditionId: conditions.data[0].id,
+      quantity: 2,
+      neededByDate: '2026-09-15',
+      requirements: 'Two 40ft E2E test containers',
+    }),
   });
   ids.inquiry = inquiry.data.id;
   list = await request(token, `/leads/warm-leads?search=${encodeURIComponent(email)}`);
   if (list.data.length) throw new Error('Converted warm lead remained in the active warm-lead list');
+
+  const inquiryList = await request(token, `/leads/inquiries?search=${encodeURIComponent(email)}`);
+  const inquiryRow = inquiryList.data[0];
+  if (
+    inquiryRow?.quantity !== 2
+    || inquiryRow?.container_sizes?.id !== sizes.data[0].id
+    || inquiryRow?.container_conditions?.id !== conditions.data[0].id
+    || inquiryRow?.needed_by_date !== '2026-09-15'
+  ) {
+    throw new Error('Inquiry did not persist container size/condition/quantity/needed-by date');
+  }
 
   const rejectedQuotation = await request(token, '/deals/quotations', {
     method: 'POST',
