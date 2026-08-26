@@ -10,6 +10,7 @@ import analyticsRoutes from './routes/analytics.routes';
 import outreachRoutes from './routes/outreach.routes';
 import authRoutes from './routes/auth.routes';
 import catalogRoutes from './routes/catalog.routes';
+import picRoutes from './routes/pic.routes';
 import { requireAuth } from './middleware/auth.middleware';
 import { requestContext } from './middleware/request-context.middleware';
 import { env } from './config/env';
@@ -42,6 +43,7 @@ app.use('/api/v1/deals', dealRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/outreach', outreachRoutes);
 app.use('/api/v1/catalog', catalogRoutes);
+app.use('/api/v1/pics', picRoutes);
 
 // Start Server
 app.listen(env.PORT, () => {

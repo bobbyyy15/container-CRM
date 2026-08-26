@@ -13,6 +13,18 @@ const useCatalog = (path: string) => {
   return options
 }
 
+type PicOption = { id: string; name: string }
+
+const usePics = () => {
+  const [options, setOptions] = useState<PicOption[]>([])
+  useEffect(() => {
+    let cancelled = false
+    api.get('/pics').then(response => { if (!cancelled) setOptions(response.data.data ?? []) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+  return options
+}
+
 export type WarmLeadOption = { id: string; company: string; contact: string }
 export type InquiryOption = { id: string; ref: string; company: string; contact: string }
 export type QuotationOption = { id: string; ref: string; co: string; status: string; qty: number; sellTotal: number }
@@ -51,31 +63,71 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
 }) => {
   const sizes = useCatalog('/catalog/sizes')
   const conditions = useCatalog('/catalog/conditions')
+  const pics = usePics()
+  // A Warm Lead usually starts the chain, but an existing customer/contact can get a fresh
+  // inquiry with no Warm Lead in between at all.
+  const [source, setSource] = useState<'warmLead' | 'manual'>('warmLead')
   const [warmLeadId, setWarmLeadId] = useState(initialId ?? warmLeads[0]?.id ?? '')
+  const [companyName, setCompanyName] = useState('')
+  const [contactPerson, setContactPerson] = useState('')
+  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [stateProvince, setStateProvince] = useState('')
+  const [country, setCountry] = useState('')
+  const [picId, setPicId] = useState('')
   const [containerSizeId, setContainerSizeId] = useState('')
   const [containerConditionId, setContainerConditionId] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [neededByDate, setNeededByDate] = useState('')
+  const [askingPrice, setAskingPrice] = useState('')
   const [requirements, setRequirements] = useState('')
+  const [specialRequirements, setSpecialRequirements] = useState('')
+  const [remarks, setRemarks] = useState('')
+  const [followUpDate, setFollowUpDate] = useState('')
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => { if (!containerSizeId && sizes.length) setContainerSizeId(sizes[0].id) }, [sizes, containerSizeId])
   useEffect(() => { if (!containerConditionId && conditions.length) setContainerConditionId(conditions[0].id) }, [conditions, containerConditionId])
 
+  const canSubmit = containerSizeId && containerConditionId
+    && (source === 'warmLead' ? Boolean(warmLeadId) : Boolean(companyName.trim()))
+
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (!warmLeadId || !containerSizeId || !containerConditionId) return
+    if (!canSubmit) return
     setWorking(true)
     setError('')
     try {
-      await api.post(`/leads/warm-leads/${warmLeadId}/create-inquiry`, {
+      const shared = {
         containerSizeId,
         containerConditionId,
         quantity,
         neededByDate: neededByDate || undefined,
+        askingPrice: askingPrice ? Number(askingPrice) : undefined,
         requirements: requirements.trim() || undefined,
-      })
+        specialRequirements: specialRequirements.trim() || undefined,
+        remarks: remarks.trim() || undefined,
+        followUpDate: followUpDate || undefined,
+      }
+      if (source === 'warmLead') {
+        await api.post(`/leads/warm-leads/${warmLeadId}/create-inquiry`, {
+          ...shared,
+          stateProvince: stateProvince.trim() || undefined,
+          country: country.trim() || undefined,
+        })
+      } else {
+        await api.post('/leads/inquiries', {
+          ...shared,
+          companyName: companyName.trim(),
+          contactPerson: contactPerson.trim() || undefined,
+          phone: phone.trim() || undefined,
+          email: email.trim() || undefined,
+          stateProvince: stateProvince.trim() || undefined,
+          country: country.trim() || undefined,
+          picId: picId || undefined,
+        })
+      }
       onSaved()
       onClose()
     } catch (caught) {
@@ -86,14 +138,51 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   }
 
   return (
-    <Modal title="Create inquiry" description="An inquiry must come from an active warm lead." onClose={onClose}>
+    <Modal title="Create inquiry" description="From a Warm Lead, or directly for an existing contact/customer." onClose={onClose}>
       <form onSubmit={submit}>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          {warmLeads.length ? <>
-            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Warm lead</label>
-            <select className="inp" style={{ gridColumn: '1 / -1' }} value={warmLeadId} onChange={event => setWarmLeadId(event.target.value)} required>
-              {warmLeads.map(lead => <option key={lead.id} value={lead.id}>{lead.company} — {lead.contact}</option>)}
-            </select>
+          <div className="tabs" style={{ gridColumn: '1 / -1', padding: 0 }}>
+            <button type="button" className={`tab${source === 'warmLead' ? ' active' : ''}`} onClick={() => setSource('warmLead')}>From Warm Lead</button>
+            <button type="button" className={`tab${source === 'manual' ? ' active' : ''}`} onClick={() => setSource('manual')}>Manual / Existing Customer</button>
+          </div>
+
+          {source === 'warmLead' ? (
+            warmLeads.length ? (
+              <>
+                <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Warm lead</label>
+                <select className="inp" style={{ gridColumn: '1 / -1' }} value={warmLeadId} onChange={event => setWarmLeadId(event.target.value)} required>
+                  {warmLeads.map(lead => <option key={lead.id} value={lead.id}>{lead.company} — {lead.contact}</option>)}
+                </select>
+              </>
+            ) : (
+              <div style={{ gridColumn: '1 / -1', padding: 12, background: 'var(--brand-bg)', borderRadius: 8, fontSize: 12 }}>
+                There are no active warm leads. Convert a Prospect, add a Warm Lead manually, or switch to "Manual / Existing Customer".
+              </div>
+            )
+          ) : (
+            <>
+              <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Company</label><input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} required /></div>
+              <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Contact person</label><input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} /></div>
+              <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>PIC</label>
+                <select className="inp" value={picId} onChange={event => setPicId(event.target.value)}>
+                  <option value="">Unassigned</option>
+                  {pics.map(pic => <option key={pic.id} value={pic.id}>{pic.name}</option>)}
+                </select>
+              </div>
+              <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Phone</label><input className="inp" value={phone} onChange={event => setPhone(event.target.value)} /></div>
+              <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Email</label><input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} /></div>
+            </>
+          )}
+
+          {(source === 'warmLead' ? warmLeads.length > 0 : true) && <>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>State/Province</label>
+              <input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. CO, ON" />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Country</label>
+              <input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" />
+            </div>
             <div>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Container size</label>
               <select className="inp" value={containerSizeId} onChange={event => setContainerSizeId(event.target.value)} required>
@@ -111,21 +200,115 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
               <input className="inp" type="number" min="1" value={quantity} onChange={event => setQuantity(Number(event.target.value))} required />
             </div>
             <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Asking price</label>
+              <input className="inp" type="number" min="0" step="0.01" value={askingPrice} onChange={event => setAskingPrice(event.target.value)} placeholder="If available" />
+            </div>
+            <div>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Needed by</label>
               <input className="inp" type="date" value={neededByDate} onChange={event => setNeededByDate(event.target.value)} />
             </div>
-            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Requirements</label>
-            <textarea className="inp" style={{ gridColumn: '1 / -1' }} rows={4} value={requirements} onChange={event => setRequirements(event.target.value)} placeholder="Location, logistics, follow-up notes…" />
-          </> : (
-            <div style={{ gridColumn: '1 / -1', padding: 12, background: 'var(--brand-bg)', borderRadius: 8, fontSize: 12 }}>
-              There are no active warm leads. Convert a Prospect to Warm Lead first.
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Follow-up date</label>
+              <input className="inp" type="date" value={followUpDate} onChange={event => setFollowUpDate(event.target.value)} />
             </div>
-          )}
+            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Inquiry details</label>
+            <textarea className="inp" style={{ gridColumn: '1 / -1' }} rows={3} value={requirements} onChange={event => setRequirements(event.target.value)} placeholder="What the customer is asking for…" />
+            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Special requirements</label>
+            <textarea className="inp" style={{ gridColumn: '1 / -1' }} rows={2} value={specialRequirements} onChange={event => setSpecialRequirements(event.target.value)} placeholder="Liftgate delivery, modification, timing constraints…" />
+            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Remarks</label>
+            <textarea className="inp" style={{ gridColumn: '1 / -1' }} rows={2} value={remarks} onChange={event => setRemarks(event.target.value)} />
+          </>}
           <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={working || !warmLeadId || !containerSizeId || !containerConditionId}>{working ? 'Creating…' : 'Create Inquiry'}</button>
+          <button className="btn btn-primary" disabled={working || !canSubmit}>{working ? 'Creating…' : 'Create Inquiry'}</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+export const NewWarmLeadDialog = ({ onClose, onSaved }: {
+  onClose: () => void
+  onSaved: () => void
+}) => {
+  const pics = usePics()
+  const [companyName, setCompanyName] = useState('')
+  const [contactPerson, setContactPerson] = useState('')
+  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [stateProvince, setStateProvince] = useState('')
+  const [country, setCountry] = useState('')
+  const [picId, setPicId] = useState('')
+  const [notes, setNotes] = useState('')
+  const [previousInquiryIndicator, setPreviousInquiryIndicator] = useState(false)
+  const [source, setSource] = useState('')
+  const [followUpDate, setFollowUpDate] = useState('')
+  const [followUpNotes, setFollowUpNotes] = useState('')
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!companyName.trim()) return
+    setWorking(true)
+    setError('')
+    try {
+      await api.post('/leads/warm-leads', {
+        companyName: companyName.trim(),
+        contactPerson: contactPerson.trim() || undefined,
+        phone: phone.trim() || undefined,
+        email: email.trim() || undefined,
+        stateProvince: stateProvince.trim() || undefined,
+        country: country.trim() || undefined,
+        picId: picId || undefined,
+        notes: notes.trim() || undefined,
+        previousInquiryIndicator,
+        source: source.trim() || undefined,
+        followUpDate: followUpDate || undefined,
+        followUpNotes: followUpNotes.trim() || undefined,
+      })
+      onSaved()
+      onClose()
+    } catch (caught) {
+      setError(apiError(caught))
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <Modal title="New warm lead" description="For contacts already known to be interested, with or without a Prospect record on file." onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Company</label><input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} required /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Contact person</label><input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>PIC</label>
+            <select className="inp" value={picId} onChange={event => setPicId(event.target.value)}>
+              <option value="">Unassigned</option>
+              {pics.map(pic => <option key={pic.id} value={pic.id}>{pic.name}</option>)}
+            </select>
+          </div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Phone</label><input className="inp" value={phone} onChange={event => setPhone(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Email</label><input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>State/Province</label><input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. CO, ON" /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Country</label><input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Source</label><input className="inp" value={source} onChange={event => setSource(event.target.value)} placeholder="Referral, cold call, trade show…" /></div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 20 }}>
+            <input type="checkbox" checked={previousInquiryIndicator} onChange={event => setPreviousInquiryIndicator(event.target.checked)} />
+            Made a previous inquiry (details not on file)
+          </label>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Follow-up date</label><input className="inp" type="date" value={followUpDate} onChange={event => setFollowUpDate(event.target.value)} /></div>
+          <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Notes</label>
+          <textarea className="inp" style={{ gridColumn: '1 / -1' }} rows={3} value={notes} onChange={event => setNotes(event.target.value)} placeholder="Whatever is still known about this contact…" />
+          <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Follow-up notes</label>
+          <textarea className="inp" style={{ gridColumn: '1 / -1' }} rows={2} value={followUpNotes} onChange={event => setFollowUpNotes(event.target.value)} />
+          <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={working || !companyName.trim()}>{working ? 'Creating…' : 'Create Warm Lead'}</button>
         </div>
       </form>
     </Modal>

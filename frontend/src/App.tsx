@@ -5,6 +5,7 @@ import Login from './Login'
 import ProspectImportDialog from './features/import/ProspectImportDialog'
 import {
   NewInquiryDialog,
+  NewWarmLeadDialog,
   QuotationDialog,
   SaleDialog,
   type InquiryOption,
@@ -63,6 +64,9 @@ const mapPipelineRow = (p: any) => ({
   emailAddr: p.contacts?.email_active || '',
   email2: p.contacts?.email_2 || '',
   address: p.companies?.address_street || '',
+  lifecycleStatus: p.lifecycle_status || 'active',
+  conversionReason: p.conversion_reason || '',
+  conversionChannel: p.conversion_channel || '',
 })
 
 export const useWarmLeads = (revision = 0) => {
@@ -182,14 +186,14 @@ const useAnalytics = () => {
   return data
 }
 
-const useProspects = (revision = 0) => {
+const useProspects = (revision = 0, status: 'active' | 'converted' | 'removed' | 'all' = 'active') => {
   const [prospects, setProspects] = useState<any[]>([]);
   useEffect(() => {
-    api.get('/leads/prospects', { params: { limit: 500 } }).then(res => {
+    api.get('/leads/prospects', { params: { limit: 500, status } }).then(res => {
       const data = (res.data.data || []).map(mapPipelineRow);
       setProspects(data);
     }).catch(e => console.error("Failed to fetch API data", e));
-  }, [revision]);
+  }, [revision, status]);
   return prospects;
 }
 
@@ -1123,14 +1127,17 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [category, setCategory] = useState('')
   const [country, setCountry] = useState('')
   const [industry, setIndustry] = useState('')
+  const [status, setStatus] = useState<'active' | 'converted' | 'removed' | 'all'>('active')
   const [missingContactOnly, setMissingContactOnly] = useState(false)
   const [view, setView] = useState('grid')
   const [tab, setTab] = useState('Standard A–Q View')
 
   const [revision, setRevision] = useState(0)
   const [importMode, setImportMode] = useState<'file' | 'paste' | null>(null)
+  const [showNewWarmLead, setShowNewWarmLead] = useState(false)
+  const [inquiryWarmLeadId, setInquiryWarmLeadId] = useState<string | null>(null)
 
-  const _prospectsData = useProspects(revision)
+  const _prospectsData = useProspects(revision, mode === 'prospect' ? status : 'active')
   const _warmData = useWarmLeads(revision)
   const prospectsData = mode === 'warm' ? _warmData : _prospectsData
 
@@ -1141,16 +1148,6 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
       setRevision(value => value + 1)
     } catch (e: any) {
       alert(e.response?.data?.error?.message ?? 'Conversion failed.')
-    }
-  }
-
-  const handleCreateInquiry = async (id: string) => {
-    try {
-      await api.post(`/leads/warm-leads/${id}/create-inquiry`, {});
-      setSelected(current => current.filter(value => value !== id))
-      setRevision(value => value + 1)
-    } catch (e: any) {
-      alert(e.response?.data?.error?.message ?? 'Inquiry creation failed.')
     }
   }
 
@@ -1223,6 +1220,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {mode === 'prospect' && <Btn variant="primary" sm onClick={() => setImportMode('file')}><Ic n={I.upload} size={13} /> Import Excel</Btn>}
+          {mode === 'warm' && <Btn variant="primary" sm onClick={() => setShowNewWarmLead(true)}><Ic n={I.plus} size={13} /> New Warm Lead</Btn>}
           <Btn variant="ghost" sm onClick={() => exportToCSV(filtered, 'pipeline_data')}><Ic n={I.export} size={13} /> Export</Btn>
           {mode === 'prospect' && <Btn variant="secondary" sm onClick={() => setImportMode('paste')}><Ic n={I.copy} size={13} /> Paste Bulk</Btn>}
         </div>
@@ -1268,6 +1266,14 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
         <select className="sel" value={category} onChange={e => setCategory(e.target.value)}><option value="">All Categories</option><option value="Proceed">Proceed</option></select>
         <select className="sel" value={country} onChange={e => setCountry(e.target.value)}><option value="">All Countries</option>{countries.map(value => <option key={value}>{value}</option>)}</select>
         <select className="sel" value={industry} onChange={e => setIndustry(e.target.value)}><option value="">All Industries</option>{industries.map(value => <option key={value}>{value}</option>)}</select>
+        {mode === 'prospect' && (
+          <select className="sel" value={status} onChange={e => setStatus(e.target.value as typeof status)}>
+            <option value="active">Active Prospects</option>
+            <option value="converted">Converted</option>
+            <option value="removed">Removed</option>
+            <option value="all">All</option>
+          </select>
+        )}
 
         {selected.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', background: 'var(--brand-bg)', borderRadius: 7, fontSize: 12, fontWeight: 600, color: 'var(--brand)' }}>
@@ -1276,7 +1282,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
             <Btn variant="ghost" sm>Change Category</Btn>
             {mode === 'prospect'
               ? <Btn variant="ghost" sm onClick={() => Promise.all(selected.map(handleConvert))}>→ Warm Lead</Btn>
-              : <Btn variant="ghost" sm onClick={() => Promise.all(selected.map(handleCreateInquiry))}>Create Inquiry</Btn>
+              : <Btn variant="ghost" sm onClick={() => setInquiryWarmLeadId(selected[0])}>Create Inquiry</Btn>
             }
           </div>
         )}
@@ -1360,7 +1366,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                 <div style={{ minWidth: 160, width: 160, padding: '0 8px', display: 'flex', alignItems: 'center', gap: 2 }}>
                   {mode === 'prospect'
                     ? <Btn variant="ghost" sm style={{ color: 'var(--brand)' }} onClick={(e) => { e.stopPropagation(); handleConvert(row.id); }}>→ Warm</Btn>
-                    : <Btn variant="ghost" sm style={{ color: 'var(--brand)' }} onClick={(e) => { e.stopPropagation(); handleCreateInquiry(row.id); }}>Inquiry</Btn>
+                    : <Btn variant="ghost" sm style={{ color: 'var(--brand)' }} onClick={(e) => { e.stopPropagation(); setInquiryWarmLeadId(row.id); }}>Inquiry</Btn>
                   }
                   <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={(e) => { e.stopPropagation(); handleRemove(row.id); }}>Remove</Btn>
                 </div>
@@ -1386,6 +1392,20 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           initialMode={importMode}
           onClose={() => setImportMode(null)}
           onImported={() => setRevision(value => value + 1)}
+        />
+      )}
+      {showNewWarmLead && (
+        <NewWarmLeadDialog
+          onClose={() => setShowNewWarmLead(false)}
+          onSaved={() => setRevision(value => value + 1)}
+        />
+      )}
+      {inquiryWarmLeadId && (
+        <NewInquiryDialog
+          warmLeads={prospectsData as WarmLeadOption[]}
+          initialId={inquiryWarmLeadId}
+          onClose={() => setInquiryWarmLeadId(null)}
+          onSaved={() => { setSelected([]); setRevision(value => value + 1) }}
         />
       )}
     </div>

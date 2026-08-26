@@ -16,6 +16,8 @@ const noContactCompanyName = `CRM E2E No Contact ${stamp}`;
 const password = `E2e-${randomBytes(18).toString('base64url')}!`;
 const batchIds = [randomUUID(), randomUUID()];
 const ids: Record<string, string | undefined> = {};
+const manualWarmLeadCompany = `CRM E2E Manual WL ${stamp}`;
+const manualInquiryStandaloneCompany = `CRM E2E Standalone Inquiry ${stamp}`;
 
 const publicClient = createClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY!, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -45,12 +47,15 @@ const deleteWhereIn = async (table: string, column: string, values: (string | un
 };
 
 const cleanup = async () => {
-  await deleteWhereIn('domain_events', 'entity_id', [ids.prospect, ids.warmLead, ids.inquiry, ids.rejectedQuotation, ids.quotation, ids.sale]);
+  await deleteWhereIn('domain_events', 'entity_id', [
+    ids.prospect, ids.warmLead, ids.inquiry, ids.rejectedQuotation, ids.quotation, ids.sale,
+    ids.manualWarmLead, ids.manualInquiry, ids.standaloneInquiry,
+  ]);
   await deleteWhereIn('sales', 'id', [ids.sale]);
   await deleteWhereIn('quotation_items', 'quotation_id', [ids.rejectedQuotation, ids.quotation]);
   await deleteWhereIn('quotations', 'id', [ids.rejectedQuotation, ids.quotation]);
-  await deleteWhereIn('inquiries', 'id', [ids.inquiry]);
-  await deleteWhereIn('warm_leads', 'id', [ids.warmLead]);
+  await deleteWhereIn('inquiries', 'id', [ids.inquiry, ids.manualInquiry, ids.standaloneInquiry]);
+  await deleteWhereIn('warm_leads', 'id', [ids.warmLead, ids.manualWarmLead]);
   await deleteWhereIn('prospect_clients', 'id', [ids.prospect, ids.noContactProspect]);
   await deleteWhereIn('import_staging_conflicts', 'batch_id', batchIds);
   await deleteWhereIn('import_rows', 'batch_id', batchIds);
@@ -60,8 +65,8 @@ const cleanup = async () => {
       .eq('company_id', ids.company).eq('contact_id', ids.contact);
     if (error) throw new Error(`Cleanup company_contacts: ${error.message}`);
   }
-  await deleteWhereIn('contacts', 'id', [ids.contact]);
-  await deleteWhereIn('companies', 'id', [ids.company, ids.noContactCompany]);
+  await deleteWhereIn('contacts', 'id', [ids.contact, ids.manualWarmLeadContact, ids.standaloneContact]);
+  await deleteWhereIn('companies', 'id', [ids.company, ids.noContactCompany, ids.manualWarmLeadCompanyId, ids.standaloneCompanyId]);
   if (ids.user) {
     const { error } = await supabaseAdmin.auth.admin.deleteUser(ids.user);
     if (error) throw new Error(`Cleanup auth user: ${error.message}`);
@@ -145,14 +150,96 @@ const run = async () => {
   ids.noContactProspect = noContactList.data[0].id;
   ids.noContactCompany = noContactList.data[0].company_id;
 
-  const warm = await request(token, `/leads/prospects/${ids.prospect}/convert-to-warm-lead`, { method: 'POST' });
+  const warm = await request(token, `/leads/prospects/${ids.prospect}/convert-to-warm-lead`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: 'Replied positively to outreach email', channel: 'Email' }),
+  });
   ids.warmLead = warm.data.id;
   list = await request(token, `/leads/prospects?search=${encodeURIComponent(email)}`);
   if (list.data.length) throw new Error('Converted prospect remained in the active prospect list');
 
+  const convertedList = await request(token, `/leads/prospects?status=converted&search=${encodeURIComponent(email)}`);
+  const convertedRow = convertedList.data[0];
+  if (convertedRow?.id !== ids.prospect || convertedRow?.conversion_reason !== 'Replied positively to outreach email' || convertedRow?.conversion_channel !== 'Email') {
+    throw new Error(`status=converted did not surface the conversion reason/channel: ${JSON.stringify(convertedRow)}`);
+  }
+  const allList = await request(token, `/leads/prospects?status=all&search=${encodeURIComponent(email)}`);
+  if (!allList.data.some((row: any) => row.id === ids.prospect)) {
+    throw new Error('status=all did not include the converted prospect');
+  }
+
+  const manualWarm = await request(token, '/leads/warm-leads', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyName: manualWarmLeadCompany,
+      contactPerson: 'Old Contact Person',
+      phone: '3035550199',
+      stateProvince: 'CO',
+      country: 'US',
+      notes: 'Called years ago, no inquiry record on file',
+      previousInquiryIndicator: true,
+      source: 'Referral',
+      followUpNotes: 'Call back next quarter',
+    }),
+  });
+  ids.manualWarmLead = manualWarm.data.id;
+  ids.manualWarmLeadCompanyId = manualWarm.data.company_id;
+  ids.manualWarmLeadContact = manualWarm.data.contact_id;
+  if (manualWarm.data.state_province !== 'CO' || manualWarm.data.source !== 'Referral' || manualWarm.data.previous_inquiry_indicator !== true) {
+    throw new Error(`Manual warm lead did not persist expected fields: ${JSON.stringify(manualWarm.data)}`);
+  }
+
   const sizes = await request(token, '/catalog/sizes');
   const conditions = await request(token, '/catalog/conditions');
   if (!sizes.data.length || !conditions.data.length) throw new Error('Container catalog is not seeded');
+
+  // Manual Warm Lead -> Inquiry: no source Prospect anywhere in this chain, and the
+  // inquiry should inherit the warm lead's state/country since none is given explicitly.
+  const manualInquiry = await request(token, '/leads/inquiries', {
+    method: 'POST',
+    body: JSON.stringify({
+      warmLeadId: ids.manualWarmLead,
+      containerSizeId: sizes.data[0].id,
+      containerConditionId: conditions.data[0].id,
+      quantity: 1,
+      askingPrice: 4200,
+      requirements: 'One 20ft container',
+      specialRequirements: 'Needs liftgate delivery',
+      remarks: 'Called from a referral list',
+      followUpDate: '2026-10-01',
+    }),
+  });
+  ids.manualInquiry = manualInquiry.data.id;
+  if (
+    manualInquiry.data.source_warm_lead_id !== ids.manualWarmLead
+    || Number(manualInquiry.data.asking_price) !== 4200
+    || manualInquiry.data.special_requirements !== 'Needs liftgate delivery'
+    || manualInquiry.data.state_province !== 'CO'
+  ) {
+    throw new Error(`Manual-warm-lead inquiry did not persist expected fields: ${JSON.stringify(manualInquiry.data)}`);
+  }
+
+  // Existing Contact/Customer -> Manual Inquiry: fully standalone, no Warm Lead at all.
+  const standaloneInquiry = await request(token, '/leads/inquiries', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyName: manualInquiryStandaloneCompany,
+      contactPerson: 'Standalone Contact',
+      email: `crm-e2e-standalone-${stamp}@example.test`,
+      stateProvince: 'TX',
+      country: 'US',
+      containerSizeId: sizes.data[0].id,
+      containerConditionId: conditions.data[0].id,
+      quantity: 3,
+      remarks: 'Existing customer calling in directly',
+    }),
+  });
+  ids.standaloneInquiry = standaloneInquiry.data.id;
+  ids.standaloneCompanyId = standaloneInquiry.data.company_id;
+  ids.standaloneContact = standaloneInquiry.data.contact_id;
+  if (standaloneInquiry.data.source_warm_lead_id || standaloneInquiry.data.state_province !== 'TX' || standaloneInquiry.data.quantity !== 3) {
+    throw new Error(`Standalone manual inquiry did not persist expected fields: ${JSON.stringify(standaloneInquiry.data)}`);
+  }
 
   const inquiry = await request(token, `/leads/warm-leads/${ids.warmLead}/create-inquiry`, {
     method: 'POST',
@@ -248,7 +335,7 @@ const run = async () => {
     throw new Error('PATCH status allowed modifying an already-Converted quotation');
   }
 
-  console.log('PASS hosted API: auth -> duplicate-safe import -> prospect -> warm lead -> inquiry -> reject+requote -> accepted -> sale -> immutability guards');
+  console.log('PASS hosted API: auth -> duplicate-safe import -> prospect -> warm lead (+reason/channel, status filter) -> manual warm lead -> manual inquiries (linked + standalone) -> inquiry -> reject+requote -> accepted -> sale -> immutability guards');
 };
 
 void (async () => {

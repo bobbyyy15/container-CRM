@@ -16,6 +16,10 @@ router.post('/prospects/:prospectId/convert-to-warm-lead', requireRoles('admin',
 // Warm Lead -> Inquiry
 router.post('/warm-leads/:warmLeadId/create-inquiry', requireRoles('admin', 'manager', 'pic'), LeadController.createInquiry);
 
+// Manual entry -- no source Prospect/Warm Lead required
+router.post('/warm-leads', requireRoles('admin', 'manager', 'pic'), LeadController.createManualWarmLead);
+router.post('/inquiries', requireRoles('admin', 'manager', 'pic'), LeadController.createManualInquiry);
+
 router.post('/:stage/:entityId/remove', requireRoles('admin', 'manager', 'pic'), LeadController.removeEntry);
 
 export default router;

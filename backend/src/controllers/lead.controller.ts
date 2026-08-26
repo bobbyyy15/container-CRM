@@ -3,6 +3,8 @@ import { LeadService } from '../services/lead.service';
 import {
   ConvertProspectSchema,
   CreateInquirySchema,
+  CreateManualWarmLeadSchema,
+  CreateManualInquirySchema,
   LeadListQuerySchema,
   RemovePipelineEntrySchema,
 } from '../schemas/lead.schema';
@@ -25,7 +27,7 @@ const listActiveLeads = async (
     .order('created_at', { ascending: false })
     .limit(5000);
 
-  if (table === 'prospect_clients') dbQuery = dbQuery.eq('lifecycle_status', 'active');
+  if (table === 'prospect_clients' && query.status !== 'all') dbQuery = dbQuery.eq('lifecycle_status', query.status);
   if (table === 'warm_leads') dbQuery = dbQuery.eq('status', 'active');
   if (table === 'inquiries') dbQuery = dbQuery.not('status', 'in', '(Removed,Lost,Quotation Created,Converted to Sale)');
 
@@ -41,12 +43,19 @@ const listActiveLeads = async (
   const removedEmails = new Set((removed ?? []).filter(row => row.identity_type === 'email').map(row => row.normalized_value));
   const removedPhones = new Set((removed ?? []).filter(row => row.identity_type === 'phone').map(row => row.normalized_value));
 
+  // Outreach-suppression filtering only makes sense for the "active" working view -- a
+  // Converted/Removed/All view on Prospect Clients is meant to show exactly those records,
+  // including ones that are also on the removed_entries suppression list.
+  const applySuppressionFilter = table !== 'prospect_clients' || query.status === 'active';
+
   const eligible = (data ?? []).filter((row: any) => {
     const company = row.companies ?? {};
     const contact = row.contacts ?? {};
-    if (removedCompanies.has(row.company_id) || removedContacts.has(row.contact_id)) return false;
-    if ([contact.email_active, contact.email_2].some(value => removedEmails.has(text(value)))) return false;
-    if ([contact.phone_direct, contact.phone_2].some(value => removedPhones.has(digits(value)))) return false;
+    if (applySuppressionFilter) {
+      if (removedCompanies.has(row.company_id) || removedContacts.has(row.contact_id)) return false;
+      if ([contact.email_active, contact.email_2].some(value => removedEmails.has(text(value)))) return false;
+      if ([contact.phone_direct, contact.phone_2].some(value => removedPhones.has(digits(value)))) return false;
+    }
 
     const haystack = [company.name, contact.first_name, contact.last_name, contact.email_active, contact.email_2, contact.phone_direct, contact.phone_2]
       .map(text).join(' ');
@@ -95,14 +104,12 @@ export class LeadController {
   static async convertProspect(req: Request, res: Response) {
     try {
       const prospectId = req.params.prospectId as string;
-      
-      // Validate with Zod
-      ConvertProspectSchema.parse({ prospectId });
+      const payload = ConvertProspectSchema.parse({ ...req.body, prospectId });
 
       const actorId = req.auth!.user.id;
 
-      const warmLead = await LeadService.convertProspectToWarmLead(prospectId, actorId);
-      
+      const warmLead = await LeadService.convertProspectToWarmLead(prospectId, actorId, payload.reason, payload.channel);
+
       res.json({
         success: true,
         data: warmLead,
@@ -113,6 +120,28 @@ export class LeadController {
         success: false,
         error: { message: error.message }
       });
+    }
+  }
+
+  static async createManualWarmLead(req: Request, res: Response) {
+    try {
+      const payload = CreateManualWarmLeadSchema.parse(req.body);
+      const actorId = req.auth!.user.id;
+      const warmLead = await LeadService.createManualWarmLead(payload, actorId);
+      res.status(201).json({ success: true, data: warmLead });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async createManualInquiry(req: Request, res: Response) {
+    try {
+      const payload = CreateManualInquirySchema.parse(req.body);
+      const actorId = req.auth!.user.id;
+      const inquiry = await LeadService.createManualInquiry(payload, actorId);
+      res.status(201).json({ success: true, data: inquiry });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
     }
   }
 
