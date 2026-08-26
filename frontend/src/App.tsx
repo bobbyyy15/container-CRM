@@ -1210,6 +1210,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 
   const [revision, setRevision] = useState(0)
   const [importMode, setImportMode] = useState<'file' | 'paste' | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
 
   const _prospectsData = useProspects(revision)
   const _warmData = useWarmLeads(revision)
@@ -1382,6 +1383,27 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 
       {/* Spreadsheet table */}
       <div className="table-wrap">
+        {contextMenu && (
+          <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 999 }} onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
+            <div style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: '4px', boxShadow: '0 8px 24px rgba(0,0,0,0.15)', minWidth: 160 }}>
+              <div 
+                style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', borderRadius: 4, fontSize: 13, color: 'var(--t2)', fontWeight: 500 }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                onClick={() => {
+                  const dataToCopy = filtered.map(r => getVal(r, contextMenu.colField)).filter(Boolean).join('\n');
+                  navigator.clipboard.writeText(dataToCopy);
+                  setContextMenu(null);
+                  alert(`Copied ${filtered.map(r => getVal(r, contextMenu.colField)).filter(Boolean).length} ${contextMenu.colLabel}s to clipboard!`);
+                }}
+              >
+                <Ic n={I.copy} size={14} style={{ color: 'var(--brand)' }} />
+                Copy Column ({contextMenu.colLabel})
+              </div>
+            </div>
+          </>
+        )}
         <div style={{ minWidth: 'max-content' }}>
           {/* Column header row */}
           <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 5, background: 'var(--s2)', borderBottom: '2px solid var(--border)' }}>
@@ -1397,9 +1419,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  const dataToCopy = filtered.map(r => getVal(r, col.field)).filter(Boolean).join('\n');
-                  navigator.clipboard.writeText(dataToCopy);
-                  alert(`Copied ${filtered.map(r => getVal(r, col.field)).filter(Boolean).length} ${col.label}s to clipboard!`);
+                  setContextMenu({ x: e.clientX, y: e.clientY, colField: col.field, colLabel: col.label });
                 }}
               >
                 <div>
@@ -1497,6 +1517,7 @@ const InquiryList = () => {
   const warmLeads = useWarmLeads(revision)
   const [tab, setTab] = useState('All')
   const [lookup, setLookup] = useState('')
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
   const tabs = ['All', 'New', 'Quotation Required', 'Awaiting Response', 'Negotiating', 'Converted', 'Lost']
 
   const filtered = INQUIRIES.filter(r => {
@@ -1579,6 +1600,27 @@ const InquiryList = () => {
 
       {/* Table */}
       <div className="table-wrap">
+        {contextMenu && (
+          <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 999 }} onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
+            <div style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: '4px', boxShadow: '0 8px 24px rgba(0,0,0,0.15)', minWidth: 160 }}>
+              <div 
+                style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', borderRadius: 4, fontSize: 13, color: 'var(--t2)', fontWeight: 500 }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                onClick={() => {
+                  const dataToCopy = filtered.map((r: any) => r[contextMenu.colField]).filter(Boolean).join('\n');
+                  navigator.clipboard.writeText(dataToCopy);
+                  setContextMenu(null);
+                  alert(`Copied ${filtered.map((r: any) => r[contextMenu.colField]).filter(Boolean).length} ${contextMenu.colLabel.toLowerCase()}!`);
+                }}
+              >
+                <Ic n={I.copy} size={14} style={{ color: 'var(--brand)' }} />
+                Copy Column ({contextMenu.colLabel})
+              </div>
+            </div>
+          </>
+        )}
         <table className="crm">
           <thead>
             <tr>
@@ -1589,8 +1631,7 @@ const InquiryList = () => {
                 title="Right-click to copy all companies"
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  navigator.clipboard.writeText(filtered.map(r => r.company).filter(Boolean).join('\n'));
-                  alert(`Copied ${filtered.map(r => r.company).filter(Boolean).length} companies!`);
+                  setContextMenu({ x: e.clientX, y: e.clientY, colField: 'company', colLabel: 'Companies' });
                 }}
               >Company</th>
               <th 
@@ -1598,8 +1639,7 @@ const InquiryList = () => {
                 title="Right-click to copy all contacts"
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  navigator.clipboard.writeText(filtered.map(r => r.contact).filter(Boolean).join('\n'));
-                  alert(`Copied ${filtered.map(r => r.contact).filter(Boolean).length} contacts!`);
+                  setContextMenu({ x: e.clientX, y: e.clientY, colField: 'contact', colLabel: 'Contacts' });
                 }}
               >Contact</th>
               <th>Category</th><th>Size</th><th className="r">Qty</th><th>Needed By</th><th>Status</th><th>PIC</th>
