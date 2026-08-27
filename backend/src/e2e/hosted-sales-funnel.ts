@@ -67,6 +67,7 @@ const cleanup = async () => {
   }
   await deleteWhereIn('contacts', 'id', [ids.contact, ids.manualWarmLeadContact, ids.standaloneContact]);
   await deleteWhereIn('companies', 'id', [ids.company, ids.noContactCompany, ids.manualWarmLeadCompanyId, ids.standaloneCompanyId]);
+  await deleteWhereIn('pics', 'id', [ids.pic]);
   if (ids.user) {
     const { error } = await supabaseAdmin.auth.admin.deleteUser(ids.user);
     if (error) throw new Error(`Cleanup auth user: ${error.message}`);
@@ -88,6 +89,17 @@ const run = async () => {
 
   const { error: roleError } = await supabaseAdmin.from('profiles').update({ role: 'sales_manager' }).eq('id', ids.user);
   if (roleError) throw roleError;
+
+  // Data-silos identity chain (see docs/ACCOUNT_MODULE.md): a profile owns nothing in the
+  // pipeline until an admin assigns it a PIC identity. Without this, every list/create call
+  // below would see or create nothing.
+  const { data: pic, error: picError } = await supabaseAdmin
+    .from('pics')
+    .insert({ profile_id: ids.user, name: 'CRM E2E Tester' })
+    .select('id')
+    .single();
+  if (picError || !pic) throw picError ?? new Error('Temporary PIC identity was not created');
+  ids.pic = pic.id;
 
   const { data: signedIn, error: signInError } = await publicClient.auth.signInWithPassword({ email, password });
   if (signInError || !signedIn.session) throw signInError ?? new Error('Temporary user could not sign in');
@@ -252,8 +264,13 @@ const run = async () => {
     }),
   });
   ids.inquiry = inquiry.data.id;
+  // Business rule (see 017_manual_prospect_sale_and_flow_fixes.sql): creating an inquiry from
+  // a warm lead does NOT remove it from the active Warm Leads list -- it stays visible and
+  // can generate further inquiries later.
   list = await request(token, `/leads/warm-leads?search=${encodeURIComponent(email)}`);
-  if (list.data.length) throw new Error('Converted warm lead remained in the active warm-lead list');
+  if (list.data.length !== 1 || list.data[0].id !== ids.warmLead) {
+    throw new Error('Warm lead did not stay visible in the active list after creating an inquiry');
+  }
 
   const inquiryList = await request(token, `/leads/inquiries?search=${encodeURIComponent(email)}`);
   const inquiryRow = inquiryList.data[0];
