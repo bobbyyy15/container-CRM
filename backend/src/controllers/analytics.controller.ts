@@ -23,16 +23,22 @@ export class AnalyticsController {
       let total_units = 0;
       let total_revenue = 0;
       let total_gross_profit = 0;
-      const unique_clients = new Set();
 
       for (const sale of (sales || [])) {
         total_units += sale.total_units;
         total_revenue += Number(sale.revenue);
         total_gross_profit += Number(sale.gross_profit);
-        unique_clients.add(sale.company_id);
       }
 
-      const active_clients = unique_clients.size;
+      let activeClientsQuery = supabaseAdmin
+        .from('customer_accounts_view')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'Active');
+      
+      if (!isAdmin) activeClientsQuery = activeClientsQuery.eq('pic_id', picId);
+      const { count: active_clients_count } = await activeClientsQuery;
+      
+      const active_clients = active_clients_count || 0;
       const profit_margin = total_revenue > 0 ? (total_gross_profit / total_revenue) * 100 : 0;
 
       // 2. Funnel metrics (Counts)

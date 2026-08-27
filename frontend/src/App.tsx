@@ -191,6 +191,31 @@ const useAnalytics = () => {
   return data
 }
 
+
+const useCustomers = (status = 'All', search = '') => {
+  const [data, setData] = useState<any[]>([]);
+  useEffect(() => {
+    api.get('/customers', { params: { status, search } }).then(res => {
+      setData((res.data.data || []).map((c: any) => ({
+        id: c.company_id,
+        co: c.company_name,
+        contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
+        phone: c.primary_contact ? (c.primary_contact.phone_1 || c.primary_contact.phone_2) : '-',
+        state: c.state || '-',
+        country: c.country || '-',
+        sales: c.sales_count,
+        units: c.total_units,
+        revenue: Number(c.total_revenue),
+        profit: Number(c.total_gross_profit),
+        last: new Date(c.last_purchase_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        pic: c.pic_name || '-',
+        status: c.status
+      })));
+    }).catch(console.error);
+  }, [status, search]);
+  return data;
+}
+
 const useProspects = (revision = 0, status: 'active' | 'converted' | 'removed' | 'all' = 'active') => {
   const [prospects, setProspects] = useState<any[]>([]);
   useEffect(() => {
@@ -395,7 +420,7 @@ type PicPerformanceRow = {
   quotes: number
   revenue: number
 }
-type BestClientRow = { r: number; co: string; u: number; p: number }
+
 type OverduePickupRow = { contract: string; co: string; days: number; qty: number; size: string }
 type LossReasonRow = { reason: string; color: string; count: number }
 
@@ -403,7 +428,7 @@ const profitChartData: ProfitChartPoint[] = []
 const categoryData: ChartSlice[] = []
 const inquiryStatusData: ChartSlice[] = []
 const PIC_DATA: PicPerformanceRow[] = []
-const BEST_CLIENTS: BestClientRow[] = []
+
 const OVERDUE_PICKUPS: OverduePickupRow[] = []
 const LOSS_REASONS: LossReasonRow[] = []
 
@@ -978,14 +1003,14 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
             <table className="crm" style={{ width: '100%' }}>
               <thead><tr><th>#</th><th>Company</th><th className="r">Units</th><th className="r">Profit</th></tr></thead>
               <tbody>
-                {BEST_CLIENTS.map(row => (
-                  <tr key={row.r}>
+                                {topCustomers.map((row, idx) => (
+                  <tr key={row.id}>
                     <td style={{ width: 36 }}>
-                      <span style={{ width: 22, height: 22, borderRadius: 6, background: row.r === 1 ? '#FEF3C7' : 'var(--s3)', color: row.r === 1 ? '#D97706' : 'var(--t4)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{row.r}</span>
+                      <span style={{ width: 22, height: 22, borderRadius: 6, background: idx === 0 ? '#FEF3C7' : 'var(--s3)', color: idx === 0 ? '#D97706' : 'var(--t4)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{idx + 1}</span>
                     </td>
                     <td style={{ fontWeight: 600, fontSize: 12.5 }}>{row.co}</td>
-                    <td className="r mono" style={{ fontWeight: 700 }}>{row.u}</td>
-                    <td className="r profit-cell">${row.p.toLocaleString()}</td>
+                    <td className="r mono" style={{ fontWeight: 700 }}>{row.units}</td>
+                    <td className="r profit-cell">${row.profit.toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -2042,14 +2067,10 @@ const SalesTracker = () => {
 // ─── Customer Accounts ────────────────────────────────────────────────────────
 
 const CustomerAccounts = () => {
-  const [tab, setTab] = useState('All')
-  const customers = [
-    { co: 'NorthStar Construction LLC', contact: 'Tom Erikson', phone: '+1-612-555-0182', state: 'MN', country: 'USA', sales: 22, units: 28, revenue: 182400, profit: 56800, last: 'Jul 28', pic: 'JC', status: 'Active' },
-    { co: 'Great Lakes Storage Solutions', contact: 'Ryan Murphy', phone: '+1-313-555-0447', state: 'MI', country: 'USA', sales: 18, units: 22, revenue: 134800, profit: 42200, last: 'Jul 25', pic: 'MS', status: 'Active' },
-    { co: 'Ontario Modular Structures', contact: 'Pierre Leclerc', phone: '+1-416-555-0229', state: 'ON', country: 'CAN', sales: 14, units: 18, revenue: 112800, profit: 34600, last: 'Jul 16', pic: 'DL', status: 'Active' },
-    { co: 'Rockies Build Ltd', contact: 'Derek Holt', phone: '+1-403-555-0318', state: 'AB', country: 'CAN', sales: 11, units: 14, revenue: 88600, profit: 26400, last: 'Jul 22', pic: 'DL', status: 'Active' },
-    { co: 'Bakken Industrial LLC', contact: 'Mark Jensen', phone: '+1-701-555-0512', state: 'ND', country: 'USA', sales: 8, units: 11, revenue: 72400, profit: 21800, last: 'Jun 30', pic: 'JC', status: 'Floating' },
-  ]
+  const [tab, setTab] = useState('All');
+  const [search, setSearch] = useState('');
+  const customers = useCustomers(tab, search);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="page-header">
@@ -2082,7 +2103,7 @@ const CustomerAccounts = () => {
           </tr></thead>
           <tbody>
             {(tab === 'All' ? customers : customers.filter(c => c.status === tab)).map(c => (
-              <tr key={c.co}>
+              <tr key={c.id}>
                 <td className="col-check"><input type="checkbox" className="cb" /></td>
                 <td>
                   <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{c.co}</div>
