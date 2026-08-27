@@ -1,8 +1,13 @@
 import { Router } from 'express';
 import { GoogleAuthController } from '../controllers/google.controller';
+import { AuthController } from '../controllers/auth.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
+
+// No auth required: this runs before the user has a session, to resolve a username login
+// into the email Supabase Auth actually signs in with.
+router.post('/resolve-login', AuthController.resolveLogin);
 
 router.get('/google/status', requireAuth, GoogleAuthController.status);
 router.post('/google/sync-provider', requireAuth, GoogleAuthController.syncProvider);

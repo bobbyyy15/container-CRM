@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from './config/supabase';
+import { api } from './lib/api';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [isRegistering, setIsRegistering] = useState(false);
@@ -24,9 +25,9 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
         if (!email || !password || !username) {
           throw new Error("Email, username, and password are required.");
         }
-        
+
         // Supabase Signup
-        const { error: signUpError } = await supabase.auth.signUp({
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -38,16 +39,34 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
         });
 
         if (signUpError) throw signUpError;
-        alert("Registration successful! You are now logged in.");
-        onLogin();
+
+        // If email confirmation is required, signUp succeeds but returns no session --
+        // there is nothing to log in to yet. Calling onLogin() here regardless was the
+        // bug: it claimed success while the account couldn't actually sign in until the
+        // confirmation link was clicked.
+        if (!signUpData.session) {
+          alert("Registration successful! Check your email to confirm your account before signing in.");
+          setIsRegistering(false);
+          setIdentifier(email);
+        } else {
+          onLogin();
+        }
 
       } else {
         if (!identifier || !password) {
-          throw new Error("Please enter your email and password.");
+          throw new Error("Please enter your email or username and password.");
+        }
+
+        // Supabase Auth only signs in by email, but this CRM allows logging in with either
+        // email or username -- resolve a username to its email first.
+        let loginEmail = identifier.trim();
+        if (!loginEmail.includes('@')) {
+          const response = await api.post('/auth/resolve-login', { identifier: loginEmail });
+          loginEmail = response.data.data.email;
         }
 
         const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: identifier,
+          email: loginEmail,
           password
         });
 
@@ -55,7 +74,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
         onLogin();
       }
     } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred.');
+      setError(err.response?.data?.error?.message ?? err.message ?? 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }
@@ -96,8 +115,8 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
             </>
           ) : (
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Email</label>
-              <input type="email" value={identifier} onChange={e => setIdentifier(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--t1)', boxSizing: 'border-box' }} required />
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Email or Username</label>
+              <input type="text" value={identifier} onChange={e => setIdentifier(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--t1)', boxSizing: 'border-box' }} required />
             </div>
           )}
 
