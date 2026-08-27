@@ -192,6 +192,31 @@ const useAnalytics = () => {
 }
 
 
+
+const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses', search = '') => {
+  const [data, setData] = useState<any[]>([]);
+  useEffect(() => {
+    api.get('/contracts', { params: { status, pickStatus, search } }).then(res => {
+      setData((res.data.data || []).map((c: any) => ({
+        id: c.id,
+        ref: c.contract_number,
+        co: c.company_name,
+        contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
+        category: c.items && c.items.length > 0 ? c.items[0].description.split(' ')[0] : '-',
+        size: c.items && c.items.length > 0 ? c.items[0].description : '-',
+        qty: c.total_units,
+        value: Number(c.revenue),
+        pickup: c.pickup_date ? new Date(c.pickup_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Unscheduled',
+        pickStatus: c.pickup_status,
+        status: c.contract_status,
+        pic: c.pic_name || '-',
+        sale: c.sale_number
+      })));
+    }).catch(console.error);
+  }, [status, pickStatus, search]);
+  return data;
+}
+
 const useCustomers = (status = 'All', search = '') => {
   const [data, setData] = useState<any[]>([]);
   useEffect(() => {
@@ -1901,7 +1926,7 @@ const QuotationList = () => {
       </div>
       <div className="toolbar">
         <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search quotations…" /></div>
-        <select className="sel"><option>All Statuses</option></select>
+        <select className="sel" value={status} onChange={e => setStatus(e.target.value)}><option>All Statuses</option><option>Pending Signature</option><option>Active</option><option>Completed</option></select>
         <select className="sel"><option>All PICs</option></select>
         <div className="toolbar-right">
           <Btn variant="ghost" sm onClick={() => exportToCSV(quotes, 'quotations')}><Ic n={I.export} size={13} /> Export</Btn>
@@ -2229,12 +2254,11 @@ const ContactOutreach = () => {
 // ─── Contracts ────────────────────────────────────────────────────────────────
 
 const Contracts = () => {
-  const contracts = [
-    { ref: 'CT-2024-0042', co: 'Calgary Build Corp', contact: 'Wade S.', category: 'Open-Top', size: '40ft HC', qty: 3, value: 18600, pickup: 'Aug 15', pickStatus: 'Scheduled', status: 'Active', pic: 'JC', sale: 'SL-2024-0140' },
-    { ref: 'CT-2024-0041', co: 'NorthStar Construction LLC', contact: 'Tom E.', category: 'High-Cube', size: '40ft HC', qty: 4, value: 19200, pickup: 'Aug 8', pickStatus: 'Confirmed', status: 'Active', pic: 'JC', sale: 'SL-2024-0142' },
-    { ref: 'CT-2024-0039', co: 'Great Lakes Storage Solutions', contact: 'Ryan M.', category: 'Dry', size: '20ft', qty: 6, value: 15600, pickup: 'Jul 30', pickStatus: 'Picked Up', status: 'Completed', pic: 'MS', sale: 'SL-2024-0141' },
-    { ref: 'CT-2024-0037', co: 'Bakken Industrial LLC', contact: 'Mark J.', category: 'Office', size: '20ft HC', qty: 3, value: 18600, pickup: 'Jul 18', pickStatus: 'Overdue', status: 'Active', pic: 'JC', sale: 'SL-2024-0139' },
-  ]
+  const [status, setStatus] = useState('All Statuses');
+  const [pickStatus, setPickStatus] = useState('All Pickup Statuses');
+  const [search, setSearch] = useState('');
+  const contracts = useContracts(status, pickStatus, search);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {contracts.some(c => c.pickStatus === 'Overdue') && (
@@ -2247,9 +2271,9 @@ const Contracts = () => {
         </div>
       )}
       <div className="toolbar">
-        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search contracts…" /></div>
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search contracts…" value={search} onChange={e => setSearch(e.target.value)} /></div>
         <select className="sel"><option>All Statuses</option></select>
-        <select className="sel"><option>All Pickup Statuses</option><option>Overdue</option></select>
+        <select className="sel" value={pickStatus} onChange={e => setPickStatus(e.target.value)}><option>All Pickup Statuses</option><option>Pending</option><option>Scheduled</option><option>Confirmed</option><option>Picked Up</option><option>Overdue</option></select>
         <div className="toolbar-right">
           <Btn variant="primary" sm><Ic n={I.plus} size={13} /> New Contract</Btn>
         </div>
@@ -2263,7 +2287,7 @@ const Contracts = () => {
           </tr></thead>
           <tbody>
             {contracts.map(c => (
-              <tr key={c.ref} style={{ background: c.pickStatus === 'Overdue' ? 'var(--red-bg)' : undefined }}>
+              <tr key={c.id} style={{ background: c.pickStatus === 'Overdue' ? 'var(--red-bg)' : undefined }}>
                 <td><span className="ref-id" style={{ color: 'var(--teal)' }}>{c.ref}</span></td>
                 <td>
                   <div style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--t1)' }}>{c.co}</div>
