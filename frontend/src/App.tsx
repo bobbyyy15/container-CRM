@@ -11,6 +11,7 @@ import {
   NewWarmLeadDialog,
   NewProspectDialog,
   NewManualSaleDialog,
+  NewContractDialog,
   QuotationDialog,
   SaleDialog,
   type InquiryOption,
@@ -2257,7 +2258,11 @@ const Contracts = () => {
   const [status, setStatus] = useState('All Statuses');
   const [pickStatus, setPickStatus] = useState('All Pickup Statuses');
   const [search, setSearch] = useState('');
+  const [showNew, setShowNew] = useState(false);
+  const [revision, setRevision] = useState(0);
   const contracts = useContracts(status, pickStatus, search);
+  // Re-fetch sales when clicking New Contract
+  const sales = useSales(revision);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -2275,7 +2280,8 @@ const Contracts = () => {
         <select className="sel"><option>All Statuses</option></select>
         <select className="sel" value={pickStatus} onChange={e => setPickStatus(e.target.value)}><option>All Pickup Statuses</option><option>Pending</option><option>Scheduled</option><option>Confirmed</option><option>Picked Up</option><option>Overdue</option></select>
         <div className="toolbar-right">
-          <Btn variant="primary" sm><Ic n={I.plus} size={13} /> New Contract</Btn>
+          <Btn variant="primary" sm onClick={() => setShowNew(true)}><Ic n={I.plus} size={13} /> New Contract</Btn>
+          {showNew && <NewContractDialog sales={sales} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); setRevision(r => r + 1); window.location.reload(); }} />}
         </div>
       </div>
       <div className="table-wrap">

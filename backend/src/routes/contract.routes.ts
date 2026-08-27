@@ -8,5 +8,6 @@ const router = Router();
 router.use(requireRoles('admin', 'sales_manager'));
 
 router.get('/', ContractController.listContracts);
+router.post('/', ContractController.createContract);
 
 export default router;

@@ -40,4 +40,31 @@ export class ContractController {
       res.status(500).json({ success: false, error: { message: error.message } });
     }
   }
+
+  static async createContract(req: Request, res: Response) {
+    try {
+      const { sale_id, pickup_date } = req.body;
+      if (!sale_id) throw new Error('sale_id is required');
+
+      // Verify the sale exists and belongs to the user (silos)
+      let saleQuery = supabaseAdmin.from('sales').select('id, company_id, pic_id').eq('id', sale_id).single();
+      const { data: sale, error: saleErr } = await saleQuery;
+      if (saleErr || !sale) throw new Error('Sale not found');
+
+      if (req.auth?.profile.role !== 'admin' && sale.pic_id !== req.auth?.profile.pic_id) {
+        throw new Error('Unauthorized to create a contract for this sale');
+      }
+
+      const { data, error } = await supabaseAdmin.from('contracts').insert({
+        sale_id,
+        company_id: sale.company_id,
+        pickup_date: pickup_date || null
+      }).select('*').single();
+
+      if (error) throw error;
+      res.status(201).json({ success: true, data });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
 }
