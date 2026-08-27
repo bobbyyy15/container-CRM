@@ -13,9 +13,7 @@ export class DealController {
         .not('status', 'in', '(Converted,Rejected)')
         .order('created_at', { ascending: false });
 
-      if (req.auth?.profile.role !== 'admin') {
-        dbQuery = dbQuery.eq('pic_id', req.auth?.profile.pic_id);
-      }
+      dbQuery = dbQuery.eq('pic_id', req.auth?.profile.pic_id);
 
       const { data, error } = await dbQuery;
 
@@ -33,9 +31,7 @@ export class DealController {
         .select('*, companies(*), pics(name), quotations(*, contacts(*), quotation_items(*))')
         .order('created_at', { ascending: false });
 
-      if (req.auth?.profile.role !== 'admin') {
-        dbQuery = dbQuery.eq('pic_id', req.auth?.profile.pic_id);
-      }
+      dbQuery = dbQuery.eq('pic_id', req.auth?.profile.pic_id);
 
       const { data, error } = await dbQuery;
 
@@ -76,9 +72,7 @@ export class DealController {
       const userId = req.auth!.user.id;
 
       // DATA SILOS ENFORCEMENT
-      if (req.auth?.profile.role !== 'admin') {
-        payload.picId = req.auth?.profile.pic_id ?? undefined;
-      }
+      payload.picId = req.auth?.profile.pic_id ?? undefined;
 
       const sale = await DealService.createManualSale(payload, userId);
       res.status(201).json({ success: true, data: sale });
