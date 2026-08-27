@@ -579,7 +579,7 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange, role }: {
 
 // ─── TopBar ───────────────────────────────────────────────────────────────────
 
-const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onToggleDark: () => void; session: any; onNav: (s: Screen) => void }) => {
+const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolean; onToggleDark: () => void; session: any; onNav: (s: Screen) => void; role?: string }) => {
   const [showAccountMenu, setShowAccountMenu] = useState(false)
   const [showNotifs, setShowNotifs] = useState(false)
   
@@ -712,7 +712,9 @@ const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onT
             <div className="avatar">{initials}</div>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t1)', lineHeight: 1.2 }}>{userName}</span>
-              <span style={{ fontSize: 10.5, color: 'var(--t3)' }}>Sales Manager</span>
+              <span style={{ fontSize: 10.5, color: 'var(--t3)', textTransform: 'capitalize' }}>
+                {role ? role.replace('_', ' ') : 'Staff'}
+              </span>
             </div>
             <Ic n={I.chevDown} size={12} style={{ color: 'var(--t4)', marginLeft: 2 }} />
           </div>
@@ -3037,7 +3039,7 @@ export default function App() {
 
       <div className="workspace" style={{ flex: 1, minWidth: 0, zIndex: 1 }}>
         <div className="ws-card">
-          <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} session={session} onNav={handleNav} />
+          <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} session={session} onNav={handleNav} role={currentProfile?.role} />
           {renderScreen()}
         </div>
       </div>
