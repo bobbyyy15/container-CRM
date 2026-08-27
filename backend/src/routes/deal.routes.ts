@@ -6,12 +6,12 @@ const router = Router();
 
 // Quotations
 router.get('/quotations', DealController.getQuotations);
-router.post('/quotations', requireRoles('admin', 'manager', 'pic'), DealController.createQuotation);
-router.patch('/quotations/:id/status', requireRoles('admin', 'manager', 'pic'), DealController.updateQuotationStatus);
-router.post('/quotations/:id/convert-to-sale', requireRoles('admin', 'manager', 'pic'), DealController.convertToSale);
+router.post('/quotations', requireRoles('admin', 'sales_manager'), DealController.createQuotation);
+router.patch('/quotations/:id/status', requireRoles('admin', 'sales_manager'), DealController.updateQuotationStatus);
+router.post('/quotations/:id/convert-to-sale', requireRoles('admin', 'sales_manager'), DealController.convertToSale);
 
 // Sales
 router.get('/sales', DealController.getSales);
-router.post('/sales', requireRoles('admin', 'manager', 'pic'), DealController.createManualSale);
+router.post('/sales', requireRoles('admin', 'sales_manager'), DealController.createManualSale);
 
 export default router;

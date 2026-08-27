@@ -6,13 +6,13 @@ type Profile = {
   email: string;
   username: string | null;
   full_name: string | null;
-  role: 'admin' | 'manager' | 'pic';
+  role: 'admin' | 'sales_manager' | 'procurement';
   status: 'active' | 'inactive';
   created_at: string;
   pics?: { id: string; name: string }[];
 };
 
-const ROLES: Profile['role'][] = ['admin', 'manager', 'pic'];
+const ROLES: Profile['role'][] = ['admin', 'sales_manager', 'procurement'];
 const STATUSES: Profile['status'][] = ['active', 'inactive'];
 
 export const UserManagement = () => {
