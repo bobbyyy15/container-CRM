@@ -28,6 +28,11 @@ const listActiveLeads = async (
     .order('created_at', { ascending: false })
     .limit(5000);
 
+  // DATA SILOS ENFORCEMENT
+  if (req.auth?.profile.role !== 'admin') {
+    dbQuery = dbQuery.eq('pic_id', req.auth?.profile.pic_id);
+  }
+
   if (table === 'prospect_clients' && query.status !== 'all') dbQuery = dbQuery.eq('lifecycle_status', query.status);
   if (table === 'warm_leads') dbQuery = dbQuery.eq('status', 'active');
   if (table === 'inquiries') dbQuery = dbQuery.not('status', 'in', '(Removed,Lost,Quotation Created,Converted to Sale)');
@@ -128,8 +133,14 @@ export class LeadController {
     try {
       const payload = CreateManualProspectSchema.parse(req.body);
       const actorId = req.auth!.user.id;
+      
+      // DATA SILOS ENFORCEMENT
+      if (req.auth?.profile.role !== 'admin') {
+        payload.picId = req.auth?.profile.pic_id ?? undefined;
+      }
+
       const prospect = await LeadService.createManualProspect(payload, actorId);
-      res.status(201).json({ success: true, data: prospect });
+      res.json({ success: true, data: prospect, message: 'Prospect created successfully' });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });
     }
@@ -139,8 +150,14 @@ export class LeadController {
     try {
       const payload = CreateManualWarmLeadSchema.parse(req.body);
       const actorId = req.auth!.user.id;
+      
+      // DATA SILOS ENFORCEMENT
+      if (req.auth?.profile.role !== 'admin') {
+        payload.picId = req.auth?.profile.pic_id ?? undefined;
+      }
+
       const warmLead = await LeadService.createManualWarmLead(payload, actorId);
-      res.status(201).json({ success: true, data: warmLead });
+      res.json({ success: true, data: warmLead, message: 'Warm Lead created successfully' });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });
     }
@@ -150,6 +167,12 @@ export class LeadController {
     try {
       const payload = CreateManualInquirySchema.parse(req.body);
       const actorId = req.auth!.user.id;
+      
+      // DATA SILOS ENFORCEMENT
+      if (req.auth?.profile.role !== 'admin') {
+        payload.picId = req.auth?.profile.pic_id ?? undefined;
+      }
+
       const inquiry = await LeadService.createManualInquiry(payload, actorId);
       res.status(201).json({ success: true, data: inquiry });
     } catch (error: any) {

@@ -7,11 +7,17 @@ export class DealController {
   
   static async getQuotations(req: Request, res: Response) {
     try {
-      const { data, error } = await supabaseAdmin
+      let dbQuery = supabaseAdmin
         .from('quotations')
         .select('*, companies(*), contacts(*), pics(name), quotation_items(*)')
         .not('status', 'in', '(Converted,Rejected)')
         .order('created_at', { ascending: false });
+
+      if (req.auth?.profile.role !== 'admin') {
+        dbQuery = dbQuery.eq('pic_id', req.auth?.profile.pic_id);
+      }
+
+      const { data, error } = await dbQuery;
 
       if (error) throw error;
       res.json({ success: true, data });
@@ -22,10 +28,16 @@ export class DealController {
 
   static async getSales(req: Request, res: Response) {
     try {
-      const { data, error } = await supabaseAdmin
+      let dbQuery = supabaseAdmin
         .from('sales')
         .select('*, companies(*), pics(name), quotations(*, contacts(*), quotation_items(*))')
         .order('created_at', { ascending: false });
+
+      if (req.auth?.profile.role !== 'admin') {
+        dbQuery = dbQuery.eq('pic_id', req.auth?.profile.pic_id);
+      }
+
+      const { data, error } = await dbQuery;
 
       if (error) throw error;
 
@@ -62,6 +74,12 @@ export class DealController {
     try {
       const payload = CreateManualSaleSchema.parse(req.body);
       const userId = req.auth!.user.id;
+
+      // DATA SILOS ENFORCEMENT
+      if (req.auth?.profile.role !== 'admin') {
+        payload.picId = req.auth?.profile.pic_id ?? undefined;
+      }
+
       const sale = await DealService.createManualSale(payload, userId);
       res.status(201).json({ success: true, data: sale });
     } catch (error: any) {
