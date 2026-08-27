@@ -668,7 +668,7 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
       <div className="dialog" onClick={e => e.stopPropagation()} style={{ width: 440 }}>
         <div className="dialog-header">
           <div className="dialog-title">Generate Contract</div>
-          <button className="close-btn" onClick={onClose}><Ic n={I.close} size={16} /></button>
+          <button type="button" className="close-btn" onClick={onClose}>✕</button>
         </div>
         <form onSubmit={handleSubmit} className="dialog-content" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {error && <div style={{ color: 'var(--red)', fontSize: 13, background: 'var(--red-bg)', padding: '8px 12px', borderRadius: 6 }}>{error}</div>}
@@ -679,7 +679,7 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
               <option value="">-- Select a Sale --</option>
               {sales.map(s => (
                 <option key={s.id} value={s.id}>
-                  {s.companies?.name || 'Unknown Company'} (Total: ${(s.revenue || 0).toLocaleString()})
+                  {s.company || 'Unknown Company'} (Total: ${(s.totalSell || 0).toLocaleString()})
                 </option>
               ))}
             </select>
@@ -697,10 +697,10 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
           </div>
 
           <div className="dialog-footer">
-            <Btn variant="ghost" onClick={onClose} disabled={submitting}>Cancel</Btn>
-            <Btn variant="primary" type="submit" disabled={submitting}>
+            <button type="button" className="btn ghost" onClick={onClose} disabled={submitting}>Cancel</button>
+            <button type="submit" className="btn primary" disabled={submitting}>
               {submitting ? 'Generating...' : 'Generate Contract'}
-            </Btn>
+            </button>
           </div>
         </form>
       </div>
