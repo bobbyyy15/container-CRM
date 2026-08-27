@@ -6,12 +6,13 @@ type Profile = {
   email: string;
   username: string | null;
   full_name: string | null;
-  role: 'admin' | 'manager' | 'pic';
+  role: 'admin' | 'sales_manager' | 'procurement';
   status: 'active' | 'inactive';
   created_at: string;
+  pics?: { id: string; name: string }[];
 };
 
-const ROLES: Profile['role'][] = ['admin', 'manager', 'pic'];
+const ROLES: Profile['role'][] = ['admin', 'sales_manager', 'procurement'];
 const STATUSES: Profile['status'][] = ['active', 'inactive'];
 
 export const UserManagement = () => {
@@ -42,9 +43,23 @@ export const UserManagement = () => {
     setSavingId(id);
     try {
       const res = await api.patch(`/admin/users/${id}`, payload);
-      setUsers(prev => prev.map(u => (u.id === id ? res.data.data : u)));
+      setUsers(prev => prev.map(u => (u.id === id ? { ...u, ...res.data.data } : u)));
     } catch (err: any) {
       alert(`Error updating user: ${err.response?.data?.error?.message ?? err.message}`);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const assignPic = async (id: string, fullName: string | null) => {
+    const picName = prompt("Enter the PIC Name to create and assign to this user:", fullName || '');
+    if (!picName) return;
+    setSavingId(id);
+    try {
+      await api.post(`/admin/users/${id}/pic`, { name: picName });
+      load(); // Reload to fetch the join properly
+    } catch (err: any) {
+      alert(`Error assigning PIC: ${err.response?.data?.error?.message ?? err.message}`);
     } finally {
       setSavingId(null);
     }
@@ -57,16 +72,15 @@ export const UserManagement = () => {
       <div className="page-content">
         <div style={{ marginBottom: 20 }}>
           <div className="page-title">User Management</div>
-          <div className="page-desc">Manage roles and account status for everyone in the CRM.</div>
+          <div className="page-desc">Manage roles and account status for everyone in the CRM. Assign PIC identities so users can own pipeline data.</div>
         </div>
 
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <table className="crm" style={{ width: '100%' }}>
             <thead>
               <tr>
-                <th>Email</th>
-                <th>Username</th>
-                <th>Full Name</th>
+                <th>Email / Name</th>
+                <th>PIC Identity (Data Ownership)</th>
                 <th>Role</th>
                 <th>Status</th>
                 <th>Created</th>
@@ -76,11 +90,27 @@ export const UserManagement = () => {
               {users.map(u => {
                 const isSelf = u.id === selfId;
                 const isSaving = savingId === u.id;
+                const hasPic = u.pics && u.pics.length > 0;
                 return (
                   <tr key={u.id}>
-                    <td>{u.email}</td>
-                    <td>{u.username || '—'}</td>
-                    <td>{u.full_name || '—'}</td>
+                    <td>
+                      <div style={{ fontWeight: 600, color: 'var(--t1)' }}>{u.full_name || u.username || '—'}</div>
+                      <div style={{ fontSize: 11, color: 'var(--t4)' }}>{u.email}</div>
+                    </td>
+                    <td>
+                      {hasPic ? (
+                        <div className="badge badge-blue">✓ {u.pics![0].name}</div>
+                      ) : (
+                        <button 
+                          className="btn" 
+                          style={{ fontSize: 11, padding: '4px 8px' }}
+                          onClick={() => assignPic(u.id, u.full_name)}
+                          disabled={isSaving}
+                        >
+                          + Assign PIC
+                        </button>
+                      )}
+                    </td>
                     <td>
                       <select
                         className="inp"

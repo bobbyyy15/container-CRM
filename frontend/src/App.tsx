@@ -11,6 +11,7 @@ import {
   NewWarmLeadDialog,
   NewProspectDialog,
   NewManualSaleDialog,
+  NewContractDialog,
   QuotationDialog,
   SaleDialog,
   type InquiryOption,
@@ -189,6 +190,56 @@ const useAnalytics = () => {
     }).catch(console.error)
   }, [])
   return data
+}
+
+
+
+const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses', search = '') => {
+  const [data, setData] = useState<any[]>([]);
+  useEffect(() => {
+    api.get('/contracts', { params: { status, pickStatus, search } }).then(res => {
+      setData((res.data.data || []).map((c: any) => ({
+        id: c.id,
+        ref: c.contract_number,
+        co: c.company_name,
+        contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
+        category: c.items && c.items.length > 0 ? c.items[0].description.split(' ')[0] : '-',
+        size: c.items && c.items.length > 0 ? c.items[0].description : '-',
+        qty: c.total_units,
+        value: Number(c.revenue),
+        pickup: c.pickup_date ? new Date(c.pickup_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Unscheduled',
+        pickStatus: c.pickup_status,
+        status: c.contract_status,
+        pic: c.pic_name || '-',
+        sale: c.sale_number
+      })));
+    }).catch(console.error);
+  }, [status, pickStatus, search]);
+  return data;
+}
+
+const useCustomers = (status = 'All', search = '') => {
+  const [data, setData] = useState<any[]>([]);
+  useEffect(() => {
+    api.get('/customers', { params: { status, search } }).then(res => {
+      setData((res.data.data || []).map((c: any) => ({
+        id: c.company_id,
+        co: c.company_name,
+        contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
+        phone: c.primary_contact ? (c.primary_contact.phone_1 || c.primary_contact.phone_2) : '-',
+        state: c.state || '-',
+        country: c.country || '-',
+        sales: c.sales_count,
+        units: c.total_units,
+        revenue: Number(c.total_revenue),
+        profit: Number(c.total_gross_profit),
+        last: new Date(c.last_purchase_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        pic: c.pic_name || '-',
+        status: c.status
+      })));
+    }).catch(console.error);
+  }, [status, search]);
+  return data;
 }
 
 const useProspects = (revision = 0, status: 'active' | 'converted' | 'removed' | 'all' = 'active') => {
@@ -395,7 +446,7 @@ type PicPerformanceRow = {
   quotes: number
   revenue: number
 }
-type BestClientRow = { r: number; co: string; u: number; p: number }
+
 type OverduePickupRow = { contract: string; co: string; days: number; qty: number; size: string }
 type LossReasonRow = { reason: string; color: string; count: number }
 
@@ -403,7 +454,7 @@ const profitChartData: ProfitChartPoint[] = []
 const categoryData: ChartSlice[] = []
 const inquiryStatusData: ChartSlice[] = []
 const PIC_DATA: PicPerformanceRow[] = []
-const BEST_CLIENTS: BestClientRow[] = []
+
 const OVERDUE_PICKUPS: OverduePickupRow[] = []
 const LOSS_REASONS: LossReasonRow[] = []
 
@@ -579,7 +630,7 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange, role }: {
 
 // ─── TopBar ───────────────────────────────────────────────────────────────────
 
-const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onToggleDark: () => void; session: any; onNav: (s: Screen) => void }) => {
+const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolean; onToggleDark: () => void; session: any; onNav: (s: Screen) => void; role?: string }) => {
   const [showAccountMenu, setShowAccountMenu] = useState(false)
   const [showNotifs, setShowNotifs] = useState(false)
   
@@ -712,7 +763,9 @@ const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onT
             <div className="avatar">{initials}</div>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t1)', lineHeight: 1.2 }}>{userName}</span>
-              <span style={{ fontSize: 10.5, color: 'var(--t3)' }}>Sales Manager</span>
+              <span style={{ fontSize: 10.5, color: 'var(--t3)', textTransform: 'capitalize' }}>
+                {role ? role.replace('_', ' ') : 'Staff'}
+              </span>
             </div>
             <Ic n={I.chevDown} size={12} style={{ color: 'var(--t4)', marginLeft: 2 }} />
           </div>
@@ -725,6 +778,7 @@ const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onT
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: any }) => {
+  const topCustomers = useCustomers('All', '').slice(0, 5);
   const [chartMetric, setChartMetric] = useState<'profit' | 'revenue' | 'cost'>('profit')
   const chartColor = chartMetric === 'profit' ? '#315EF6' : chartMetric === 'revenue' ? '#059669' : '#6B7280'
   const analytics = useAnalytics()
@@ -976,14 +1030,14 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
             <table className="crm" style={{ width: '100%' }}>
               <thead><tr><th>#</th><th>Company</th><th className="r">Units</th><th className="r">Profit</th></tr></thead>
               <tbody>
-                {BEST_CLIENTS.map(row => (
-                  <tr key={row.r}>
+                                {topCustomers.map((row, idx) => (
+                  <tr key={row.id}>
                     <td style={{ width: 36 }}>
-                      <span style={{ width: 22, height: 22, borderRadius: 6, background: row.r === 1 ? '#FEF3C7' : 'var(--s3)', color: row.r === 1 ? '#D97706' : 'var(--t4)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{row.r}</span>
+                      <span style={{ width: 22, height: 22, borderRadius: 6, background: idx === 0 ? '#FEF3C7' : 'var(--s3)', color: idx === 0 ? '#D97706' : 'var(--t4)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{idx + 1}</span>
                     </td>
                     <td style={{ fontWeight: 600, fontSize: 12.5 }}>{row.co}</td>
-                    <td className="r mono" style={{ fontWeight: 700 }}>{row.u}</td>
-                    <td className="r profit-cell">${row.p.toLocaleString()}</td>
+                    <td className="r mono" style={{ fontWeight: 700 }}>{row.units}</td>
+                    <td className="r profit-cell">${row.profit.toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -2040,14 +2094,10 @@ const SalesTracker = () => {
 // ─── Customer Accounts ────────────────────────────────────────────────────────
 
 const CustomerAccounts = () => {
-  const [tab, setTab] = useState('All')
-  const customers = [
-    { co: 'NorthStar Construction LLC', contact: 'Tom Erikson', phone: '+1-612-555-0182', state: 'MN', country: 'USA', sales: 22, units: 28, revenue: 182400, profit: 56800, last: 'Jul 28', pic: 'JC', status: 'Active' },
-    { co: 'Great Lakes Storage Solutions', contact: 'Ryan Murphy', phone: '+1-313-555-0447', state: 'MI', country: 'USA', sales: 18, units: 22, revenue: 134800, profit: 42200, last: 'Jul 25', pic: 'MS', status: 'Active' },
-    { co: 'Ontario Modular Structures', contact: 'Pierre Leclerc', phone: '+1-416-555-0229', state: 'ON', country: 'CAN', sales: 14, units: 18, revenue: 112800, profit: 34600, last: 'Jul 16', pic: 'DL', status: 'Active' },
-    { co: 'Rockies Build Ltd', contact: 'Derek Holt', phone: '+1-403-555-0318', state: 'AB', country: 'CAN', sales: 11, units: 14, revenue: 88600, profit: 26400, last: 'Jul 22', pic: 'DL', status: 'Active' },
-    { co: 'Bakken Industrial LLC', contact: 'Mark Jensen', phone: '+1-701-555-0512', state: 'ND', country: 'USA', sales: 8, units: 11, revenue: 72400, profit: 21800, last: 'Jun 30', pic: 'JC', status: 'Floating' },
-  ]
+  const [tab, setTab] = useState('All');
+  const [search, setSearch] = useState('');
+  const customers = useCustomers(tab, search);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="page-header">
@@ -2080,7 +2130,7 @@ const CustomerAccounts = () => {
           </tr></thead>
           <tbody>
             {(tab === 'All' ? customers : customers.filter(c => c.status === tab)).map(c => (
-              <tr key={c.co}>
+              <tr key={c.id}>
                 <td className="col-check"><input type="checkbox" className="cb" /></td>
                 <td>
                   <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{c.co}</div>
@@ -2205,12 +2255,15 @@ const ContactOutreach = () => {
 // ─── Contracts ────────────────────────────────────────────────────────────────
 
 const Contracts = () => {
-  const contracts = [
-    { ref: 'CT-2024-0042', co: 'Calgary Build Corp', contact: 'Wade S.', category: 'Open-Top', size: '40ft HC', qty: 3, value: 18600, pickup: 'Aug 15', pickStatus: 'Scheduled', status: 'Active', pic: 'JC', sale: 'SL-2024-0140' },
-    { ref: 'CT-2024-0041', co: 'NorthStar Construction LLC', contact: 'Tom E.', category: 'High-Cube', size: '40ft HC', qty: 4, value: 19200, pickup: 'Aug 8', pickStatus: 'Confirmed', status: 'Active', pic: 'JC', sale: 'SL-2024-0142' },
-    { ref: 'CT-2024-0039', co: 'Great Lakes Storage Solutions', contact: 'Ryan M.', category: 'Dry', size: '20ft', qty: 6, value: 15600, pickup: 'Jul 30', pickStatus: 'Picked Up', status: 'Completed', pic: 'MS', sale: 'SL-2024-0141' },
-    { ref: 'CT-2024-0037', co: 'Bakken Industrial LLC', contact: 'Mark J.', category: 'Office', size: '20ft HC', qty: 3, value: 18600, pickup: 'Jul 18', pickStatus: 'Overdue', status: 'Active', pic: 'JC', sale: 'SL-2024-0139' },
-  ]
+  const [status, setStatus] = useState('All Statuses');
+  const [pickStatus, setPickStatus] = useState('All Pickup Statuses');
+  const [search, setSearch] = useState('');
+  const [showNew, setShowNew] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const contracts = useContracts(status, pickStatus, search);
+  // Re-fetch sales when clicking New Contract
+  const sales = useSales(revision);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {contracts.some(c => c.pickStatus === 'Overdue') && (
@@ -2223,11 +2276,12 @@ const Contracts = () => {
         </div>
       )}
       <div className="toolbar">
-        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search contracts…" /></div>
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search contracts…" value={search} onChange={e => setSearch(e.target.value)} /></div>
         <select className="sel"><option>All Statuses</option></select>
-        <select className="sel"><option>All Pickup Statuses</option><option>Overdue</option></select>
+        <select className="sel" value={pickStatus} onChange={e => setPickStatus(e.target.value)}><option>All Pickup Statuses</option><option>Pending</option><option>Scheduled</option><option>Confirmed</option><option>Picked Up</option><option>Overdue</option></select>
         <div className="toolbar-right">
-          <Btn variant="primary" sm><Ic n={I.plus} size={13} /> New Contract</Btn>
+          <Btn variant="primary" sm onClick={() => setShowNew(true)}><Ic n={I.plus} size={13} /> New Contract</Btn>
+          {showNew && <NewContractDialog sales={sales} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); setRevision(r => r + 1); window.location.reload(); }} />}
         </div>
       </div>
       <div className="table-wrap">
@@ -2239,7 +2293,7 @@ const Contracts = () => {
           </tr></thead>
           <tbody>
             {contracts.map(c => (
-              <tr key={c.ref} style={{ background: c.pickStatus === 'Overdue' ? 'var(--red-bg)' : undefined }}>
+              <tr key={c.id} style={{ background: c.pickStatus === 'Overdue' ? 'var(--red-bg)' : undefined }}>
                 <td><span className="ref-id" style={{ color: 'var(--teal)' }}>{c.ref}</span></td>
                 <td>
                   <div style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--t1)' }}>{c.co}</div>
@@ -3037,7 +3091,7 @@ export default function App() {
 
       <div className="workspace" style={{ flex: 1, minWidth: 0, zIndex: 1 }}>
         <div className="ws-card">
-          <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} session={session} onNav={handleNav} />
+          <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} session={session} onNav={handleNav} role={currentProfile?.role} />
           {renderScreen()}
         </div>
       </div>

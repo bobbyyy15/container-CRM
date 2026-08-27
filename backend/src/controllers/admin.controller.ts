@@ -7,7 +7,10 @@ export class AdminController {
     try {
       const { data, error } = await supabaseAdmin
         .from('profiles')
-        .select('id, email, username, full_name, role, status, created_at')
+        .select(`
+          id, email, username, full_name, role, status, created_at,
+          pics ( id, name )
+        `)
         .order('created_at', { ascending: false });
       if (error) throw error;
       res.json({ success: true, data });
@@ -37,6 +40,40 @@ export class AdminController {
       if (error) throw error;
       if (!data) return res.status(404).json({ success: false, error: { message: 'User not found.' } });
 
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async assignPic(req: Request, res: Response) {
+    try {
+      const targetId = req.params.id as string;
+      const { name } = req.body; // if we pass a name, we create a new PIC. if we pass pic_id, we link? Let's just create a new PIC linked to them for simplicity, or find existing.
+      if (!name) throw new Error("PIC Name is required");
+
+      // Check if they already have a PIC
+      const { data: existingPic } = await supabaseAdmin
+        .from('pics')
+        .select('id')
+        .eq('profile_id', targetId)
+        .maybeSingle();
+
+      if (existingPic) {
+        throw new Error("This user already has a linked PIC identity.");
+      }
+
+      // Create new PIC
+      const { data, error } = await supabaseAdmin
+        .from('pics')
+        .insert({
+          profile_id: targetId,
+          name: name
+        })
+        .select()
+        .single();
+      
+      if (error) throw error;
       res.json({ success: true, data });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });

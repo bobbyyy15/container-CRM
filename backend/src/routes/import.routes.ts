@@ -4,7 +4,7 @@ import { requireRoles } from '../middleware/auth.middleware';
 
 const router = Router();
 
-router.post('/', requireRoles('admin', 'manager', 'pic'), ImportController.processImport);
-router.get('/conflicts', ImportController.getConflicts);
+router.post('/', requireRoles('admin', 'sales_manager'), ImportController.processImport);
+router.get('/conflicts', requireRoles('admin', 'sales_manager'), ImportController.getConflicts);
 
 export default router;

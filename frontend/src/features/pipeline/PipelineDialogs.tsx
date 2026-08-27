@@ -629,3 +629,76 @@ export const SaleDialog = ({ quotations, initialId, onClose, onSaved }: {
     </Modal>
   )
 }
+
+
+export const NewContractDialog = ({ sales, onClose, onSaved }: {
+  sales: any[];
+  onClose: () => void;
+  onSaved: () => void;
+}) => {
+  const [saleId, setSaleId] = useState('');
+  const [pickupDate, setPickupDate] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!saleId) return setError('Please select a source sale');
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await api.post('/contracts', { 
+        sale_id: saleId, 
+        pickup_date: pickupDate ? new Date(pickupDate).toISOString() : undefined 
+      });
+      if (res.data.success) {
+        onSaved();
+      } else {
+        setError(res.data.error?.message || 'Failed to create contract');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error?.message || err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal title="Generate contract" description="Create a contract from a won sale." onClose={onClose}>
+      <form onSubmit={handleSubmit}>
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <ErrorMessage message={error ?? ''} />
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Source sale</label>
+            <select className="inp" value={saleId} onChange={e => setSaleId(e.target.value)} disabled={submitting}>
+              <option value="">-- Select a sale --</option>
+              {sales.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.companies?.name || 'Unknown Company'} (Total: ${(s.revenue || 0).toLocaleString()})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Target pickup date (optional)</label>
+            <input
+              type="date"
+              className="inp"
+              value={pickupDate}
+              onChange={e => setPickupDate(e.target.value)}
+              disabled={submitting}
+            />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
+          <button className="btn btn-primary" disabled={submitting || !saleId}>
+            {submitting ? 'Generating…' : 'Generate Contract'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+};

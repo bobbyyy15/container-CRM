@@ -4,6 +4,6 @@ import { requireRoles } from '../middleware/auth.middleware';
 
 const router = Router();
 
-router.post('/email', requireRoles('admin', 'manager', 'pic'), OutreachController.sendEmail);
+router.post('/email', requireRoles('admin', 'sales_manager'), OutreachController.sendEmail);
 
 export default router;

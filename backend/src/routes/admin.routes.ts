@@ -10,5 +10,6 @@ router.use(requireRoles('admin'));
 
 router.get('/users', AdminController.listUsers);
 router.patch('/users/:id', AdminController.updateUser);
+router.post('/users/:id/pic', AdminController.assignPic);
 
 export default router;

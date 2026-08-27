@@ -8,8 +8,9 @@ declare global {
         user: User;
         profile: {
           id: string;
-          role: 'admin' | 'manager' | 'pic';
+          role: 'admin' | 'sales_manager' | 'procurement';
           status: 'active' | 'inactive';
+          pic_id: string | null;
         };
       };
     }

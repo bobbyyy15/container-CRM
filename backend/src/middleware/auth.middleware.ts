@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 
-type OperationalRole = 'admin' | 'manager' | 'pic';
+type OperationalRole = 'admin' | 'sales_manager' | 'procurement';
 
 const authError = (
   req: Request,
@@ -42,9 +42,16 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     }
 
     const role = profile.role;
-    if (!['admin', 'manager', 'pic'].includes(role)) {
+    if (!['admin', 'sales_manager', 'procurement'].includes(role)) {
       return authError(req, res, 403, 'ROLE_INVALID', 'This account does not have a supported CRM role.');
     }
+
+    const { data: picData } = await supabaseAdmin
+      .from('pics')
+      .select('id')
+      .eq('profile_id', user.id)
+      .eq('status', 'active')
+      .maybeSingle();
 
     req.auth = {
       user,
@@ -52,6 +59,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
         id: profile.id,
         role: role as OperationalRole,
         status: 'active',
+        pic_id: picData?.id || null,
       },
     };
 
