@@ -1927,7 +1927,7 @@ const QuotationList = () => {
       </div>
       <div className="toolbar">
         <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search quotations…" /></div>
-        <select className="sel" value={status} onChange={e => setStatus(e.target.value)}><option>All Statuses</option><option>Pending Signature</option><option>Active</option><option>Completed</option></select>
+        <select className="sel"><option>All Statuses</option></select>
         <select className="sel"><option>All PICs</option></select>
         <div className="toolbar-right">
           <Btn variant="ghost" sm onClick={() => exportToCSV(quotes, 'quotations')}><Ic n={I.export} size={13} /> Export</Btn>

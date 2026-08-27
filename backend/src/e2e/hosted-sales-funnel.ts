@@ -86,7 +86,7 @@ const run = async () => {
   if (createError || !created.user) throw createError ?? new Error('Temporary user was not created');
   ids.user = created.user.id;
 
-  const { error: roleError } = await supabaseAdmin.from('profiles').update({ role: 'manager' }).eq('id', ids.user);
+  const { error: roleError } = await supabaseAdmin.from('profiles').update({ role: 'sales_manager' }).eq('id', ids.user);
   if (roleError) throw roleError;
 
   const { data: signedIn, error: signInError } = await publicClient.auth.signInWithPassword({ email, password });

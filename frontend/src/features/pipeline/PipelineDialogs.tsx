@@ -664,19 +664,15 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
   };
 
   return (
-    <div className="overlay" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="dialog" onClick={e => e.stopPropagation()} style={{ width: 440 }}>
-        <div className="dialog-header">
-          <div className="dialog-title">Generate Contract</div>
-          <button className="close-btn" onClick={onClose}><Ic n={I.close} size={16} /></button>
-        </div>
-        <form onSubmit={handleSubmit} className="dialog-content" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {error && <div style={{ color: 'var(--red)', fontSize: 13, background: 'var(--red-bg)', padding: '8px 12px', borderRadius: 6 }}>{error}</div>}
-          
-          <div className="form-group">
-            <label className="form-label">Source Sale</label>
-            <select className="form-input" value={saleId} onChange={e => setSaleId(e.target.value)} disabled={submitting}>
-              <option value="">-- Select a Sale --</option>
+    <Modal title="Generate contract" description="Create a contract from a won sale." onClose={onClose}>
+      <form onSubmit={handleSubmit}>
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <ErrorMessage message={error ?? ''} />
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Source sale</label>
+            <select className="inp" value={saleId} onChange={e => setSaleId(e.target.value)} disabled={submitting}>
+              <option value="">-- Select a sale --</option>
               {sales.map(s => (
                 <option key={s.id} value={s.id}>
                   {s.companies?.name || 'Unknown Company'} (Total: ${(s.revenue || 0).toLocaleString()})
@@ -685,25 +681,24 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
             </select>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Target Pickup Date (Optional)</label>
-            <input 
-              type="date" 
-              className="form-input" 
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Target pickup date (optional)</label>
+            <input
+              type="date"
+              className="inp"
               value={pickupDate}
               onChange={e => setPickupDate(e.target.value)}
-              disabled={submitting} 
+              disabled={submitting}
             />
           </div>
-
-          <div className="dialog-footer">
-            <Btn variant="ghost" onClick={onClose} disabled={submitting}>Cancel</Btn>
-            <Btn variant="primary" type="submit" disabled={submitting}>
-              {submitting ? 'Generating...' : 'Generate Contract'}
-            </Btn>
-          </div>
-        </form>
-      </div>
-    </div>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
+          <button className="btn btn-primary" disabled={submitting || !saleId}>
+            {submitting ? 'Generating…' : 'Generate Contract'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 };

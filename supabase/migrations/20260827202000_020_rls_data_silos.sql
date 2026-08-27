@@ -134,7 +134,7 @@ BEGIN
                 CONTINUE;
             END IF;
 
-            IF public.is_pipeline_identity_removed(v_company_id, v_contact_id, v_pic_id, v_email_1, v_email_2, v_phone_1, v_phone_2) THEN
+            IF public.is_pipeline_identity_removed(v_company_id, v_contact_id, v_email_1, v_email_2, v_phone_1, v_phone_2) THEN
                 v_reason := 'Identity is on the removed/suppression list';
                 INSERT INTO public.import_rows (batch_id, row_number, raw_data, status, reason, company_id, contact_id)
                 VALUES (v_batch_id, v_item.row_number, v_row, 'removed', v_reason, v_company_id, v_contact_id);
@@ -162,7 +162,7 @@ BEGIN
                 IF v_prospect_id IS NOT NULL THEN
                     v_reason := 'Contact already exists in the pipeline';
                     INSERT INTO public.import_rows (batch_id, row_number, raw_data, status, reason, company_id, contact_id, prospect_id)
-                    VALUES (v_batch_id, v_item.row_number, v_row, 'duplicate', v_reason, v_company_id, v_contact_id, v_pic_id, v_prospect_id);
+                    VALUES (v_batch_id, v_item.row_number, v_row, 'duplicate', v_reason, v_company_id, v_contact_id, v_prospect_id);
                     v_duplicates := v_duplicates + 1;
                     CONTINUE;
                 END IF;
@@ -206,7 +206,7 @@ BEGIN
 
             IF v_contact_id IS NOT NULL THEN
                 INSERT INTO public.company_contacts (company_id, contact_id, is_primary)
-                VALUES (v_company_id, v_contact_id, v_pic_id, true)
+                VALUES (v_company_id, v_contact_id, true)
                 ON CONFLICT (company_id, contact_id) DO NOTHING;
             END IF;
 
@@ -220,7 +220,7 @@ BEGIN
             RETURNING id INTO v_prospect_id;
 
             INSERT INTO public.import_rows (batch_id, row_number, raw_data, status, company_id, contact_id, prospect_id)
-            VALUES (v_batch_id, v_item.row_number, v_row, 'imported', v_company_id, v_contact_id, v_pic_id, v_prospect_id);
+            VALUES (v_batch_id, v_item.row_number, v_row, 'imported', v_company_id, v_contact_id, v_prospect_id);
             v_imported := v_imported + 1;
             IF v_contact_id IS NULL THEN
                 v_without_contact := v_without_contact + 1;
