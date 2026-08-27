@@ -11,6 +11,10 @@ been scoped but not yet built).
 See [`docs/ACCOUNT_MODULE.md`](docs/ACCOUNT_MODULE.md) for the signup/login/roles/Google-OAuth
 flow, its known bugs, and what to pick up next there.
 
+See [`docs/CUSTOMERS_MODULE.md`](docs/CUSTOMERS_MODULE.md) for the Customer Accounts module
+(currently mock data, not yet built), where it connects, and the Sales Manager /
+Inventory-Inquiry RBAC model.
+
 ## Local setup
 
 1. Install both locked dependency sets:
