@@ -156,7 +156,8 @@ export class LeadController {
 
       res.json({
         success: true,
-        data: inquiry
+        data: inquiry,
+        message: 'Inquiry created successfully'
       });
     } catch (error: any) {
       res.status(400).json({

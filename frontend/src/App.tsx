@@ -3,6 +3,7 @@ import { supabase } from './config/supabase'
 import { api } from './lib/api'
 import Login from './Login'
 import ProspectImportDialog from './features/import/ProspectImportDialog'
+import { UserProfileSettings } from './features/settings/UserProfileSettings'
 import {
   NewInquiryDialog,
   NewWarmLeadDialog,
@@ -20,7 +21,7 @@ import {
   LineChart, Line,
 } from 'recharts'
 
-export const exportToCSV = (data: any[], filename: string) => {
+const exportToCSV = (data: any[], filename: string) => {
   if (!data || !data.length) return;
   const headers = Object.keys(data[0]);
   const csvRows = [];
@@ -234,6 +235,7 @@ const I = {
   x:           'M18 6L6 18M6 6l12 12',
   chevDown:    'M6 9l6 6 6-6',
   chevRight:   'M9 18l6-6-6-6',
+  chevLeft:    'M15 18l-6-6 6-6',
   arrowRight:  'M5 12h14M12 5l7 7-7 7',
   trending:    'M23 6l-9.5 9.5-5-5L1 18',
   trendDown:   'M23 18l-9.5-9.5-5 5L1 6',
@@ -251,6 +253,7 @@ const I = {
   target:      'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4',
   upload:      'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
   menu:        'M3 12h18M3 6h18M3 18h18',
+  sidebar:     'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm5 0v16',
   copy:        'M20 9h-9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 0 2 2v1',
   outreach:    'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm18 2l-8 7-8-7',
   profit:      'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
@@ -266,7 +269,7 @@ type Screen =
   | 'daily-tasks' | 'removed' | 'deliverability'
   | 'container-catalog'
   | 'pic-performance' | 'best-clients' | 'profit-analytics' | 'inquiry-funnel'
-  | 'service-territories' | 'daily-targets' | 'system-settings'
+  | 'service-territories' | 'daily-targets' | 'system-settings' | 'profile-settings'
 
 // ─── Navigation ──────────────────────────────────────────────────────────────
 
@@ -334,14 +337,6 @@ const NAV: NavGroup[] = [
   },
 ]
 
-const COLLAPSED_NAV_ITEMS = new Set<Screen>([
-  'dashboard',
-  'prospects',
-  'warm-leads',
-  'inquiries',
-  'quotations',
-  'sales-tracker',
-])
 
 const SCREEN_LABELS: Record<Screen, string> = {
   'dashboard': 'Executive Overview',
@@ -367,6 +362,7 @@ const SCREEN_LABELS: Record<Screen, string> = {
   'service-territories': 'Service Territories',
   'daily-targets': 'Daily Targets',
   'system-settings': 'System Settings',
+  'profile-settings': 'Profile Settings',
 }
 
 // ─── Sample Data ──────────────────────────────────────────────────────────────
@@ -427,17 +423,36 @@ const Badge = ({ status }: { status: string }) => (
   <span className={`badge ${BADGE_MAP[status] || 'b-gray'}`}>{status}</span>
 )
 
-const Trend = ({ val, up, white }: { val: string; up: boolean; white?: boolean }) => (
-  <span className={`trend ${white ? 'trend-up-white' : up ? 'trend-up' : 'trend-down'}`}>
-    {up ? '↑' : '↓'} {val}
-  </span>
-)
+const Trend = ({ val, up, white }: { val: string | number; up?: boolean; white?: boolean }) => {
+  const strVal = String(val)
+  const isZero = strVal === '0' || strVal === '0%'
+  const numericVal = parseFloat(strVal.replace(/[^0-9.-]+/g, "") || "0")
+  const isUp = up !== undefined ? up : numericVal > 0
+  const isDown = !isUp && numericVal < 0
 
-const Prog = ({ pct, color = '#315EF6', tall }: { pct: number; color?: string; tall?: boolean }) => (
-  <div className={`prog${tall ? ' tall' : ''}`}>
-    <div className="prog-fill" style={{ width: `${Math.min(100, pct)}%`, background: color }} />
-  </div>
-)
+  if (isZero) {
+    return (
+      <span className={`trend ${white ? 'trend-up-white' : 'trend-neutral'}`}>
+        - {strVal}
+      </span>
+    )
+  }
+
+  return (
+    <span className={`trend ${white ? 'trend-up-white' : isUp ? 'trend-up' : 'trend-down'}`}>
+      {isUp ? '↑' : '↓'} {strVal}
+    </span>
+  )
+}
+
+const Prog = ({ pct, color = '#315EF6', tall }: { pct: number; color?: string; tall?: boolean }) => {
+  const safePct = isNaN(pct) ? 0 : Math.max(0, Math.min(100, pct))
+  return (
+    <div className={`prog${tall ? ' tall' : ''}`}>
+      <div className="prog-fill" style={{ width: `${safePct}%`, background: color }} />
+    </div>
+  )
+}
 
 const Divider = () => <div className="divider" />
 
@@ -461,17 +476,12 @@ const ChipPIC = ({ label }: { label: string }) => (
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-const Sidebar = ({ active, onNav, expanded, onToggle }: {
-  active: Screen; onNav: (s: Screen) => void; expanded: boolean; onToggle: () => void
+const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
+  active: Screen; onNav: (s: Screen) => void; expanded: boolean;
+  mode: 'expanded' | 'collapsed' | 'hover'; onModeChange: (m: 'expanded' | 'collapsed' | 'hover') => void;
 }) => {
-  const visibleGroups = expanded
-    ? NAV
-    : NAV
-        .map(group => ({
-          ...group,
-          items: group.items.filter(item => COLLAPSED_NAV_ITEMS.has(item.id)),
-        }))
-        .filter(group => group.items.length > 0)
+  const [showModeMenu, setShowModeMenu] = useState(false)
+  const visibleGroups = NAV
 
   return (
     <aside className={`sidebar${expanded ? ' expanded' : ''}`}>
@@ -486,23 +496,6 @@ const Sidebar = ({ active, onNav, expanded, onToggle }: {
             <div style={{ fontSize: 10, color: 'var(--sb-text)', fontWeight: 500 }}>Enterprise</div>
           </div>
         )}
-        <button
-          type="button"
-          className="sb-toggle"
-          onClick={onToggle}
-          aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
-          aria-expanded={expanded}
-        >
-          <Ic
-            n={I.chevRight}
-            size={13}
-            style={{
-              color: 'white',
-              transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 0.24s cubic-bezier(0.4,0,0.2,1)',
-            }}
-          />
-        </button>
       </div>
 
       {/* Nav */}
@@ -532,27 +525,36 @@ const Sidebar = ({ active, onNav, expanded, onToggle }: {
 
       {/* Bottom */}
       <div className="sb-bottom">
-        <button
-          type="button"
-          className={`sb-item${active === 'system-settings' ? ' active' : ''}`}
-          data-tooltip="System Settings"
-          title={expanded ? undefined : 'System Settings'}
-          aria-current={active === 'system-settings' ? 'page' : undefined}
-          onClick={() => onNav('system-settings')}
-        >
-          <div className="sb-icon-wrap">
-            <Ic n={I.config} size={16} style={{ color: 'var(--sb-icon)' }} />
-          </div>
-          <span className="sb-item-label">Settings</span>
-        </button>
-        <div className="sb-item" data-tooltip="James Carter">
-          <div className="avatar" style={{ width: 34, height: 34, borderRadius: 9, fontSize: 11 }}>JC</div>
-          {expanded && (
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--sb-icon-a)', lineHeight: 1.2 }}>James Carter</div>
-              <div style={{ fontSize: 10, color: 'var(--sb-text)' }}>Sales Manager</div>
-            </div>
+        <div style={{ position: 'relative' }}>
+          {showModeMenu && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowModeMenu(false)} />
+              <div style={{ position: 'absolute', bottom: 'calc(100% + 10px)', left: expanded ? 0 : 4, width: 200, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 10, padding: 6, zIndex: 100, boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t4)', padding: '6px 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sidebar Mode</div>
+                {[
+                  { m: 'expanded', label: 'Pinned Open', icon: I.chevRight },
+                  { m: 'hover', label: 'Hover to Expand', icon: I.sidebar },
+                  { m: 'collapsed', label: 'Pinned Closed', icon: I.chevLeft },
+                ].map(opt => (
+                  <div key={opt.m} onClick={() => { onModeChange(opt.m as any); setShowModeMenu(false); }} style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6, cursor: 'pointer', background: mode === opt.m ? 'var(--brand-bg)' : 'transparent', color: mode === opt.m ? 'var(--brand)' : 'var(--t2)', fontSize: 13, fontWeight: 500 }}>
+                    <Ic n={opt.icon} size={14} style={{ color: mode === opt.m ? 'var(--brand)' : 'var(--t3)' }} />
+                    {opt.label}
+                  </div>
+                ))}
+              </div>
+            </>
           )}
+          <button
+            type="button"
+            className="sb-item"
+            data-tooltip="Toggle Navigation Mode"
+            title={expanded ? undefined : 'Toggle Navigation Mode'}
+            onClick={() => setShowModeMenu(!showModeMenu)}
+          >
+            <div className="sb-icon-wrap">
+              <Ic n={I.sidebar} size={16} style={{ color: 'var(--sb-icon)' }} />
+            </div>
+          </button>
         </div>
       </div>
     </aside>
@@ -561,7 +563,41 @@ const Sidebar = ({ active, onNav, expanded, onToggle }: {
 
 // ─── TopBar ───────────────────────────────────────────────────────────────────
 
-const TopBar = ({ isDark, onToggleDark }: { isDark: boolean; onToggleDark: () => void }) => {
+const TopBar = ({ isDark, onToggleDark, session, onNav }: { isDark: boolean; onToggleDark: () => void; session: any; onNav: (s: Screen) => void }) => {
+  const [showAccountMenu, setShowAccountMenu] = useState(false)
+  const [showNotifs, setShowNotifs] = useState(false)
+  
+  const [syncTime, setSyncTime] = useState(Date.now())
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncText, setSyncText] = useState('Synced just now')
+
+  useEffect(() => {
+    if (isSyncing) {
+      setSyncText('Syncing...')
+      return
+    }
+    const updateText = () => {
+      const mins = Math.floor((Date.now() - syncTime) / 60000)
+      setSyncText(mins === 0 ? 'Synced just now' : `Synced ${mins}m ago`)
+    }
+    updateText()
+    const interval = setInterval(updateText, 30000)
+    return () => clearInterval(interval)
+  }, [syncTime, isSyncing])
+
+  const handleManualSync = () => {
+    if (isSyncing) return
+    setIsSyncing(true)
+    setTimeout(() => {
+      setIsSyncing(false)
+      setSyncTime(Date.now())
+    }, 1200)
+  }
+  const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User'
+  const initials = userName.substring(0, 2).toUpperCase()
+  
+  const NOTIFICATIONS: any[] = [];
+
   return (
     <header className="topbar">
       <div className="search-wrap">
@@ -570,36 +606,100 @@ const TopBar = ({ isDark, onToggleDark }: { isDark: boolean; onToggleDark: () =>
       </div>
 
       <div className="topbar-right">
-        <div className="sync-pill">
-          <Ic n={I.sync} size={11} />
-          Synced 2m ago
+        <div 
+          className="sync-pill" 
+          onClick={handleManualSync} 
+          style={{ cursor: isSyncing ? 'wait' : 'pointer', opacity: isSyncing ? 0.7 : 1 }}
+        >
+          <Ic n={I.sync} size={11} style={{ animation: isSyncing ? 'spin 1s linear infinite' : 'none' }} />
+          {syncText}
         </div>
-
-        
-        <button className="tb-btn" onClick={() => supabase.auth.signOut()} title="Logout" style={{ color: 'var(--red)' }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-        </button>
 
         <button className="tb-btn" onClick={onToggleDark} title={isDark ? 'Light mode' : 'Dark mode'}>
           <Ic n={isDark ? I.sun : I.moon} size={16} />
         </button>
 
-        <button className="tb-btn" style={{ position: 'relative' }}>
-          <Ic n={I.bell} size={17} />
-          <span className="notif-dot" />
-        </button>
+        <div style={{ position: 'relative' }}>
+          {showNotifs && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowNotifs(false)} />
+              <div style={{ position: 'absolute', top: 'calc(100% + 10px)', right: -50, width: 320, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 10, zIndex: 100, boxShadow: '0 10px 25px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--s2)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)' }}>Notifications</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--brand)', cursor: 'pointer' }}>Mark all as read</div>
+                </div>
+                
+                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                  {NOTIFICATIONS.length === 0 ? (
+                    <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--t3)', fontSize: 12.5 }}>
+                      <Ic n={I.bell} size={24} style={{ opacity: 0.3, marginBottom: 8 }} />
+                      <div>You have no new notifications.</div>
+                    </div>
+                  ) : (
+                    NOTIFICATIONS.map(n => (
+                      <div key={n.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-s)', display: 'flex', gap: 12, cursor: 'pointer', background: n.unread ? 'rgba(49, 94, 246, 0.03)' : 'transparent' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = n.unread ? 'rgba(49, 94, 246, 0.03)' : 'transparent'}>
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${n.color}15`, color: n.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Ic n={n.icon} size={14} />
+                        </div>
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                            <div style={{ fontSize: 13, fontWeight: n.unread ? 700 : 600, color: 'var(--t1)' }}>{n.title}</div>
+                            <div style={{ fontSize: 11, color: 'var(--t4)' }}>{n.time}</div>
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--t3)', lineHeight: 1.4 }}>{n.desc}</div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                
+                <div style={{ padding: '10px', textAlign: 'center', fontSize: 12, fontWeight: 600, color: 'var(--t3)', borderTop: '1px solid var(--border-s)', cursor: 'pointer' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--brand)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--t3)'}>
+                  View all notifications
+                </div>
+              </div>
+            </>
+          )}
+          <button className="tb-btn" onClick={() => setShowNotifs(!showNotifs)} title="Notifications">
+            <Ic n={I.bell} size={17} />
+            {NOTIFICATIONS.some(n => n.unread) && <span className="notif-dot" />}
+          </button>
+        </div>
 
-        <button className="tb-btn">
-          <Ic n={I.calendar} size={17} />
-        </button>
-
-        <div className="avatar-btn">
-          <div className="avatar">JC</div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t1)', lineHeight: 1.2 }}>James Carter</span>
-            <span style={{ fontSize: 10.5, color: 'var(--t3)' }}>Sales Manager</span>
+        <div style={{ position: 'relative' }}>
+          {showAccountMenu && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowAccountMenu(false)} />
+              <div style={{ position: 'absolute', top: 'calc(100% + 10px)', right: 0, width: 220, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 10, padding: '6px 0', zIndex: 100, boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
+                <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border-s)', marginBottom: 4 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>{userName}</div>
+                  <div style={{ fontSize: 11, color: 'var(--t3)' }}>{session?.user?.email}</div>
+                </div>
+                
+                <div style={{ padding: '4px' }}>
+                  <div onClick={() => { onNav('profile-settings'); setShowAccountMenu(false); }} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6, cursor: 'pointer', color: 'var(--t2)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <Ic n={I.customer} size={14} style={{ color: 'var(--t3)' }} />
+                    My Profile
+                  </div>
+                  <div onClick={() => { onNav('system-settings'); setShowAccountMenu(false); }} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6, cursor: 'pointer', color: 'var(--t2)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <Ic n={I.config} size={14} style={{ color: 'var(--t3)' }} />
+                    System Settings
+                  </div>
+                  <div onClick={() => supabase.auth.signOut()} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6, cursor: 'pointer', color: 'var(--red)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--red-light, #FEE2E2)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                    Logout
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+          <div className="avatar-btn" onClick={() => setShowAccountMenu(!showAccountMenu)} style={{ cursor: 'pointer' }}>
+            <div className="avatar">{initials}</div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t1)', lineHeight: 1.2 }}>{userName}</span>
+              <span style={{ fontSize: 10.5, color: 'var(--t3)' }}>Sales Manager</span>
+            </div>
+            <Ic n={I.chevDown} size={12} style={{ color: 'var(--t4)', marginLeft: 2 }} />
           </div>
-          <Ic n={I.chevDown} size={12} style={{ color: 'var(--t4)', marginLeft: 2 }} />
         </div>
       </div>
     </header>
@@ -608,7 +708,7 @@ const TopBar = ({ isDark, onToggleDark }: { isDark: boolean; onToggleDark: () =>
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
-const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
+const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: any }) => {
   const [chartMetric, setChartMetric] = useState<'profit' | 'revenue' | 'cost'>('profit')
   const chartColor = chartMetric === 'profit' ? '#315EF6' : chartMetric === 'revenue' ? '#059669' : '#6B7280'
   const analytics = useAnalytics()
@@ -616,21 +716,48 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
   const funnel = analytics?.funnel || {}
   const conversion = (value: number, previous: number) => previous > 0 ? `${Math.round((value / previous) * 100)}%` : '0%'
 
+  const hour = new Date().getHours()
+  const timeGreeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  const userName = session?.user?.user_metadata?.full_name?.split(' ')[0] || session?.user?.email?.split('@')[0] || 'User'
+
+  const [dateRange, setDateRange] = useState('This month')
+  const [showDateMenu, setShowDateMenu] = useState(false)
+
+  const rangePrefixMap: Record<string, string> = {
+    'This month': 'Monthly',
+    'This quarter': 'Quarterly',
+    'This year': 'Annual',
+    'All time': 'All Time'
+  }
+  const prefix = rangePrefixMap[dateRange] || 'Monthly'
+
   return (
     <div className="page-scroll">
       {/* Greeting */}
       <div className="greeting-bar">
         <div>
-          <p className="greeting-title">Good morning, James 👋</p>
-          <p className="greeting-sub">Here's what's happening across your sales pipeline this month.</p>
+          <p className="greeting-title">{timeGreeting}, {userName} 👋</p>
+          <p className="greeting-sub">Here's what's happening across your sales pipeline {dateRange.toLowerCase()}.</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div className="date-range">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
+          <div className="date-range" onClick={() => setShowDateMenu(!showDateMenu)}>
             <Ic n={I.calendar} size={13} />
-            <span>This month</span>
+            <span>{dateRange}</span>
             <Ic n={I.chevDown} size={12} />
           </div>
-          <Btn variant="ghost" sm onClick={() => exportToCSV([], 'dashboard')}><Ic n={I.export} size={13} /> Export</Btn>
+          {showDateMenu && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowDateMenu(false)} />
+              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, width: 160, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+                {['This month', 'This quarter', 'This year', 'All time'].map(opt => (
+                  <div key={opt} onClick={() => { setDateRange(opt); setShowDateMenu(false); }} style={{ padding: '8px 12px', borderRadius: 4, cursor: 'pointer', background: dateRange === opt ? 'var(--s2)' : 'transparent', color: dateRange === opt ? 'var(--brand)' : 'var(--t2)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = dateRange === opt ? 'var(--s2)' : 'transparent'}>
+                    {opt}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          <Btn variant="ghost" sm onClick={() => window.print()}><Ic n={I.export} size={13} /> Export PDF</Btn>
         </div>
       </div>
 
@@ -641,14 +768,14 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
           {/* Featured KPI */}
           <div className="kpi-featured" style={{ background: 'linear-gradient(145deg, #2D4FE0 0%, #4C6FFF 100%)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 500 }}>Monthly Gross Profit</span>
+              <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 500 }}>{prefix} Gross Profit</span>
               <button style={{ background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 8, width: 28, height: 28, cursor: 'pointer', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Ic n={I.arrowRight} size={13} />
               </button>
             </div>
             <div>
               <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginBottom: 6 }}>${m.total_gross_profit?.toLocaleString() || 0}</div>
-              <Trend val="0" up white />
+              <Trend val="0" white />
               <div style={{ fontSize: 11, opacity: 0.65, marginTop: 6 }}>Target: $0 · 0%</div>
               <div style={{ marginTop: 10, height: 5, background: 'rgba(255,255,255,0.2)', borderRadius: 99, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: '0%', background: 'rgba(255,255,255,0.8)', borderRadius: 99 }} />
@@ -659,16 +786,16 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
           {/* Secondary KPIs stacked */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">Monthly Revenue</div>
+              <div className="kpi-label">{prefix} Revenue</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>${m.total_revenue?.toLocaleString() || 0}</div>
-              <Trend val="0" up />
+              <Trend val="0"/>
               <div className="kpi-sub">vs last month</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
               <div className="kpi-label">Units Sold</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{m.total_units || 0}</div>
-              <Trend val="0" up />
-              <div className="kpi-sub">containers this month</div>
+              <Trend val="0"/>
+              <div className="kpi-sub">containers {dateRange.toLowerCase()}</div>
             </div>
           </div>
 
@@ -676,14 +803,14 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
             <div className="kpi-card" style={{ flex: 1 }}>
               <div className="kpi-label">Active Clients</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{m.active_clients || 0}</div>
-              <Trend val="0" up />
-              <div className="kpi-sub">purchased in last 90 days</div>
+              <Trend val="0"/>
+              <div className="kpi-sub">purchased {dateRange.toLowerCase()}</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">Profit Margin</div>
+              <div className="kpi-label">{prefix} Profit Margin</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{m.profit_margin?.toFixed(1) || 0}%</div>
-              <Trend val="0" up />
-              <div className="kpi-sub">vs last month average</div>
+              <Trend val="0"/>
+              <div className="kpi-sub">vs previous {dateRange.replace('This ', '')}</div>
             </div>
           </div>
 
@@ -692,7 +819,7 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
             <div className="chart-header">
               <div>
                 <div className="chart-title">Gross Profit Performance</div>
-                <div className="chart-sub">Monthly trend — all PICs combined</div>
+                <div className="chart-sub">{prefix} trend — all PICs combined</div>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
                 {(['profit', 'revenue', 'cost'] as const).map(m => (
@@ -728,11 +855,11 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
           </div>
           <div className="pipeline-row">
             {[
-              { label: 'Prospects', count: funnel.prospects || 0, pct: '100%', change: 'active', up: true, screen: 'prospects' as Screen, color: '#315EF6' },
-              { label: 'Warm Leads', count: funnel.warm_leads || 0, pct: conversion(funnel.warm_leads || 0, funnel.prospects || 0), change: 'active', up: true, screen: 'warm-leads' as Screen, color: '#7C3AED' },
-              { label: 'Inquiries', count: funnel.inquiries || 0, pct: conversion(funnel.inquiries || 0, funnel.warm_leads || 0), change: 'active', up: true, screen: 'inquiries' as Screen, color: '#D97706' },
-              { label: 'Quotations', count: funnel.quotations || 0, pct: conversion(funnel.quotations || 0, funnel.inquiries || 0), change: 'active', up: true, screen: 'quotations' as Screen, color: '#EA580C' },
-              { label: 'Sales', count: funnel.sales || 0, pct: conversion(funnel.sales || 0, funnel.quotations || 0), change: 'won', up: true, screen: 'sales-tracker' as Screen, color: '#059669' },
+              { label: 'Prospects', count: funnel.prospects || 0, pct: '100%', change: '0%', screen: 'prospects' as Screen, color: '#315EF6' },
+              { label: 'Warm Leads', count: funnel.warm_leads || 0, pct: conversion(funnel.warm_leads || 0, funnel.prospects || 0), change: '0%', screen: 'warm-leads' as Screen, color: '#7C3AED' },
+              { label: 'Inquiries', count: funnel.inquiries || 0, pct: conversion(funnel.inquiries || 0, funnel.warm_leads || 0), change: '0%', screen: 'inquiries' as Screen, color: '#D97706' },
+              { label: 'Quotations', count: funnel.quotations || 0, pct: conversion(funnel.quotations || 0, funnel.inquiries || 0), change: '0%', screen: 'quotations' as Screen, color: '#EA580C' },
+              { label: 'Sales', count: funnel.sales || 0, pct: conversion(funnel.sales || 0, funnel.quotations || 0), change: '0%', screen: 'sales-tracker' as Screen, color: '#059669' },
             ].map((s, i) => (
               <div key={s.label} className="pipeline-stage" onClick={() => onNav(s.screen)}>
                 {i > 0 && (
@@ -741,7 +868,7 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
                 <div style={{ width: 36, height: 36, borderRadius: 10, background: `${s.color}18`, color: s.color, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8, fontSize: 15, fontWeight: 800 }}>{s.count}</div>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t1)', marginBottom: 4 }}>{s.label}</div>
                 <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 4 }}>{s.pct} conversion</div>
-                <Trend val={s.change} up={s.up} />
+                <Trend val={s.change} />
               </div>
             ))}
           </div>
@@ -754,9 +881,9 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
             <div className="chart-title">Outreach Progress — Today</div>
             <div className="chart-sub">Daily targets vs completed</div>
             {[
-              { label: 'Emails', done: 375, target: 500, color: '#315EF6' },
-              { label: 'Calls', done: 12, target: 15, color: '#0D9488' },
-              { label: 'Texts / SMS', done: 220, target: 300, color: '#7C3AED' },
+              { label: 'Emails', done: 0, target: 500, color: '#315EF6' },
+              { label: 'Calls', done: 0, target: 15, color: '#0D9488' },
+              { label: 'Texts / SMS', done: 0, target: 300, color: '#7C3AED' },
             ].map(o => (
               <div key={o.label} style={{ marginBottom: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
@@ -797,7 +924,7 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
           {/* Category donut */}
           <div className="chart-card">
             <div className="chart-title">Sales by Container Category</div>
-            <div className="chart-sub">This month · units</div>
+            <div className="chart-sub">{dateRange} · units</div>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <ResponsiveContainer width={110} height={110}>
                 <PieChart>
@@ -875,10 +1002,10 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
             <div style={{ padding: '14px 18px 10px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div className="chart-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Ic n={I.warning} size={13} style={{ color: 'var(--red)' }} />
+                  <Ic n={I.warning} size={13} style={{ color: OVERDUE_PICKUPS.length > 0 ? 'var(--red)' : 'var(--t4)' }} />
                   Overdue Pickups
                 </div>
-                <div className="chart-sub" style={{ marginBottom: 0 }}>Requires immediate action</div>
+                <div className="chart-sub" style={{ marginBottom: 0 }}>{OVERDUE_PICKUPS.length > 0 ? 'Requires immediate action' : 'All clear'}</div>
               </div>
               <Btn variant="ghost" sm onClick={() => onNav('pickups')}>View All →</Btn>
             </div>
@@ -892,8 +1019,10 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
                   <div style={{ fontSize: 11.5, color: 'var(--t3)' }}>{r.contract} · {r.qty}× {r.size}</div>
                 </div>
               ))}
-              <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--red-bg)', borderRadius: 8, fontSize: 12, color: 'var(--red)', fontWeight: 500 }}>
-                2 overdue · Total delay risk on 4 containers
+              <div style={{ marginTop: 10, padding: '8px 12px', background: OVERDUE_PICKUPS.length > 0 ? 'var(--red-bg)' : 'var(--s2)', borderRadius: 8, fontSize: 12, color: OVERDUE_PICKUPS.length > 0 ? 'var(--red)' : 'var(--t3)', fontWeight: 500 }}>
+                {OVERDUE_PICKUPS.length > 0 
+                  ? `${OVERDUE_PICKUPS.length} overdue · Total delay risk on ${OVERDUE_PICKUPS.reduce((acc, curr) => acc + curr.qty, 0)} containers`
+                  : '0 overdue pickups · No current delay risk'}
               </div>
             </div>
           </div>
@@ -907,19 +1036,59 @@ const Dashboard = ({ onNav }: { onNav: (s: Screen) => void }) => {
 // ─── Outreach Dashboard ───────────────────────────────────────────────────────
 
 const OutreachDashboard = () => {
-  const emailDone = 0, emailTarget = 0
-  const callsDone = 0, callsMin = 0, callsPref = 0
-  const textsDone = 0, textsTarget = 0
-  const profitDone = 0, profitTarget = 0
+  const analytics = useAnalytics()
+  const m = analytics?.metrics || {}
+  const prospects = useProspects() || []
+  
+  const eligibleContacts = prospects.filter((p: any) => p.status !== 'Removed').length
+  const excludedContacts = prospects.length - eligibleContacts
+
+  const profitDone = m.total_gross_profit || 0
+  const profitTarget = 50000 // Placeholder target
+  const projectedProfit = profitDone * 1.15 // Placeholder projection multiplier
+  const projectedPct = Math.round((projectedProfit / profitTarget) * 100) || 0
+  
+  const emailDone = 0, emailTarget = 500
+  const callsDone = 0, callsPref = 20
+  const textsDone = 0, textsTarget = 150
+
+  const safePct = (done: number, tgt: number) => tgt > 0 ? Math.round((done / tgt) * 100) : 0
+
+  const [dateRange, setDateRange] = useState('This month')
+  const [showDateMenu, setShowDateMenu] = useState(false)
+  const rangePrefixMap: Record<string, string> = { 'This month': 'Monthly', 'This quarter': 'Quarterly', 'This year': 'Annual', 'All time': 'All Time' }
+  const prefix = rangePrefixMap[dateRange] || 'Monthly'
+
+  const dateOptions: Intl.DateTimeFormatOptions = { weekday: 'long', month: 'short', day: 'numeric' };
+  const todayStr = new Date().toLocaleDateString('en-US', dateOptions);
 
   return (
     <div className="page-scroll">
       <div className="greeting-bar">
         <div>
           <p className="greeting-title">Outreach Dashboard</p>
-          <p className="greeting-sub">Daily targets, outreach completion, and profit progress — Monday, Jul 29</p>
+          <p className="greeting-sub">Daily targets, outreach completion, and profit progress — {todayStr}</p>
         </div>
-        <div className="date-range"><Ic n={I.calendar} size={13} /><span>Today</span><Ic n={I.chevDown} size={12} /></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
+          <div className="date-range" onClick={() => setShowDateMenu(!showDateMenu)}>
+            <Ic n={I.calendar} size={13} />
+            <span>{dateRange}</span>
+            <Ic n={I.chevDown} size={12} />
+          </div>
+          {showDateMenu && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowDateMenu(false)} />
+              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, width: 160, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+                {['This month', 'This quarter', 'This year', 'All time'].map(opt => (
+                  <div key={opt} onClick={() => { setDateRange(opt); setShowDateMenu(false); }} style={{ padding: '8px 12px', borderRadius: 4, cursor: 'pointer', background: dateRange === opt ? 'var(--s2)' : 'transparent', color: dateRange === opt ? 'var(--brand)' : 'var(--t2)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = dateRange === opt ? 'var(--s2)' : 'transparent'}>
+                    {opt}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          <Btn variant="ghost" sm onClick={() => window.print()}><Ic n={I.export} size={13} /> Export PDF</Btn>
+        </div>
       </div>
       <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
@@ -927,34 +1096,34 @@ const OutreachDashboard = () => {
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr', gap: 12 }}>
           <div className="kpi-featured" style={{ background: 'linear-gradient(145deg,#059669,#10B981)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 12, opacity: 0.85, fontWeight: 500 }}>Monthly Gross Profit</span>
+              <span style={{ fontSize: 12, opacity: 0.85, fontWeight: 500 }}>{prefix} Gross Profit</span>
             </div>
             <div>
               <div style={{ fontSize: 30, fontWeight: 800, marginBottom: 5 }}>${profitDone.toLocaleString()}</div>
-              <Trend val="0" up white />
-              <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>Target: ${profitTarget.toLocaleString()} · {Math.round(profitDone/profitTarget*100)}%</div>
+              <Trend val="0" white />
+              <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>Target: ${profitTarget.toLocaleString()} · {safePct(profitDone, profitTarget)}%</div>
               <div style={{ marginTop: 10, height: 5, background: 'rgba(255,255,255,0.25)', borderRadius: 99, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${Math.round(profitDone/profitTarget*100)}%`, background: 'rgba(255,255,255,0.85)', borderRadius: 99 }} />
+                <div style={{ height: '100%', width: `${Math.min(100, safePct(profitDone, profitTarget))}%`, background: 'rgba(255,255,255,0.85)', borderRadius: 99 }} />
               </div>
-              <div style={{ marginTop: 6, fontSize: 11, opacity: 0.7 }}>Remaining: ${(profitTarget-profitDone).toLocaleString()}</div>
+              <div style={{ marginTop: 6, fontSize: 11, opacity: 0.7 }}>Remaining: ${(profitTarget-profitDone > 0 ? profitTarget-profitDone : 0).toLocaleString()}</div>
             </div>
           </div>
           <div className="kpi-card">
-            <div className="kpi-label">Projected Month-End</div>
-            <div className="kpi-value" style={{ fontSize: 22, color: 'var(--green)' }}>$48,200</div>
-            <div className="kpi-sub">Based on current daily pace</div>
-            <span className="badge b-green" style={{ marginTop: 8 }}>96% of target</span>
+            <div className="kpi-label">Projected Period-End</div>
+            <div className="kpi-value" style={{ fontSize: 22, color: 'var(--green)' }}>${projectedProfit.toLocaleString()}</div>
+            <div className="kpi-sub">Based on current pace</div>
+            <span className={`badge ${projectedPct >= 100 ? 'b-green' : 'b-amber'}`} style={{ marginTop: 8 }}>{projectedPct}% of target</span>
           </div>
           <div className="kpi-card">
-            <div className="kpi-label">Units Sold — Month</div>
-            <div className="kpi-value" style={{ fontSize: 22 }}>0</div>
-            <Trend val="0" up /><div className="kpi-sub">vs last month</div>
+            <div className="kpi-label">Units Sold — {prefix.replace('ly', '')}</div>
+            <div className="kpi-value" style={{ fontSize: 22 }}>{m.total_units || 0}</div>
+            <Trend val="0"/><div className="kpi-sub">vs previous {dateRange.replace('This ', '')}</div>
           </div>
           <div className="kpi-card">
             <div className="kpi-label">Eligible Contacts</div>
-            <div className="kpi-value" style={{ fontSize: 22 }}>286</div>
+            <div className="kpi-value" style={{ fontSize: 22 }}>{eligibleContacts}</div>
             <div className="kpi-sub">For email, call, or text</div>
-            <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>24 excluded (Removed)</div>
+            <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>{excludedContacts} excluded (Removed)</div>
           </div>
         </div>
 
@@ -965,11 +1134,11 @@ const OutreachDashboard = () => {
               label: 'Email Target', icon: I.mail, color: '#315EF6', done: emailDone, target: emailTarget,
               details: [
                 { k: 'Remaining', v: emailTarget - emailDone, color: 'var(--amber)' },
-                { k: 'Completion', v: `${Math.round(emailDone/emailTarget*100)}%`, color: 'var(--brand)' },
-                { k: 'Valid Available', v: 0, color: 'var(--green)' },
-                { k: 'Excluded', v: 0, color: 'var(--red)' },
+                { k: 'Completion', v: `${safePct(emailDone, emailTarget)}%`, color: 'var(--brand)' },
+                { k: 'Valid Available', v: eligibleContacts, color: 'var(--green)' },
+                { k: 'Excluded', v: excludedContacts, color: 'var(--red)' },
               ],
-              status: 'On Track', statusCls: 'b-blue',
+              status: safePct(emailDone, emailTarget) >= 100 ? 'Completed' : 'On Track', statusCls: 'b-blue',
             },
             {
               label: 'Call Target', icon: I.phone, color: '#0D9488', done: callsDone, target: callsPref,
@@ -979,7 +1148,7 @@ const OutreachDashboard = () => {
                 { k: '→ Inquiry', v: 0, color: 'var(--brand)' },
                 { k: '→ Sale', v: 0, color: 'var(--green)' },
               ],
-              status: 'Min Achieved', statusCls: 'b-green',
+              status: safePct(callsDone, callsPref) >= 100 ? 'Target Achieved' : 'Min Achieved', statusCls: 'b-green',
             },
             {
               label: 'Text / SMS Target', icon: I.inquiry, color: '#7C3AED', done: textsDone, target: textsTarget,
@@ -989,7 +1158,7 @@ const OutreachDashboard = () => {
                 { k: '→ Warm Leads', v: 0, color: 'var(--brand)' },
                 { k: '→ Inquiries', v: 0, color: 'var(--purple)' },
               ],
-              status: 'Nearly Complete', statusCls: 'b-teal',
+              status: safePct(textsDone, textsTarget) >= 100 ? 'Completed' : 'On Track', statusCls: 'b-teal',
             },
           ].map(t => (
             <div key={t.label} className="chart-card">
@@ -1022,15 +1191,15 @@ const OutreachDashboard = () => {
         {/* Combined summary table */}
         <div className="card" style={{ overflow: 'hidden' }}>
           <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border-s)' }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>Combined Outreach Summary — Today</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>Combined Outreach Summary — {dateRange}</span>
           </div>
           <table className="crm">
             <thead><tr><th>Channel</th><th>Target</th><th className="r">Completed</th><th className="r">Remaining</th><th>Progress</th><th>Status</th></tr></thead>
             <tbody>
               {[
-                { ch: 'Email', target: '500', done: 375, rem: 125, pct: 75, status: 'On Track', cls: 'b-blue' },
-                { ch: 'Calls', target: '10 min · 15 pref', done: 12, rem: 3, pct: 80, status: 'Min Achieved', cls: 'b-green' },
-                { ch: 'Texts (SMS)', target: '300 declared', done: 220, rem: 80, pct: 73, status: 'Nearly Complete', cls: 'b-teal' },
+                { ch: 'Email', target: emailTarget.toString(), done: emailDone, rem: emailTarget - emailDone, pct: safePct(emailDone, emailTarget), status: safePct(emailDone, emailTarget) >= 100 ? 'Completed' : 'On Track', cls: 'b-blue' },
+                { ch: 'Calls', target: `${callsPref} pref`, done: callsDone, rem: callsPref - callsDone > 0 ? callsPref - callsDone : 0, pct: safePct(callsDone, callsPref), status: safePct(callsDone, callsPref) >= 100 ? 'Completed' : 'Min Achieved', cls: 'b-green' },
+                { ch: 'Texts (SMS)', target: textsTarget.toString(), done: textsDone, rem: textsTarget - textsDone, pct: safePct(textsDone, textsTarget), status: safePct(textsDone, textsTarget) >= 100 ? 'Completed' : 'Nearly Complete', cls: 'b-teal' },
               ].map(r => (
                 <tr key={r.ch}>
                   <td style={{ fontWeight: 600 }}>{r.ch}</td>
@@ -1136,6 +1305,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [importMode, setImportMode] = useState<'file' | 'paste' | null>(null)
   const [showNewWarmLead, setShowNewWarmLead] = useState(false)
   const [inquiryWarmLeadId, setInquiryWarmLeadId] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
 
   const _prospectsData = useProspects(revision, mode === 'prospect' ? status : 'active')
   const _warmData = useWarmLeads(revision)
@@ -1221,8 +1391,8 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
         <div style={{ display: 'flex', gap: 8 }}>
           {mode === 'prospect' && <Btn variant="primary" sm onClick={() => setImportMode('file')}><Ic n={I.upload} size={13} /> Import Excel</Btn>}
           {mode === 'warm' && <Btn variant="primary" sm onClick={() => setShowNewWarmLead(true)}><Ic n={I.plus} size={13} /> New Warm Lead</Btn>}
-          <Btn variant="ghost" sm onClick={() => exportToCSV(filtered, 'pipeline_data')}><Ic n={I.export} size={13} /> Export</Btn>
           {mode === 'prospect' && <Btn variant="secondary" sm onClick={() => setImportMode('paste')}><Ic n={I.copy} size={13} /> Paste Bulk</Btn>}
+          <Btn variant="ghost" sm onClick={() => exportToCSV(filtered, 'pipeline_data')}><Ic n={I.export} size={13} /> Export</Btn>
         </div>
       </div>
 
@@ -1306,6 +1476,27 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 
       {/* Spreadsheet table */}
       <div className="table-wrap">
+        {contextMenu && (
+          <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 999 }} onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
+            <div style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: '4px', boxShadow: '0 8px 24px rgba(0,0,0,0.15)', minWidth: 160 }}>
+              <div 
+                style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', borderRadius: 4, fontSize: 13, color: 'var(--t2)', fontWeight: 500 }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                onClick={() => {
+                  const dataToCopy = filtered.map(r => getVal(r, contextMenu.colField)).filter(Boolean).join('\n');
+                  navigator.clipboard.writeText(dataToCopy);
+                  setContextMenu(null);
+                  alert(`Copied ${filtered.map(r => getVal(r, contextMenu.colField)).filter(Boolean).length} ${contextMenu.colLabel}s to clipboard!`);
+                }}
+              >
+                <Ic n={I.copy} size={14} style={{ color: 'var(--brand)' }} />
+                Copy Column ({contextMenu.colLabel})
+              </div>
+            </div>
+          </>
+        )}
         <div style={{ minWidth: 'max-content' }}>
           {/* Column header row */}
           <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 5, background: 'var(--s2)', borderBottom: '2px solid var(--border)' }}>
@@ -1314,9 +1505,20 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
               <input type="checkbox" className="cb" onChange={e => setSelected(e.target.checked ? filtered.map(r => r.id) : [])} />
             </div>
             {COLS.map(col => (
-              <div key={col.key} style={{ minWidth: col.w, width: col.w, padding: '7px 12px', borderRight: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none' }}>
-                <span className="col-header-letter">{col.key}</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{col.label}</span>
+              <div 
+                key={col.key} 
+                style={{ minWidth: col.w, width: col.w, padding: '7px 12px', borderRight: '1px solid var(--border)', cursor: 'context-menu', userSelect: 'none', display: 'flex', alignItems: 'center' }} 
+                title={`Right-click to copy all ${col.label}`}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setContextMenu({ x: e.clientX, y: e.clientY, colField: col.field, colLabel: col.label });
+                }}
+              >
+                <div>
+                  <span className="col-header-letter">{col.key}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{col.label}</span>
+                </div>
               </div>
             ))}
             <div style={{ minWidth: 160, width: 160, padding: '7px 12px' }}>
@@ -1422,6 +1624,7 @@ const InquiryList = () => {
   const warmLeads = useWarmLeads(revision)
   const [tab, setTab] = useState('All')
   const [lookup, setLookup] = useState('')
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
   const tabs = ['All', 'New', 'Quotation Required', 'Awaiting Response', 'Negotiating', 'Converted', 'Lost']
 
   const filtered = INQUIRIES.filter(r => {
@@ -1436,7 +1639,7 @@ const InquiryList = () => {
         <NewInquiryDialog
           warmLeads={warmLeads as WarmLeadOption[]}
           onClose={() => setShowNewInquiry(false)}
-          onSaved={() => setRevision(value => value + 1)}
+          onSaved={() => { setShowNewInquiry(false); setRevision(value => value + 1); }}
         />
       )}
       {quotationInquiryId && (
@@ -1453,7 +1656,7 @@ const InquiryList = () => {
         <div style={{ display: 'flex', gap: 8, maxWidth: 480 }}>
           <input className="inp sm" placeholder="Enter phone number or email address…" value={lookup} onChange={e => setLookup(e.target.value)} style={{ flex: 1 }} />
           <Btn variant="primary" sm><Ic n={I.search} size={13} /> Lookup</Btn>
-          <Btn variant="secondary" sm onClick={() => setShowNewInquiry(true)}><Ic n={I.plus} size={13} /> New Inquiry</Btn>
+          <Btn variant="primary" sm onClick={() => setShowNewInquiry(true)}><Ic n={I.plus} size={13} /> New Inquiry</Btn>
         </div>
       </div>
 
@@ -1497,11 +1700,48 @@ const InquiryList = () => {
 
       {/* Table */}
       <div className="table-wrap">
+        {contextMenu && (
+          <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 999 }} onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
+            <div style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: '4px', boxShadow: '0 8px 24px rgba(0,0,0,0.15)', minWidth: 160 }}>
+              <div 
+                style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', borderRadius: 4, fontSize: 13, color: 'var(--t2)', fontWeight: 500 }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                onClick={() => {
+                  const dataToCopy = filtered.map((r: any) => r[contextMenu.colField]).filter(Boolean).join('\n');
+                  navigator.clipboard.writeText(dataToCopy);
+                  setContextMenu(null);
+                  alert(`Copied ${filtered.map((r: any) => r[contextMenu.colField]).filter(Boolean).length} ${contextMenu.colLabel.toLowerCase()}!`);
+                }}
+              >
+                <Ic n={I.copy} size={14} style={{ color: 'var(--brand)' }} />
+                Copy Column ({contextMenu.colLabel})
+              </div>
+            </div>
+          </>
+        )}
         <table className="crm">
           <thead>
             <tr>
               <th className="col-check"><input type="checkbox" className="cb" /></th>
-              <th>Inquiry #</th><th>Date / Time</th><th>Channel</th><th>Company</th><th>Contact</th>
+              <th>Inquiry #</th><th>Date / Time</th><th>Channel</th>
+              <th 
+                style={{ cursor: 'context-menu' }} 
+                title="Right-click to copy all companies"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setContextMenu({ x: e.clientX, y: e.clientY, colField: 'company', colLabel: 'Companies' });
+                }}
+              >Company</th>
+              <th 
+                style={{ cursor: 'context-menu' }} 
+                title="Right-click to copy all contacts"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setContextMenu({ x: e.clientX, y: e.clientY, colField: 'contact', colLabel: 'Contacts' });
+                }}
+              >Contact</th>
               <th>Category</th><th>Size</th><th className="r">Qty</th><th>Needed By</th><th>Status</th><th>PIC</th>
               <th className="col-actions">Actions</th>
             </tr>
@@ -2633,7 +2873,14 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>(() =>
     new URLSearchParams(window.location.search).has('google_sync') ? 'system-settings' : 'dashboard'
   )
-  const [expanded, setExpanded] = useState(false)
+  const [sidebarMode, setSidebarModeState] = useState<'expanded' | 'collapsed' | 'hover'>(() => {
+    return (localStorage.getItem('sidebarMode') as any) || 'expanded'
+  })
+  const setSidebarMode = (mode: 'expanded' | 'collapsed' | 'hover') => {
+    localStorage.setItem('sidebarMode', mode)
+    setSidebarModeState(mode)
+  }
+  const [isHoveringSidebar, setIsHoveringSidebar] = useState(false)
   const [isDark, setIsDark] = useState(false)
 
   const [session, setSession] = useState<any>(null)
@@ -2642,6 +2889,12 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
+      if (session?.provider_refresh_token && session?.user) {
+        api.post('/auth/google/sync-provider', {
+          refresh_token: session.provider_refresh_token,
+          email: session.user.email
+        }).catch(console.error);
+      }
       setAuthChecking(false)
     })
 
@@ -2649,6 +2902,12 @@ export default function App() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
+      if (session?.provider_refresh_token && session?.user) {
+        api.post('/auth/google/sync-provider', {
+          refresh_token: session.provider_refresh_token,
+          email: session.user.email
+        }).catch(console.error);
+      }
     })
 
     return () => subscription.unsubscribe()
@@ -2661,7 +2920,7 @@ export default function App() {
 
   const renderScreen = () => {
     switch (screen) {
-      case 'dashboard':           return <Dashboard onNav={handleNav} />
+      case 'dashboard':           return <Dashboard onNav={handleNav} session={session} />
       case 'outreach-dashboard':  return <OutreachDashboard />
       case 'inquiry-dashboard':   return <InquiryDashboard />
       case 'prospects':           return <ProspectSheet mode="prospect" onNav={handleNav} />
@@ -2681,20 +2940,45 @@ export default function App() {
       case 'daily-targets':       return <DailyTargets />
       case 'service-territories': return <ServiceTerritories />
       case 'system-settings':     return <SystemSettings />
+      case 'profile-settings':    return <UserProfileSettings session={session} />
       case 'pickups':             return <Placeholder label="Pickup Tracking" />
       case 'best-clients':        return <Placeholder label="Best Clients" />
       case 'inquiry-funnel':      return <Placeholder label="Inquiry Funnel" />
-      default:                    return <Dashboard onNav={handleNav} />
+      default:                    return <Dashboard onNav={handleNav} session={session} />
     }
   }
 
-  return (
-    <div data-theme={isDark ? 'dark' : undefined} style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
-      <Sidebar active={screen} onNav={handleNav} expanded={expanded} onToggle={() => setExpanded(e => !e)} />
+  const isSidebarExpanded = sidebarMode === 'expanded' || (sidebarMode === 'hover' && isHoveringSidebar)
 
-      <div className="workspace">
+  return (
+    <div data-theme={isDark ? 'dark' : undefined} style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)', position: 'relative' }}>
+      
+      {/* Physical spacer for layout so it doesn't push when hovering */}
+      <div style={{ 
+        width: sidebarMode === 'expanded' ? 240 : 68, 
+        minWidth: sidebarMode === 'expanded' ? 240 : 68,
+        flexShrink: 0,
+        transition: 'width 0.2s ease, min-width 0.2s ease' 
+      }} />
+
+      {/* Floating Sidebar */}
+      <div 
+        onMouseEnter={() => setIsHoveringSidebar(true)} 
+        onMouseLeave={() => setIsHoveringSidebar(false)}
+        style={{ position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 90, display: 'flex' }}
+      >
+        <Sidebar 
+          active={screen} 
+          onNav={handleNav} 
+          expanded={isSidebarExpanded} 
+          mode={sidebarMode}
+          onModeChange={setSidebarMode}
+        />
+      </div>
+
+      <div className="workspace" style={{ flex: 1, minWidth: 0, zIndex: 1 }}>
         <div className="ws-card">
-          <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} />
+          <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} session={session} onNav={handleNav} />
           {renderScreen()}
         </div>
       </div>

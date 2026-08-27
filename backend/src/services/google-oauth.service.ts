@@ -120,4 +120,17 @@ export class GoogleOAuthService {
 
     if (error) throw new Error(`Unable to disconnect Google account: ${error.message}`);
   }
+
+  static async syncProviderToken(userId: string, googleEmail: string, refreshToken: string) {
+    const { error } = await supabaseAdmin
+      .from('google_oauth_credentials')
+      .upsert({
+        user_id: userId,
+        google_email: googleEmail,
+        refresh_token: refreshToken,
+        updated_at: new Date().toISOString(),
+      });
+
+    if (error) throw new Error(`Unable to save Google credentials: ${error.message}`);
+  }
 }
