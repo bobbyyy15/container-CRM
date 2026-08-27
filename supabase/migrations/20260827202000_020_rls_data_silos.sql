@@ -49,6 +49,7 @@ DECLARE
     v_conflicts INTEGER := 0;
     v_errors INTEGER := 0;
     v_reason TEXT;
+    v_pic_id UUID;
 BEGIN
     IF jsonb_typeof(p_rows) <> 'array' OR jsonb_array_length(p_rows) = 0 OR jsonb_array_length(p_rows) > 5000 THEN
         RAISE EXCEPTION 'Import must contain between 1 and 5000 rows';
