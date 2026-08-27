@@ -90,7 +90,7 @@ a fully separate, custom-built OAuth dance for connecting a Gmail account specif
 - `GET /api/v1/auth/google/callback` → Google redirects here (no JWT, so this route skips `requireAuth`); exchanges the code for tokens, fetches the connected Gmail address, and upserts `{ user_id, google_email, refresh_token }` into `google_oauth_credentials`.
 - `GET /api/v1/auth/google/status` → `{ configured, connected, email }`.
 - `DELETE /api/v1/auth/google` → disconnects (deletes the credential row).
-- `POST /api/v1/auth/google/sync-provider` → **exists but nothing in the frontend calls it.** It looks like it was meant to bridge flow A and flow B (e.g. if a user signs in via Google and the browser happens to capture a Gmail refresh token from that flow, POST it here to also register it for outreach sending) — but that wiring was never finished. Leave it alone unless you're specifically picking up that bridge, in which case: find where the Supabase session's `provider_refresh_token` would be available client-side and wire a call to this endpoint.
+- `POST /api/v1/auth/google/sync-provider` → **correction: this IS wired up.** `App.tsx`'s session effect (on initial load and on every `onAuthStateChange` event) checks `session?.provider_refresh_token` and, when present, POSTs it here automatically to register that refresh token for outreach sending. So flow A and flow B are bridged for the case where a user signs in via the Google OAuth login button and the browser happens to capture a refresh token from that flow. It's not dead code — an earlier pass of this doc missed the caller in `App.tsx`.
 
 Where you actually connect Gmail for sending today is **System Settings → Integrations**
 (referenced by label in `UserProfileSettings.tsx`, not audited in this pass — check that page
@@ -152,16 +152,16 @@ PIC is *assigned to* a given record. That part works fine and is unrelated to th
 
 | # | What | Where | Fix effort |
 |---|---|---|---|
-| 1 | No forgot-password flow anywhere in the UI | `Login.tsx` | Small — Supabase Auth supports `resetPasswordForEmail()` natively, just needs a link + form + `/auth/callback` handling |
-| 2 | No admin UI/API to change a user's role | Whole module | Medium — new endpoint + admin page |
-| 3 | Account Settings "Save" fails when the username field is included | `UserProfileSettings.tsx` | Small — grant the column, or remove the field, per §6 |
-| 4 | Account Settings shows "Not connected" for Google regardless of actual state | `UserProfileSettings.tsx` | Small — call `/auth/google/status` instead of reading the dropped column |
-| 5 | `POST /auth/google/sync-provider` is dead code — nothing calls it | `google.controller.ts` | Decide: finish the bridge, or delete it |
-| 6 | `pics.profile_id` is a schema-only placeholder, never used | schema-wide | Medium/Large — depends what "a user IS a PIC" needs to actually do |
-| 7 | `role === 'user' ? 'pic' : role` shim in `requireAuth` | `auth.middleware.ts` | Trivial — delete once confirmed no legacy rows remain |
+| 1 | ✅ Fixed — No forgot-password flow anywhere in the UI | `Login.tsx` | Added: "Forgot password?" link → `resetPasswordForEmail()` → new `ResetPassword.tsx` screen driven off the `PASSWORD_RECOVERY` auth event in `App.tsx` |
+| 2 | ✅ Fixed — No admin UI/API to change a user's role | Whole module | Added `GET/PATCH /api/v1/admin/users` (admin-only, self-modification blocked) + new `UserManagement.tsx` page under Administration in the sidebar (admin role only) |
+| 3 | ✅ Fixed — Account Settings "Save" fails when the username field is included | `UserProfileSettings.tsx` | Username is now shown read-only (it's a login credential, not user-editable) instead of being submitted in the save payload |
+| 4 | ✅ Fixed — Account Settings shows "Not connected" for Google regardless of actual state | `UserProfileSettings.tsx` | Now calls `/auth/google/status` live instead of reading the dropped column |
+| 5 | ~~`POST /auth/google/sync-provider` is dead code~~ — **misdiagnosed, not a bug.** `App.tsx`'s session effect calls it automatically whenever a session carries a `provider_refresh_token`. | `google.controller.ts` | None — no action needed |
+| 6 | `pics.profile_id` is a schema-only placeholder, never used | schema-wide | Not fixed here — this needs a product decision on what "a user IS a PIC" should actually do, not a code guess |
+| 7 | ✅ Fixed — `role === 'user' ? 'pic' : role` shim in `requireAuth` | `auth.middleware.ts` | Confirmed 0 legacy rows on hosted, then deleted the shim |
 
-Items 1 and 2 are the two that actually affect real users day-to-day — start there if you only
-have time for a couple of these.
+Item 6 is the one still open — it needs a product decision (see §7 above) before anyone should
+pick it up.
 
 ## 9. Reference — file map
 

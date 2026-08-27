@@ -4,6 +4,8 @@ import { api } from './lib/api'
 import Login from './Login'
 import ProspectImportDialog from './features/import/ProspectImportDialog'
 import { UserProfileSettings } from './features/settings/UserProfileSettings'
+import { UserManagement } from './features/settings/UserManagement'
+import ResetPassword from './features/settings/ResetPassword'
 import {
   NewInquiryDialog,
   NewWarmLeadDialog,
@@ -272,6 +274,7 @@ type Screen =
   | 'container-catalog'
   | 'pic-performance' | 'best-clients' | 'profit-analytics' | 'inquiry-funnel'
   | 'service-territories' | 'daily-targets' | 'system-settings' | 'profile-settings'
+  | 'user-management'
 
 // ─── Navigation ──────────────────────────────────────────────────────────────
 
@@ -337,6 +340,12 @@ const NAV: NavGroup[] = [
       { id: 'system-settings', label: 'System Settings', icon: I.config },
     ],
   },
+  {
+    label: 'Administration',
+    items: [
+      { id: 'user-management', label: 'User Management', icon: I.customer },
+    ],
+  },
 ]
 
 
@@ -365,6 +374,7 @@ const SCREEN_LABELS: Record<Screen, string> = {
   'daily-targets': 'Daily Targets',
   'system-settings': 'System Settings',
   'profile-settings': 'Profile Settings',
+  'user-management': 'User Management',
 }
 
 // ─── Sample Data ──────────────────────────────────────────────────────────────
@@ -478,12 +488,16 @@ const ChipPIC = ({ label }: { label: string }) => (
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-const Sidebar = ({ active, onNav, expanded, mode, onModeChange }: {
+const Sidebar = ({ active, onNav, expanded, mode, onModeChange, role }: {
   active: Screen; onNav: (s: Screen) => void; expanded: boolean;
   mode: 'expanded' | 'collapsed' | 'hover'; onModeChange: (m: 'expanded' | 'collapsed' | 'hover') => void;
+  role?: string;
 }) => {
   const [showModeMenu, setShowModeMenu] = useState(false)
-  const visibleGroups = NAV
+  // Administration (User Management) is the one nav group that's actually access-controlled
+  // today -- everything else is visible to any authenticated role, see docs/CUSTOMERS_MODULE.md
+  // §5 for why that's a known, not-yet-addressed gap.
+  const visibleGroups = role === 'admin' ? NAV : NAV.filter(group => group.label !== 'Administration')
 
   return (
     <aside className={`sidebar${expanded ? ' expanded' : ''}`}>
@@ -2916,6 +2930,13 @@ export default function App() {
 
   const [session, setSession] = useState<any>(null)
   const [authChecking, setAuthChecking] = useState(true)
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false)
+  const [currentProfile, setCurrentProfile] = useState<{ role?: string } | null>(null)
+
+  useEffect(() => {
+    if (!session) { setCurrentProfile(null); return }
+    api.get('/auth/me').then(res => setCurrentProfile(res.data.data)).catch(console.error)
+  }, [session])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -2931,7 +2952,11 @@ export default function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      // Clicking a "reset password" email link redirects back here with a temporary session
+      // and this event -- show the set-new-password screen instead of dropping the user
+      // straight into the app on whatever page they land on.
+      if (event === 'PASSWORD_RECOVERY') setIsPasswordRecovery(true)
       setSession(session)
       if (session?.provider_refresh_token && session?.user) {
         api.post('/auth/google/sync-provider', {
@@ -2947,6 +2972,7 @@ export default function App() {
   const handleNav = useCallback((s: Screen) => setScreen(s), [])
 
   if (authChecking) return null;
+  if (isPasswordRecovery) return <ResetPassword onDone={() => setIsPasswordRecovery(false)} />;
   if (!session) return <Login onLogin={() => {}} />;
 
   const renderScreen = () => {
@@ -2972,6 +2998,7 @@ export default function App() {
       case 'service-territories': return <ServiceTerritories />
       case 'system-settings':     return <SystemSettings />
       case 'profile-settings':    return <UserProfileSettings session={session} />
+      case 'user-management':     return currentProfile?.role === 'admin' ? <UserManagement /> : <Dashboard onNav={handleNav} session={session} />
       case 'pickups':             return <Placeholder label="Pickup Tracking" />
       case 'best-clients':        return <Placeholder label="Best Clients" />
       case 'inquiry-funnel':      return <Placeholder label="Inquiry Funnel" />
@@ -3004,6 +3031,7 @@ export default function App() {
           expanded={isSidebarExpanded} 
           mode={sidebarMode}
           onModeChange={setSidebarMode}
+          role={currentProfile?.role}
         />
       </div>
 

@@ -4,16 +4,47 @@ import { api } from './lib/api';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [isRegistering, setIsRegistering] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
   const [identifier, setIdentifier] = useState('');
-  
+
   // Registration fields
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // resetPasswordForEmail() needs a real email -- reuse the same username-or-email
+  // resolution as sign-in, since the "Forgot password?" field also accepts either.
+  const resolveEmail = async (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed.includes('@')) return trimmed;
+    const response = await api.post('/auth/resolve-login', { identifier: trimmed });
+    return response.data.data.email as string;
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const targetEmail = await resolveEmail(identifier);
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(targetEmail, {
+        redirectTo: window.location.origin,
+      });
+      if (resetError) throw resetError;
+      setResetSent(true);
+    } catch (err: any) {
+      // Don't reveal whether the account exists via a different error for "not found" --
+      // resolveEmail's 404 and Supabase's own errors both just show a generic message.
+      setError(err.response?.data?.error?.message ?? err.message ?? 'Could not send the reset email.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,7 +118,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           <div style={{ width: 48, height: 48, background: 'var(--brand)', borderRadius: 12, margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 800, fontSize: 24 }}>C</div>
           <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--t1)' }}>Container CRM</div>
           <div style={{ fontSize: 13, color: 'var(--t4)', marginTop: 4 }}>
-            {isRegistering ? 'Create your account' : 'Sign in to your account'}
+            {showForgot ? 'Reset your password' : isRegistering ? 'Create your account' : 'Sign in to your account'}
           </div>
         </div>
 
@@ -97,6 +128,32 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           </div>
         )}
 
+        {showForgot ? (
+          resetSent ? (
+            <div>
+              <div style={{ padding: 12, background: 'var(--brand-bg)', color: 'var(--t1)', fontSize: 13, borderRadius: 8, marginBottom: 16 }}>
+                If an account matches that email or username, a password reset link has been sent. Check your inbox.
+              </div>
+              <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--t4)' }}>
+                <span style={{ color: 'var(--brand)', fontWeight: 600, cursor: 'pointer' }} onClick={() => { setShowForgot(false); setResetSent(false); setError(''); }}>Back to sign in</span>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleForgotPassword} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Email or Username</label>
+                <input type="text" value={identifier} onChange={e => setIdentifier(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--t1)', boxSizing: 'border-box' }} required />
+              </div>
+              <button type="submit" disabled={loading} style={{ width: '100%', padding: '10px', background: 'var(--brand)', color: 'white', border: 'none', borderRadius: 8, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer' }}>
+                {loading ? 'Sending…' : 'Send reset link'}
+              </button>
+              <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--t4)' }}>
+                <span style={{ color: 'var(--brand)', fontWeight: 600, cursor: 'pointer' }} onClick={() => { setShowForgot(false); setError(''); }}>Back to sign in</span>
+              </div>
+            </form>
+          )
+        ) : (
+        <>
         <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {isRegistering ? (
             <>
@@ -123,6 +180,11 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           <div>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Password</label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--t1)', boxSizing: 'border-box' }} required />
+            {!isRegistering && (
+              <div style={{ textAlign: 'right', marginTop: 6 }}>
+                <span style={{ fontSize: 12, color: 'var(--brand)', fontWeight: 600, cursor: 'pointer' }} onClick={() => { setShowForgot(true); setError(''); }}>Forgot password?</span>
+              </div>
+            )}
           </div>
 
           <button type="submit" disabled={loading} style={{ width: '100%', padding: '10px', background: 'var(--brand)', color: 'white', border: 'none', borderRadius: 8, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer', marginTop: 8 }}>
@@ -163,6 +225,8 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
             {isRegistering ? 'Sign In' : 'Register'}
           </span>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

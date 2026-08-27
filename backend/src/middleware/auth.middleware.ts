@@ -41,8 +41,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       return authError(req, res, 403, 'PROFILE_INACTIVE', 'This CRM account is inactive.');
     }
 
-    // Backward compatibility until migration 007 normalizes the original "user" role to "pic".
-    const role = profile.role === 'user' ? 'pic' : profile.role;
+    const role = profile.role;
     if (!['admin', 'manager', 'pic'].includes(role)) {
       return authError(req, res, 403, 'ROLE_INVALID', 'This account does not have a supported CRM role.');
     }

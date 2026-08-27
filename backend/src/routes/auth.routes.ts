@@ -9,6 +9,8 @@ const router = Router();
 // into the email Supabase Auth actually signs in with.
 router.post('/resolve-login', AuthController.resolveLogin);
 
+router.get('/me', requireAuth, AuthController.me);
+
 router.get('/google/status', requireAuth, GoogleAuthController.status);
 router.post('/google/sync-provider', requireAuth, GoogleAuthController.syncProvider);
 router.get('/google', requireAuth, GoogleAuthController.getAuthUrl);

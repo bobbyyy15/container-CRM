@@ -34,4 +34,10 @@ export class AuthController {
       res.status(400).json({ success: false, error: { message: error.message } });
     }
   }
+
+  // Lets the frontend know its own role/status without querying `profiles` directly (which
+  // is authenticated-only anyway) -- requireAuth already resolved this for the request.
+  static async me(req: Request, res: Response) {
+    res.json({ success: true, data: req.auth!.profile });
+  }
 }
