@@ -10,6 +10,7 @@ declare global {
           id: string;
           role: 'admin' | 'manager' | 'pic';
           status: 'active' | 'inactive';
+          pic_id: string | null;
         };
       };
     }

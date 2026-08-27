@@ -46,12 +46,20 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       return authError(req, res, 403, 'ROLE_INVALID', 'This account does not have a supported CRM role.');
     }
 
+    const { data: picData } = await supabaseAdmin
+      .from('pics')
+      .select('id')
+      .eq('profile_id', user.id)
+      .eq('status', 'active')
+      .maybeSingle();
+
     req.auth = {
       user,
       profile: {
         id: profile.id,
         role: role as OperationalRole,
         status: 'active',
+        pic_id: picData?.id || null,
       },
     };
 
