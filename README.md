@@ -8,6 +8,9 @@ See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for current business rule
 built and verified, and what's planned next (including the Inventory/ticketing module that's
 been scoped but not yet built).
 
+See [`docs/ACCOUNT_MODULE.md`](docs/ACCOUNT_MODULE.md) for the signup/login/roles/Google-OAuth
+flow, its known bugs, and what to pick up next there.
+
 ## Local setup
 
 1. Install both locked dependency sets:
