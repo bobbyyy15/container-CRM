@@ -315,6 +315,191 @@ export const NewWarmLeadDialog = ({ onClose, onSaved }: {
   )
 }
 
+const INDUSTRY_OPTIONS = ['Containers', 'Farms', 'Construction', 'Trucking', 'Logistics', 'Storage', 'Others']
+
+export const NewProspectDialog = ({ onClose, onSaved }: {
+  onClose: () => void
+  onSaved: () => void
+}) => {
+  const pics = usePics()
+  const [companyName, setCompanyName] = useState('')
+  const [contactPerson, setContactPerson] = useState('')
+  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [picId, setPicId] = useState('')
+  const [category, setCategory] = useState<'Proceed' | 'Removed'>('Proceed')
+  const [smsDeliverability, setSmsDeliverability] = useState<'Call/Text' | 'Calls Only' | 'Text Only' | ''>('')
+  const [industry, setIndustry] = useState('')
+  const [industryOther, setIndustryOther] = useState('')
+  const [serviceLocation, setServiceLocation] = useState('')
+  const [country, setCountry] = useState('')
+  const [stateProvince, setStateProvince] = useState('')
+  const [city, setCity] = useState('')
+  const [dateAdded, setDateAdded] = useState('')
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!companyName.trim()) return
+    setWorking(true)
+    setError('')
+    try {
+      await api.post('/leads/prospects', {
+        companyName: companyName.trim(),
+        contactPerson: contactPerson.trim() || undefined,
+        phone: phone.trim() || undefined,
+        email: email.trim() || undefined,
+        picId: picId || undefined,
+        category,
+        smsDeliverability: smsDeliverability || undefined,
+        industry: (industry === 'Others' ? industryOther.trim() : industry) || undefined,
+        serviceLocation: serviceLocation.trim() || undefined,
+        country: country.trim() || undefined,
+        stateProvince: stateProvince.trim() || undefined,
+        city: city.trim() || undefined,
+        dateAdded: dateAdded || undefined,
+      })
+      onSaved()
+      onClose()
+    } catch (caught) {
+      setError(apiError(caught))
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <Modal title="New prospect" description="Manually add a prospect that isn't from a spreadsheet import." onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Company</label><input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} required /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Contact person</label><input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Date added</label><input className="inp" type="date" value={dateAdded} onChange={event => setDateAdded(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Phone</label><input className="inp" value={phone} onChange={event => setPhone(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Email</label><input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>PIC</label>
+            <select className="inp" value={picId} onChange={event => setPicId(event.target.value)}>
+              <option value="">Unassigned</option>
+              {pics.map(pic => <option key={pic.id} value={pic.id}>{pic.name}</option>)}
+            </select>
+          </div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Category</label>
+            <select className="inp" value={category} onChange={event => setCategory(event.target.value as typeof category)}>
+              <option value="Proceed">Proceed</option>
+              <option value="Removed">Removed</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>SMS Deliverability</label>
+            <select className="inp" value={smsDeliverability} onChange={event => setSmsDeliverability(event.target.value as typeof smsDeliverability)}>
+              <option value="">Unknown</option>
+              <option value="Call/Text">Call/Text</option>
+              <option value="Calls Only">Calls Only</option>
+              <option value="Text Only">Text Only</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Industry</label>
+            <select className="inp" value={industry} onChange={event => setIndustry(event.target.value)}>
+              <option value="">Not specified</option>
+              {INDUSTRY_OPTIONS.map(value => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </div>
+          {industry === 'Others' && (
+            <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Specify industry</label><input className="inp" value={industryOther} onChange={event => setIndustryOther(event.target.value)} /></div>
+          )}
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Service location</label><input className="inp" value={serviceLocation} onChange={event => setServiceLocation(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Country</label><input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>State/Province</label><input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. CO, ON" /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>City</label><input className="inp" value={city} onChange={event => setCity(event.target.value)} /></div>
+          <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={working || !companyName.trim()}>{working ? 'Creating…' : 'Create Prospect'}</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+export const NewManualSaleDialog = ({ onClose, onSaved }: {
+  onClose: () => void
+  onSaved: () => void
+}) => {
+  const pics = usePics()
+  const [companyName, setCompanyName] = useState('')
+  const [contactPerson, setContactPerson] = useState('')
+  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [picId, setPicId] = useState('')
+  const [totalUnits, setTotalUnits] = useState(1)
+  const [buyingCost, setBuyingCost] = useState(0)
+  const [revenue, setRevenue] = useState(0)
+  const [stateProvince, setStateProvince] = useState('')
+  const [country, setCountry] = useState('')
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!companyName.trim()) return
+    setWorking(true)
+    setError('')
+    try {
+      await api.post('/deals/sales', {
+        companyName: companyName.trim(),
+        contactPerson: contactPerson.trim() || undefined,
+        phone: phone.trim() || undefined,
+        email: email.trim() || undefined,
+        picId: picId || undefined,
+        totalUnits,
+        buyingCost,
+        revenue,
+        stateProvince: stateProvince.trim() || undefined,
+        country: country.trim() || undefined,
+      })
+      onSaved()
+      onClose()
+    } catch (caught) {
+      setError(apiError(caught))
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <Modal title="Record sale manually" description="For a sale that didn't go through a Quotation." onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Company</label><input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} required /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Contact person</label><input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>PIC</label>
+            <select className="inp" value={picId} onChange={event => setPicId(event.target.value)}>
+              <option value="">Unassigned</option>
+              {pics.map(pic => <option key={pic.id} value={pic.id}>{pic.name}</option>)}
+            </select>
+          </div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Phone</label><input className="inp" value={phone} onChange={event => setPhone(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Email</label><input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>State/Province</label><input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Country</label><input className="inp" value={country} onChange={event => setCountry(event.target.value)} /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Units</label><input className="inp" type="number" min="1" value={totalUnits} onChange={event => setTotalUnits(Number(event.target.value))} required /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Buying cost total</label><input className="inp" type="number" min="0" step="0.01" value={buyingCost} onChange={event => setBuyingCost(Number(event.target.value))} required /></div>
+          <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Revenue total</label><input className="inp" type="number" min="0" step="0.01" value={revenue} onChange={event => setRevenue(Number(event.target.value))} required /></div>
+          <div style={{ gridColumn: '1 / -1', padding: 10, borderRadius: 8, background: 'var(--s2)', color: revenue - buyingCost >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>Gross profit: ${(revenue - buyingCost).toLocaleString()}</div>
+          <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={working || !companyName.trim()}>{working ? 'Recording…' : 'Record Sale'}</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 export const QuotationDialog = ({ inquiries, initialId, onClose, onSaved }: {
   inquiries: InquiryOption[]
   initialId?: string

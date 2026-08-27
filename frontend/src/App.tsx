@@ -7,6 +7,8 @@ import { UserProfileSettings } from './features/settings/UserProfileSettings'
 import {
   NewInquiryDialog,
   NewWarmLeadDialog,
+  NewProspectDialog,
+  NewManualSaleDialog,
   QuotationDialog,
   SaleDialog,
   type InquiryOption,
@@ -1304,6 +1306,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [revision, setRevision] = useState(0)
   const [importMode, setImportMode] = useState<'file' | 'paste' | null>(null)
   const [showNewWarmLead, setShowNewWarmLead] = useState(false)
+  const [showNewProspect, setShowNewProspect] = useState(false)
   const [inquiryWarmLeadId, setInquiryWarmLeadId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
 
@@ -1390,6 +1393,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {mode === 'prospect' && <Btn variant="primary" sm onClick={() => setImportMode('file')}><Ic n={I.upload} size={13} /> Import Excel</Btn>}
+          {mode === 'prospect' && <Btn variant="secondary" sm onClick={() => setShowNewProspect(true)}><Ic n={I.plus} size={13} /> New Prospect</Btn>}
           {mode === 'warm' && <Btn variant="primary" sm onClick={() => setShowNewWarmLead(true)}><Ic n={I.plus} size={13} /> New Warm Lead</Btn>}
           {mode === 'prospect' && <Btn variant="secondary" sm onClick={() => setImportMode('paste')}><Ic n={I.copy} size={13} /> Paste Bulk</Btn>}
           <Btn variant="ghost" sm onClick={() => exportToCSV(filtered, 'pipeline_data')}><Ic n={I.export} size={13} /> Export</Btn>
@@ -1602,6 +1606,12 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           onSaved={() => setRevision(value => value + 1)}
         />
       )}
+      {showNewProspect && (
+        <NewProspectDialog
+          onClose={() => setShowNewProspect(false)}
+          onSaved={() => setRevision(value => value + 1)}
+        />
+      )}
       {inquiryWarmLeadId && (
         <NewInquiryDialog
           warmLeads={prospectsData as WarmLeadOption[]}
@@ -1804,6 +1814,18 @@ const QuotationList = () => {
     }
   }
 
+  const removeQuotation = async (id: string) => {
+    const reason = window.prompt('Why should this quotation be removed?')?.trim()
+    if (!reason) return
+    setActionError('')
+    try {
+      await api.post(`/leads/quotation/${id}/remove`, { reason })
+      setRevision(value => value + 1)
+    } catch (error: any) {
+      setActionError(error.response?.data?.error?.message ?? error.message ?? 'Could not remove the quotation.')
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {showQuotation && (
@@ -1877,6 +1899,7 @@ const QuotationList = () => {
                     <Btn variant="ghost" sm>View</Btn>
                     {['Draft', 'Sent', 'Viewed'].includes(q.status) && <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => acceptQuotation(q.id)}>Accept</Btn>}
                     {q.status === 'Accepted' && <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => setSaleQuotationId(q.id)}>→ Sale</Btn>}
+                    {q.status !== 'Converted' && <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={() => removeQuotation(q.id)}>Remove</Btn>}
                   </div>
                 </td>
               </tr>
@@ -1893,6 +1916,7 @@ const QuotationList = () => {
 const SalesTracker = () => {
   const [revision, setRevision] = useState(0)
   const [showSale, setShowSale] = useState(false)
+  const [showManualSale, setShowManualSale] = useState(false)
   const SALES = useSales(revision)
   const quotations = useQuotations(revision)
   const totalBuy = SALES.reduce((s, r) => s + r.totalBuy, 0)
@@ -1906,6 +1930,12 @@ const SalesTracker = () => {
         <SaleDialog
           quotations={quotations as QuotationOption[]}
           onClose={() => setShowSale(false)}
+          onSaved={() => setRevision(value => value + 1)}
+        />
+      )}
+      {showManualSale && (
+        <NewManualSaleDialog
+          onClose={() => setShowManualSale(false)}
           onSaved={() => setRevision(value => value + 1)}
         />
       )}
@@ -1932,7 +1962,8 @@ const SalesTracker = () => {
         <select className="sel"><option>This Month</option><option>Last Month</option><option>All Time</option></select>
         <div className="toolbar-right">
           <Btn variant="ghost" sm onClick={() => exportToCSV(SALES, 'sales')}><Ic n={I.export} size={13} /> Export</Btn>
-          <Btn variant="primary" sm onClick={() => setShowSale(true)}><Ic n={I.plus} size={13} /> Record Sale</Btn>
+          <Btn variant="secondary" sm onClick={() => setShowManualSale(true)}><Ic n={I.plus} size={13} /> Record Sale Manually</Btn>
+          <Btn variant="primary" sm onClick={() => setShowSale(true)}><Ic n={I.plus} size={13} /> From Quotation</Btn>
         </div>
       </div>
 

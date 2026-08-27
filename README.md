@@ -4,6 +4,10 @@ Container CRM is a React, Express, and Supabase application for the connected sa
 
 `Prospect -> Warm Lead -> Inquiry -> Quotation -> Sale -> Customer`
 
+See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for current business rules, what's been
+built and verified, and what's planned next (including the Inventory/ticketing module that's
+been scoped but not yet built).
+
 ## Local setup
 
 1. Install both locked dependency sets:

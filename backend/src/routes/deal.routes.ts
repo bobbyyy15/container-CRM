@@ -12,5 +12,6 @@ router.post('/quotations/:id/convert-to-sale', requireRoles('admin', 'manager', 
 
 // Sales
 router.get('/sales', DealController.getSales);
+router.post('/sales', requireRoles('admin', 'manager', 'pic'), DealController.createManualSale);
 
 export default router;

@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../config/supabase';
-import { CreateInquiryPayload, CreateManualWarmLeadPayload, CreateManualInquiryPayload } from '../schemas/lead.schema';
+import { CreateInquiryPayload, CreateManualWarmLeadPayload, CreateManualInquiryPayload, CreateManualProspectPayload } from '../schemas/lead.schema';
 
 export class LeadService {
   static async convertProspectToWarmLead(prospectId: string, actorId: string, reason?: string, channel?: string) {
@@ -36,6 +36,30 @@ export class LeadService {
       .single();
 
     if (error) throw new Error(`Failed to create inquiry: ${error.message}`);
+    return data;
+  }
+
+  static async createManualProspect(payload: CreateManualProspectPayload, actorId: string) {
+    const { data, error } = await supabaseAdmin
+      .rpc('create_manual_prospect', {
+        p_actor_id: actorId,
+        p_company_name: payload.companyName,
+        p_contact_person: payload.contactPerson ?? null,
+        p_phone: payload.phone ?? null,
+        p_email: payload.email ?? null,
+        p_pic_id: payload.picId ?? null,
+        p_category: payload.category,
+        p_sms_deliverability: payload.smsDeliverability ?? null,
+        p_industry: payload.industry ?? null,
+        p_service_location: payload.serviceLocation ?? null,
+        p_country: payload.country ?? null,
+        p_state_province: payload.stateProvince ?? null,
+        p_city: payload.city ?? null,
+        p_date_added: payload.dateAdded ?? null,
+      })
+      .single();
+
+    if (error) throw new Error(`Failed to create prospect: ${error.message}`);
     return data;
   }
 

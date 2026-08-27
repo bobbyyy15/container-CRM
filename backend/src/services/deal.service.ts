@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../config/supabase';
-import { ConvertToSalePayload, CreateQuotationPayload, UpdateQuotationStatusPayload } from '../schemas/deal.schema';
+import { ConvertToSalePayload, CreateQuotationPayload, UpdateQuotationStatusPayload, CreateManualSalePayload } from '../schemas/deal.schema';
 
 export class DealService {
 
@@ -27,6 +27,26 @@ export class DealService {
       .single();
     if (error) throw new Error(`Failed to create quotation: ${error.message}`);
     return quote;
+  }
+
+  static async createManualSale(payload: CreateManualSalePayload, userId: string) {
+    const { data: sale, error } = await supabaseAdmin
+      .rpc('create_manual_sale', {
+        p_actor_id: userId,
+        p_company_name: payload.companyName,
+        p_contact_person: payload.contactPerson ?? null,
+        p_phone: payload.phone ?? null,
+        p_email: payload.email ?? null,
+        p_pic_id: payload.picId ?? null,
+        p_total_units: payload.totalUnits,
+        p_buying_cost: payload.buyingCost,
+        p_revenue: payload.revenue,
+        p_state_province: payload.stateProvince ?? null,
+        p_country: payload.country ?? null,
+      })
+      .single();
+    if (error) throw new Error(`Failed to create sale: ${error.message}`);
+    return sale;
   }
 
   static async convertToSale(quotationId: string, payload: ConvertToSalePayload, userId: string) {

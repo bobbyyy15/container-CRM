@@ -5,6 +5,7 @@ import {
   CreateInquirySchema,
   CreateManualWarmLeadSchema,
   CreateManualInquirySchema,
+  CreateManualProspectSchema,
   LeadListQuerySchema,
   RemovePipelineEntrySchema,
 } from '../schemas/lead.schema';
@@ -120,6 +121,17 @@ export class LeadController {
         success: false,
         error: { message: error.message }
       });
+    }
+  }
+
+  static async createManualProspect(req: Request, res: Response) {
+    try {
+      const payload = CreateManualProspectSchema.parse(req.body);
+      const actorId = req.auth!.user.id;
+      const prospect = await LeadService.createManualProspect(payload, actorId);
+      res.status(201).json({ success: true, data: prospect });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
     }
   }
 

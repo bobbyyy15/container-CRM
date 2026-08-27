@@ -21,6 +21,20 @@ export const ConvertToSaleSchema = z.object({
   revenue: z.number().min(0)
 });
 
+export const CreateManualSaleSchema = z.object({
+  companyName: z.string().trim().min(1, 'Company is required'),
+  contactPerson: z.string().trim().max(200).optional(),
+  phone: z.string().trim().max(50).optional(),
+  email: z.string().trim().max(200).optional(),
+  picId: z.string().uuid().optional(),
+  totalUnits: z.number().int().min(1),
+  buyingCost: z.number().min(0),
+  revenue: z.number().min(0),
+  stateProvince: z.string().trim().max(100).optional(),
+  country: z.string().trim().max(100).optional(),
+});
+
 export type CreateQuotationPayload = z.infer<typeof CreateQuotationSchema>;
 export type ConvertToSalePayload = z.infer<typeof ConvertToSaleSchema>;
 export type UpdateQuotationStatusPayload = z.infer<typeof UpdateQuotationStatusSchema>;
+export type CreateManualSalePayload = z.infer<typeof CreateManualSaleSchema>;

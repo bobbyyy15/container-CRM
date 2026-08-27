@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { DealService } from '../services/deal.service';
-import { CreateQuotationSchema, UpdateQuotationStatusSchema, ConvertToSaleSchema } from '../schemas/deal.schema';
+import { CreateQuotationSchema, UpdateQuotationStatusSchema, ConvertToSaleSchema, CreateManualSaleSchema } from '../schemas/deal.schema';
 
 export class DealController {
   
@@ -53,6 +53,17 @@ export class DealController {
       const userId = req.auth!.user.id;
       const quote = await DealService.updateQuotationStatus(id, payload, userId);
       res.json({ success: true, data: quote });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async createManualSale(req: Request, res: Response) {
+    try {
+      const payload = CreateManualSaleSchema.parse(req.body);
+      const userId = req.auth!.user.id;
+      const sale = await DealService.createManualSale(payload, userId);
+      res.status(201).json({ success: true, data: sale });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });
     }

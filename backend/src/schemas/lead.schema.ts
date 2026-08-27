@@ -61,6 +61,24 @@ export const CreateManualInquirySchema = z.object({
   { message: 'Either warmLeadId or companyName is required', path: ['companyName'] },
 );
 
+export const CreateManualProspectSchema = z.object({
+  companyName: z.string().trim().min(1, 'Company is required'),
+  contactPerson: z.string().trim().max(200).optional(),
+  phone: z.string().trim().max(50).optional(),
+  email: z.string().trim().max(200).optional(),
+  picId: z.string().uuid().optional(),
+  category: z.enum(['Proceed', 'Removed']).default('Proceed'),
+  smsDeliverability: z.enum(['Call/Text', 'Calls Only', 'Text Only']).optional(),
+  // Frontend offers a fixed list plus "Others" with a free-text specify field; either way
+  // this arrives as plain text and is not required.
+  industry: z.string().trim().max(100).optional(),
+  serviceLocation: z.string().trim().max(200).optional(),
+  country: z.string().trim().max(100).optional(),
+  stateProvince: z.string().trim().max(100).optional(),
+  city: z.string().trim().max(100).optional(),
+  dateAdded: z.string().date().optional(),
+});
+
 export const LeadListQuerySchema = z.object({
   search: z.string().trim().max(100).optional(),
   country: z.string().trim().max(100).optional(),
@@ -73,7 +91,7 @@ export const LeadListQuerySchema = z.object({
 });
 
 export const RemovePipelineEntrySchema = z.object({
-  stage: z.enum(['prospect', 'warm_lead', 'inquiry']),
+  stage: z.enum(['prospect', 'warm_lead', 'inquiry', 'quotation']),
   entityId: z.string().uuid(),
   reason: z.string().trim().min(3).max(500),
 });
@@ -81,3 +99,4 @@ export const RemovePipelineEntrySchema = z.object({
 export type CreateInquiryPayload = z.infer<typeof CreateInquirySchema>;
 export type CreateManualWarmLeadPayload = z.infer<typeof CreateManualWarmLeadSchema>;
 export type CreateManualInquiryPayload = z.infer<typeof CreateManualInquirySchema>;
+export type CreateManualProspectPayload = z.infer<typeof CreateManualProspectSchema>;
