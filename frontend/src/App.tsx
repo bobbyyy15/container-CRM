@@ -752,6 +752,7 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: any }) => {
+  const topCustomers = useCustomers('All', '').slice(0, 5);
   const [chartMetric, setChartMetric] = useState<'profit' | 'revenue' | 'cost'>('profit')
   const chartColor = chartMetric === 'profit' ? '#315EF6' : chartMetric === 'revenue' ? '#059669' : '#6B7280'
   const analytics = useAnalytics()
