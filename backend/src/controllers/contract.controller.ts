@@ -81,7 +81,7 @@ export class ContractController {
       if (contractErr || !contract) throw new Error('Contract not found');
 
       const saleData = Array.isArray(contract.sales) ? contract.sales[0] : contract.sales;
-      if (req.auth?.profile.role !== 'admin' && (saleData as any)?.pic_id !== req.auth?.profile.pic_id) {
+      if (!req.auth?.profile.pic_id || (saleData as any)?.pic_id !== req.auth.profile.pic_id) {
         throw new Error('Unauthorized to update this contract');
       }
 
