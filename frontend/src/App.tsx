@@ -218,7 +218,7 @@ const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses
   return data;
 }
 
-const useCustomers = (status = 'All', search = '') => {
+const useCustomers = (status = 'All', search = '', revision = 0) => {
   const [data, setData] = useState<any[]>([]);
   useEffect(() => {
     api.get('/customers', { params: { status, search } }).then(res => {
@@ -238,7 +238,7 @@ const useCustomers = (status = 'All', search = '') => {
         status: c.status
       })));
     }).catch(console.error);
-  }, [status, search]);
+  }, [status, search, revision]);
   return data;
 }
 
@@ -2096,7 +2096,9 @@ const SalesTracker = () => {
 const CustomerAccounts = () => {
   const [tab, setTab] = useState('All');
   const [search, setSearch] = useState('');
-  const customers = useCustomers(tab, search);
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const customers = useCustomers(tab, search, revision);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -2105,7 +2107,8 @@ const CustomerAccounts = () => {
           <div className="page-title">Customer Accounts</div>
           <div className="page-desc">Companies with confirmed purchase history.</div>
         </div>
-        <Btn variant="primary" sm><Ic n={I.plus} size={13} /> Add Customer</Btn>
+        <Btn variant="primary" sm onClick={() => setShowNewCustomer(true)}><Ic n={I.plus} size={13} /> Add Customer</Btn>
+        {showNewCustomer && <NewManualSaleDialog onClose={() => setShowNewCustomer(false)} onSaved={() => { setShowNewCustomer(false); setRevision(r => r + 1); window.location.reload(); }} />}
       </div>
       <div className="tabs">
         {['All', 'Active', 'Floating'].map(t => <div key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</div>)}
