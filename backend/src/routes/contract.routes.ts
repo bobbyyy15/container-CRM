@@ -9,5 +9,6 @@ router.use(requireRoles('admin', 'sales_manager'));
 
 router.get('/', ContractController.listContracts);
 router.post('/', ContractController.createContract);
+router.patch('/:id', ContractController.updateContract);
 
 export default router;

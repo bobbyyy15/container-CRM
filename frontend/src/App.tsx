@@ -194,7 +194,7 @@ const useAnalytics = () => {
 
 
 
-const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses', search = '') => {
+const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses', search = '', revision = 0) => {
   const [data, setData] = useState<any[]>([]);
   useEffect(() => {
     api.get('/contracts', { params: { status, pickStatus, search } }).then(res => {
@@ -214,7 +214,7 @@ const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses
         sale: c.sale_number
       })));
     }).catch(console.error);
-  }, [status, pickStatus, search]);
+  }, [status, pickStatus, search, revision]);
   return data;
 }
 
@@ -455,7 +455,7 @@ const categoryData: ChartSlice[] = []
 const inquiryStatusData: ChartSlice[] = []
 const PIC_DATA: PicPerformanceRow[] = []
 
-const OVERDUE_PICKUPS: OverduePickupRow[] = []
+
 const LOSS_REASONS: LossReasonRow[] = []
 
 // ─── Utility components ───────────────────────────────────────────────────────
@@ -779,6 +779,12 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
 
 const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: any }) => {
   const topCustomers = useCustomers('All', '').slice(0, 5);
+  const overdueContracts = useContracts('All Statuses', 'Overdue', '');
+  const OVERDUE_PICKUPS = overdueContracts.map(c => {
+    const targetDate = c.pickup === 'Unscheduled' ? new Date() : new Date(c.pickup);
+    const diff = Math.floor((new Date().getTime() - targetDate.getTime()) / (1000 * 3600 * 24));
+    return { contract: c.ref, co: c.co, days: diff > 0 ? diff : 1, qty: c.qty, size: c.size };
+  });
   const [chartMetric, setChartMetric] = useState<'profit' | 'revenue' | 'cost'>('profit')
   const chartColor = chartMetric === 'profit' ? '#315EF6' : chartMetric === 'revenue' ? '#059669' : '#6B7280'
   const analytics = useAnalytics()
@@ -3056,7 +3062,7 @@ export default function App() {
       case 'system-settings':     return <SystemSettings />
       case 'profile-settings':    return <UserProfileSettings session={session} />
       case 'user-management':     return currentProfile?.role === 'admin' ? <UserManagement /> : <Dashboard onNav={handleNav} session={session} />
-      case 'pickups':             return <Placeholder label="Pickup Tracking" />
+      case 'pickups':             return <Pickups />
       case 'best-clients':        return <Placeholder label="Best Clients" />
       case 'inquiry-funnel':      return <Placeholder label="Inquiry Funnel" />
       default:                    return <Dashboard onNav={handleNav} session={session} />
@@ -3101,3 +3107,94 @@ export default function App() {
     </div>
   )
 }
+
+// ─── Pickup Tracking ──────────────────────────────────────────────────────────
+
+const Pickups = () => {
+  const [pickStatus, setPickStatus] = useState('All Pickup Statuses');
+  const [search, setSearch] = useState('');
+  const [revision, setRevision] = useState(0);
+  const contracts = useContracts('All Statuses', pickStatus, search, revision);
+
+  const handleUpdateStatus = async (id: string, newStatus: string) => {
+    try {
+      await api.patch(`/contracts/${id}`, { pickup_status: newStatus });
+      setRevision(r => r + 1);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to update status');
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="page-header">
+        <div>
+          <div className="page-title">Pickup Tracking</div>
+          <div className="page-desc">Manage container dispatch and warehouse fulfillment.</div>
+        </div>
+      </div>
+      
+      <div className="toolbar">
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search pickups…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+        <select className="sel" value={pickStatus} onChange={e => setPickStatus(e.target.value)}>
+          <option>All Pickup Statuses</option>
+          <option>Pending</option>
+          <option>Scheduled</option>
+          <option>Confirmed</option>
+          <option>Picked Up</option>
+          <option>Overdue</option>
+        </select>
+        <div className="toolbar-right">
+          <span className="count-label">{contracts.length} pickups</span>
+        </div>
+      </div>
+
+      <div className="table-wrap">
+        <table className="crm">
+          <thead><tr>
+            <th>Contract #</th><th>Company</th><th>Container</th><th className="r">Qty</th>
+            <th>Target Date</th><th>Status</th><th>PIC</th><th className="col-actions">Actions</th>
+          </tr></thead>
+          <tbody>
+            {contracts.map(c => (
+              <tr key={c.id} style={{ background: c.pickStatus === 'Overdue' ? 'var(--red-bg)' : undefined }}>
+                <td><span className="ref-id" style={{ color: 'var(--teal)' }}>{c.ref}</span></td>
+                <td>
+                  <div style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--t1)' }}>{c.co}</div>
+                  <div style={{ fontSize: 11, color: 'var(--t4)' }}>{c.contact}</div>
+                </td>
+                <td>
+                  <div style={{ fontWeight: 500, fontSize: 12 }}>{c.size}</div>
+                  <div style={{ fontSize: 11, color: 'var(--t3)' }}>{c.category}</div>
+                </td>
+                <td className="r" style={{ fontWeight: 600 }}>{c.qty}</td>
+                <td className="mono" style={{ fontSize: 12, color: c.pickStatus === 'Overdue' ? 'var(--red)' : undefined }}>{c.pickup}</td>
+                <td>
+                  <span className={`badge ${c.pickStatus === 'Picked Up' ? 'b-green' : c.pickStatus === 'Overdue' ? 'b-red' : c.pickStatus === 'Confirmed' ? 'b-brand' : 'b-amber'}`}>
+                    {c.pickStatus}
+                  </span>
+                </td>
+                <td style={{ fontSize: 12, color: 'var(--t2)' }}>{c.pic}</td>
+                <td className="col-actions">
+                  <select 
+                    className="sel" 
+                    value={c.pickStatus} 
+                    onChange={e => handleUpdateStatus(c.id, e.target.value)}
+                    style={{ padding: '4px 8px', fontSize: 11, minWidth: 110 }}
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="Scheduled">Scheduled</option>
+                    <option value="Confirmed">Confirmed</option>
+                    <option value="Picked Up">Picked Up</option>
+                    <option value="Overdue">Overdue</option>
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
