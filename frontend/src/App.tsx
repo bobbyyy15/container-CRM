@@ -450,13 +450,8 @@ type PicPerformanceRow = {
 type OverduePickupRow = { contract: string; co: string; days: number; qty: number; size: string }
 type LossReasonRow = { reason: string; color: string; count: number }
 
-const profitChartData: ProfitChartPoint[] = []
-const categoryData: ChartSlice[] = []
-const inquiryStatusData: ChartSlice[] = []
-const PIC_DATA: PicPerformanceRow[] = []
 
 
-const LOSS_REASONS: LossReasonRow[] = []
 
 // ─── Utility components ───────────────────────────────────────────────────────
 
@@ -778,6 +773,17 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: any }) => {
+  const analytics = useAnalytics();
+  const m = analytics?.metrics || {};
+  const funnel = analytics?.funnel || {};
+  const c = analytics?.charts || {};
+  
+  const profitChartData: ProfitChartPoint[] = c.profitChartData || [];
+  const categoryData: ChartSlice[] = c.categoryData || [];
+  const inquiryStatusData: ChartSlice[] = c.inquiryStatusData || [];
+  const PIC_DATA: PicPerformanceRow[] = c.PIC_DATA || [];
+  const LOSS_REASONS: LossReasonRow[] = c.LOSS_REASONS || [];
+
   const topCustomers = useCustomers('All', '').slice(0, 5);
   const overdueContracts = useContracts('All Statuses', 'Overdue', '');
   const OVERDUE_PICKUPS = overdueContracts.map(c => {
@@ -787,9 +793,6 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
   });
   const [chartMetric, setChartMetric] = useState<'profit' | 'revenue' | 'cost'>('profit')
   const chartColor = chartMetric === 'profit' ? '#315EF6' : chartMetric === 'revenue' ? '#059669' : '#6B7280'
-  const analytics = useAnalytics()
-  const m = analytics?.metrics || {}
-  const funnel = analytics?.funnel || {}
   const conversion = (value: number, previous: number) => previous > 0 ? `${Math.round((value / previous) * 100)}%` : '0%'
 
   const hour = new Date().getHours()

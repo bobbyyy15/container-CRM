@@ -59,6 +59,13 @@ export class AnalyticsController {
       const countError = prospects.error || warmLeads.error || inquiries.error || quotations.error;
       if (countError) throw countError;
 
+      // 3. Fetch Chart Data via RPC
+      const { data: chartData, error: chartError } = await supabaseAdmin.rpc('get_dashboard_charts', {
+        p_pic_id: isAdmin ? null : picId
+      });
+
+      if (chartError) throw chartError;
+
       res.json({
         success: true,
         data: {
@@ -75,7 +82,8 @@ export class AnalyticsController {
             inquiries: inquiries.count || 0,
             quotations: quotations.count || 0,
             sales: sales?.length || 0
-          }
+          },
+          charts: chartData || {}
         }
       });
     } catch (error: any) {
