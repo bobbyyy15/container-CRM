@@ -2646,7 +2646,10 @@ const ContainerCatalog = () => (
 
 // ─── PIC Performance ─────────────────────────────────────────────────────────
 
-const PICPerformance = () => (
+const PICPerformance = () => {
+  const analytics = useAnalytics();
+  const PIC_DATA: PicPerformanceRow[] = analytics?.charts?.PIC_DATA || [];
+  return (
   <div className="page-scroll">
     <div className="greeting-bar" style={{ marginBottom: 16 }}>
       <p className="greeting-title">PIC Performance</p>
@@ -2707,11 +2710,15 @@ const PICPerformance = () => (
       </div>
     </div>
   </div>
-)
+  );
+}
 
 // ─── Profit Analytics ─────────────────────────────────────────────────────────
 
-const ProfitAnalytics = () => (
+const ProfitAnalytics = () => {
+  const analytics = useAnalytics();
+  const profitChartData: ProfitChartPoint[] = analytics?.charts?.profitChartData || [];
+  return (
   <div className="page-scroll">
     <div className="greeting-bar" style={{ marginBottom: 0 }}>
       <p className="greeting-title">Profit Analytics</p>
@@ -2751,7 +2758,8 @@ const ProfitAnalytics = () => (
       </div>
     </div>
   </div>
-)
+  );
+}
 
 // ─── Admin pages ──────────────────────────────────────────────────────────────
 
