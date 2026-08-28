@@ -664,15 +664,16 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
   };
 
   return (
-    <Modal title="Generate Contract" description="Create a contract from an existing Sale." onClose={onClose}>
+    <Modal title="Generate contract" description="Create a contract from a won sale." onClose={onClose}>
       <form onSubmit={handleSubmit}>
-        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {error && <div style={{ color: 'var(--red)', fontSize: 13, background: 'var(--red-bg)', padding: '8px 12px', borderRadius: 6 }}>{error}</div>}
-          
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <ErrorMessage message={error ?? ''} />
+
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Source Sale</label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Source sale</label>
             <select className="inp" value={saleId} onChange={e => setSaleId(e.target.value)} disabled={submitting}>
-              <option value="">-- Select a Sale --</option>
+              <option value="">-- Select a sale --</option>
+
               {sales.map(s => (
                 <option key={s.id} value={s.id}>
                   {s.company || 'Unknown Company'} (Total: ${(s.totalSell || 0).toLocaleString()})
@@ -682,21 +683,22 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Target Pickup Date (Optional)</label>
-            <input 
-              type="date" 
-              className="inp" 
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Target pickup date (optional)</label>
+            <input
+              type="date"
+              className="inp"
+
               value={pickupDate}
               onChange={e => setPickupDate(e.target.value)}
-              disabled={submitting} 
+              disabled={submitting}
             />
           </div>
         </div>
-
-        <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+        <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
-          <button type="submit" className="btn primary" disabled={submitting} style={{ background: 'var(--brand)', color: 'white', padding: '6px 12px', borderRadius: 6, fontWeight: 500 }}>
-            {submitting ? 'Generating...' : 'Generate Contract'}
+          <button className="btn btn-primary" disabled={submitting || !saleId}>
+            {submitting ? 'Generating…' : 'Generate Contract'}
+
           </button>
         </div>
       </form>

@@ -14,6 +14,21 @@ import { supabaseAdmin } from '../config/supabase';
 const text = (value: unknown) => String(value ?? '').trim().toLowerCase();
 const digits = (value: unknown) => String(value ?? '').replace(/\D/g, '');
 
+// A record created with no PIC stamped on it is invisible under the pic_id-based data
+// silos (NULL never equals NULL for row-ownership checks), so it becomes unreachable the
+// moment it's created. Refuse to create it instead of losing it silently.
+const requirePicId = (req: Request, res: Response): string | null => {
+  const picId = req.auth?.profile.pic_id;
+  if (!picId) {
+    res.status(400).json({
+      success: false,
+      error: { message: 'You must be assigned a PIC identity by an admin before creating pipeline records.' },
+    });
+    return null;
+  }
+  return picId;
+};
+
 const listActiveLeads = async (
   table: 'prospect_clients' | 'warm_leads' | 'inquiries',
   req: Request,
@@ -28,8 +43,15 @@ const listActiveLeads = async (
     .order('created_at', { ascending: false })
     .limit(5000);
 
-  // DATA SILOS ENFORCEMENT
-  dbQuery = dbQuery.eq('pic_id', req.auth?.profile.pic_id);
+  // DATA SILOS ENFORCEMENT -- every role, including admin, only sees the pipeline data
+  // stamped with their own PIC identity. A user with no PIC assigned yet (or an admin, who
+  // never gets one) has nothing to see: .eq('pic_id', null) is not a valid NULL check in
+  // PostgREST and would error, so short-circuit to an empty result instead.
+  const picId = req.auth?.profile.pic_id;
+  if (!picId) {
+    return { data: [], meta: { total: 0, limit: query.limit, offset: query.offset } };
+  }
+  dbQuery = dbQuery.eq('pic_id', picId);
 
   if (table === 'prospect_clients' && query.status !== 'all') dbQuery = dbQuery.eq('lifecycle_status', query.status);
   if (table === 'warm_leads') dbQuery = dbQuery.eq('status', 'active');
@@ -131,9 +153,11 @@ export class LeadController {
     try {
       const payload = CreateManualProspectSchema.parse(req.body);
       const actorId = req.auth!.user.id;
-      
+
       // DATA SILOS ENFORCEMENT
-      payload.picId = req.auth?.profile.pic_id ?? undefined;
+      const picId = requirePicId(req, res);
+      if (!picId) return;
+      payload.picId = picId;
 
       const prospect = await LeadService.createManualProspect(payload, actorId);
       res.json({ success: true, data: prospect, message: 'Prospect created successfully' });
@@ -146,9 +170,11 @@ export class LeadController {
     try {
       const payload = CreateManualWarmLeadSchema.parse(req.body);
       const actorId = req.auth!.user.id;
-      
+
       // DATA SILOS ENFORCEMENT
-      payload.picId = req.auth?.profile.pic_id ?? undefined;
+      const picId = requirePicId(req, res);
+      if (!picId) return;
+      payload.picId = picId;
 
       const warmLead = await LeadService.createManualWarmLead(payload, actorId);
       res.json({ success: true, data: warmLead, message: 'Warm Lead created successfully' });
@@ -161,9 +187,11 @@ export class LeadController {
     try {
       const payload = CreateManualInquirySchema.parse(req.body);
       const actorId = req.auth!.user.id;
-      
+
       // DATA SILOS ENFORCEMENT
-      payload.picId = req.auth?.profile.pic_id ?? undefined;
+      const picId = requirePicId(req, res);
+      if (!picId) return;
+      payload.picId = picId;
 
       const inquiry = await LeadService.createManualInquiry(payload, actorId);
       res.status(201).json({ success: true, data: inquiry });

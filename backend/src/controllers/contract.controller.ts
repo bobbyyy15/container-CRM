@@ -9,14 +9,15 @@ export class ContractController {
       const pickStatus = req.query.pickStatus as string;
       const search = req.query.search as string;
 
+      // DATA SILOS ENFORCEMENT -- consistent with every other pipeline module: no PIC
+      // assigned (including every admin, by design) means nothing to see.
+      const picId = req.auth?.profile.pic_id;
+      if (!picId) return res.json({ success: true, data: [] });
+
       let dbQuery = supabaseAdmin
         .from('contracts_view')
-        .select('*');
-
-      // 1. DATA SILOS ENFORCEMENT
-      if (req.auth?.profile.role !== 'admin') {
-        dbQuery = dbQuery.eq('pic_id', req.auth?.profile.pic_id);
-      }
+        .select('*')
+        .eq('pic_id', picId);
 
       // 2. STATUS FILTERING
       if (status && status !== 'All Statuses') {
@@ -51,7 +52,7 @@ export class ContractController {
       const { data: sale, error: saleErr } = await saleQuery;
       if (saleErr || !sale) throw new Error('Sale not found');
 
-      if (req.auth?.profile.role !== 'admin' && sale.pic_id !== req.auth?.profile.pic_id) {
+      if (!req.auth?.profile.pic_id || sale.pic_id !== req.auth.profile.pic_id) {
         throw new Error('Unauthorized to create a contract for this sale');
       }
 

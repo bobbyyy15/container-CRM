@@ -3,19 +3,36 @@ import { supabaseAdmin } from '../config/supabase';
 import { DealService } from '../services/deal.service';
 import { CreateQuotationSchema, UpdateQuotationStatusSchema, ConvertToSaleSchema, CreateManualSaleSchema } from '../schemas/deal.schema';
 
+// A record created with no PIC stamped on it is invisible under the pic_id-based data
+// silos (NULL never equals NULL for row-ownership checks), so it becomes unreachable the
+// moment it's created. Refuse to create it instead of losing it silently.
+const requirePicId = (req: Request, res: Response): string | null => {
+  const picId = req.auth?.profile.pic_id;
+  if (!picId) {
+    res.status(400).json({
+      success: false,
+      error: { message: 'You must be assigned a PIC identity by an admin before creating pipeline records.' },
+    });
+    return null;
+  }
+  return picId;
+};
+
 export class DealController {
-  
+
   static async getQuotations(req: Request, res: Response) {
     try {
-      let dbQuery = supabaseAdmin
+      // DATA SILOS ENFORCEMENT -- no PIC assigned (including every admin) means nothing to
+      // see; .eq('pic_id', null) is not a valid NULL check in PostgREST and would error.
+      const picId = req.auth?.profile.pic_id;
+      if (!picId) return res.json({ success: true, data: [] });
+
+      const { data, error } = await supabaseAdmin
         .from('quotations')
         .select('*, companies(*), contacts(*), pics(name), quotation_items(*)')
         .not('status', 'in', '(Converted,Rejected)')
+        .eq('pic_id', picId)
         .order('created_at', { ascending: false });
-
-      dbQuery = dbQuery.eq('pic_id', req.auth?.profile.pic_id);
-
-      const { data, error } = await dbQuery;
 
       if (error) throw error;
       res.json({ success: true, data });
@@ -26,14 +43,14 @@ export class DealController {
 
   static async getSales(req: Request, res: Response) {
     try {
-      let dbQuery = supabaseAdmin
+      const picId = req.auth?.profile.pic_id;
+      if (!picId) return res.json({ success: true, data: [] });
+
+      const { data, error } = await supabaseAdmin
         .from('sales')
         .select('*, companies(*), pics(name), quotations(*, contacts(*), quotation_items(*))')
+        .eq('pic_id', picId)
         .order('created_at', { ascending: false });
-
-      dbQuery = dbQuery.eq('pic_id', req.auth?.profile.pic_id);
-
-      const { data, error } = await dbQuery;
 
       if (error) throw error;
 
@@ -72,7 +89,9 @@ export class DealController {
       const userId = req.auth!.user.id;
 
       // DATA SILOS ENFORCEMENT
-      payload.picId = req.auth?.profile.pic_id ?? undefined;
+      const picId = requirePicId(req, res);
+      if (!picId) return;
+      payload.picId = picId;
 
       const sale = await DealService.createManualSale(payload, userId);
       res.status(201).json({ success: true, data: sale });
