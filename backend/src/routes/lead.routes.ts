@@ -9,6 +9,7 @@ router.get('/prospects', LeadController.getProspects);
 router.get('/warm-leads', LeadController.getWarmLeads);
 router.get('/inquiries', LeadController.getInquiries);
 router.get('/removed', LeadController.getRemoved);
+router.post('/removed/bulk', requireRoles('admin', 'sales_manager'), LeadController.bulkRemove);
 
 // Prospect -> Warm Lead
 router.post('/prospects/:prospectId/convert-to-warm-lead', requireRoles('admin', 'sales_manager'), LeadController.convertProspect);
@@ -22,5 +23,6 @@ router.post('/warm-leads', requireRoles('admin', 'sales_manager'), LeadControlle
 router.post('/inquiries', requireRoles('admin', 'sales_manager'), LeadController.createManualInquiry);
 
 router.post('/:stage/:entityId/remove', requireRoles('admin', 'sales_manager'), LeadController.removeEntry);
+router.patch('/:stage/:entityId/pic', requireRoles('admin', 'sales_manager'), LeadController.assignPic);
 
 export default router;

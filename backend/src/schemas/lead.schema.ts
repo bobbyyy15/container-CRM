@@ -96,7 +96,20 @@ export const RemovePipelineEntrySchema = z.object({
   reason: z.string().trim().min(3).max(500),
 });
 
+export const AssignPicToEntrySchema = z.object({
+  stage: z.enum(['prospect', 'warm_lead']),
+  entityId: z.string().uuid(),
+  picId: z.string().uuid(),
+});
+
+export const BulkRemovedEntriesSchema = z.object({
+  text: z.string().trim().min(1).max(50000),
+  reason: z.string().trim().max(500).optional(),
+});
+
 export type CreateInquiryPayload = z.infer<typeof CreateInquirySchema>;
 export type CreateManualWarmLeadPayload = z.infer<typeof CreateManualWarmLeadSchema>;
 export type CreateManualInquiryPayload = z.infer<typeof CreateManualInquirySchema>;
 export type CreateManualProspectPayload = z.infer<typeof CreateManualProspectSchema>;
+export type AssignPicToEntryPayload = z.infer<typeof AssignPicToEntrySchema>;
+export type BulkRemovedEntriesPayload = z.infer<typeof BulkRemovedEntriesSchema>;

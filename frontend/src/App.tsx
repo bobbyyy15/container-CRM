@@ -14,6 +14,7 @@ import {
   NewContractDialog,
   QuotationDialog,
   SaleDialog,
+  usePics,
   type InquiryOption,
   type QuotationOption,
   type WarmLeadOption,
@@ -85,10 +86,10 @@ export const useWarmLeads = (revision = 0) => {
   return data
 }
 
-const useInquiries = (revision = 0) => {
+const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') => {
   const [data, setData] = useState<any[]>([])
   useEffect(() => {
-    api.get('/leads/inquiries', { params: { limit: 500 } }).then(res => {
+    api.get('/leads/inquiries', { params: { limit: 500, status } }).then(res => {
       if (res.data.success) setData((res.data.data || []).map((row: any) => {
         const created = new Date(row.created_at)
         return {
@@ -111,7 +112,7 @@ const useInquiries = (revision = 0) => {
         }
       }))
     }).catch(console.error)
-  }, [revision])
+  }, [revision, status])
   return data
 }
 
@@ -161,6 +162,7 @@ const useSales = (revision = 0) => {
           id: row.id,
           ref: `SAL-${row.id.slice(0, 8).toUpperCase()}`,
           date: new Date(row.created_at).toLocaleDateString(),
+          createdAt: row.created_at,
           company: row.companies?.name || '',
           contact: quote.contacts ? `${quote.contacts.first_name || ''} ${quote.contacts.last_name || ''}`.trim() : '',
           category: item?.description || 'Container',
@@ -530,6 +532,61 @@ const EligDot = ({ on }: { on: boolean }) => (
 
 const ChipPIC = ({ label }: { label: string }) => (
   <span style={{ background: 'var(--brand-bg)', color: 'var(--brand)', padding: '2px 7px', borderRadius: 5, fontSize: 11, fontWeight: 700 }}>{label}</span>
+)
+
+const AssignPicModal = ({ count, onClose, onAssign }: { count: number; onClose: () => void; onAssign: (picId: string) => void }) => {
+  const pics = usePics()
+  const [picId, setPicId] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{ width: 400 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">Assign PIC</div>
+          <Btn variant="ghost" sm onClick={onClose}><Ic n={I.x} size={16} /></Btn>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 12 }}>Reassign {count} selected record{count === 1 ? '' : 's'} to:</p>
+          <select className="inp" value={picId} onChange={e => setPicId(e.target.value)}>
+            <option value="">-- Select a PIC --</option>
+            {pics.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
+          <button className="btn btn-primary" disabled={!picId || submitting} onClick={async () => { setSubmitting(true); await onAssign(picId) }}>
+            {submitting ? 'Assigning…' : 'Assign'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// A read-only detail view for a single row of an already-loaded list (Inquiries, Quotations,
+// Sales, Contracts, Customers, etc). No extra API call needed -- the row already has every
+// field the table shows, this just lays them out full-size instead of squeezed into a table cell.
+type DetailField = { label: string; value: React.ReactNode }
+const RecordDetailModal = ({ title, fields, onClose }: { title: string; fields: DetailField[]; onClose: () => void }) => (
+  <div className="overlay" onClick={onClose}>
+    <div className="modal" style={{ width: 480 }} onClick={e => e.stopPropagation()}>
+      <div className="modal-header">
+        <div className="modal-title">{title}</div>
+        <Btn variant="ghost" sm onClick={onClose}><Ic n={I.x} size={16} /></Btn>
+      </div>
+      <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        {fields.map(f => (
+          <div key={f.label} style={{ gridColumn: f.label.length > 24 ? '1 / -1' : undefined }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 3 }}>{f.label}</div>
+            <div style={{ fontSize: 13, color: 'var(--t1)', fontWeight: 500 }}>{f.value ?? <span style={{ color: 'var(--t4)' }}>—</span>}</div>
+          </div>
+        ))}
+      </div>
+      <div className="modal-footer">
+        <Btn variant="ghost" onClick={onClose}>Close</Btn>
+      </div>
+    </div>
+  </div>
 )
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
@@ -1390,6 +1447,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [showNewProspect, setShowNewProspect] = useState(false)
   const [inquiryWarmLeadId, setInquiryWarmLeadId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
+  const [showAssignPic, setShowAssignPic] = useState(false)
 
   const _prospectsData = useProspects(revision, mode === 'prospect' ? status : 'active')
   const _warmData = useWarmLeads(revision)
@@ -1415,6 +1473,18 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     } catch (e: any) {
       alert(e.response?.data?.error?.message ?? 'Removal failed.')
     }
+  }
+
+  const handleAssignPic = async (picId: string) => {
+    const stage = mode === 'prospect' ? 'prospect' : 'warm_lead'
+    const results = await Promise.allSettled(
+      selected.map(id => api.patch(`/leads/${stage}/${id}/pic`, { picId }))
+    )
+    const failed = results.filter(r => r.status === 'rejected').length
+    setShowAssignPic(false)
+    setSelected([])
+    setRevision(value => value + 1)
+    if (failed > 0) alert(`${failed} of ${selected.length} records could not be reassigned.`)
   }
 
   const label = mode === 'prospect' ? 'Prospect Clients' : 'Warm Leads'
@@ -1533,8 +1603,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
         {selected.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', background: 'var(--brand-bg)', borderRadius: 7, fontSize: 12, fontWeight: 600, color: 'var(--brand)' }}>
             {selected.length} selected
-            <Btn variant="ghost" sm>Assign PIC</Btn>
-            <Btn variant="ghost" sm>Change Category</Btn>
+            <Btn variant="ghost" sm onClick={() => setShowAssignPic(true)}>Assign PIC</Btn>
             {mode === 'prospect'
               ? <Btn variant="ghost" sm onClick={() => Promise.all(selected.map(handleConvert))}>→ Warm Lead</Btn>
               : <Btn variant="ghost" sm onClick={() => setInquiryWarmLeadId(selected[0])}>Create Inquiry</Btn>
@@ -1701,6 +1770,13 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           onSaved={() => { setSelected([]); setRevision(value => value + 1) }}
         />
       )}
+      {showAssignPic && (
+        <AssignPicModal
+          count={selected.length}
+          onClose={() => setShowAssignPic(false)}
+          onAssign={handleAssignPic}
+        />
+      )}
     </div>
   )
 }
@@ -1711,17 +1787,23 @@ const InquiryList = () => {
   const [revision, setRevision] = useState(0)
   const [showNewInquiry, setShowNewInquiry] = useState(false)
   const [quotationInquiryId, setQuotationInquiryId] = useState<string | null>(null)
+  const [viewRow, setViewRow] = useState<any>(null)
   const INQUIRIES = useInquiries(revision)
   const warmLeads = useWarmLeads(revision)
   const [tab, setTab] = useState('All')
   const [lookup, setLookup] = useState('')
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
   const tabs = ['All', 'New', 'Quotation Required', 'Awaiting Response', 'Negotiating', 'Converted', 'Lost']
+  const [channel, setChannel] = useState('')
+  const [picFilter, setPicFilter] = useState('')
+  const pics = [...new Set(INQUIRIES.map(r => r.pic).filter(Boolean))].sort() as string[]
 
   const filtered = INQUIRIES.filter(r => {
     const tabMatch = tab === 'All' || r.status === tab || (tab === 'Converted' && r.status === 'Converted to Sale')
     const term = lookup.trim().toLowerCase()
-    return tabMatch && (!term || [r.company, r.contact, r.ref, r.category].some(value => String(value).toLowerCase().includes(term)))
+    const channelMatch = !channel || r.channel === channel
+    const picMatch = !picFilter || r.pic === picFilter
+    return tabMatch && channelMatch && picMatch && (!term || [r.company, r.contact, r.ref, r.category].some(value => String(value).toLowerCase().includes(term)))
   })
 
   return (
@@ -1781,8 +1863,8 @@ const InquiryList = () => {
           <Ic n={I.search} size={13} />
           <input placeholder="Search inquiries…" value={lookup} onChange={e => setLookup(e.target.value)} />
         </div>
-        <select className="sel"><option>All Channels</option><option>Phone</option><option>Email</option><option>SMS</option></select>
-        <select className="sel"><option>All PICs</option></select>
+        <select className="sel" value={channel} onChange={e => setChannel(e.target.value)}><option value="">All Channels</option><option value="Email">Email</option><option value="Direct">Direct</option></select>
+        <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{pics.map(p => <option key={p} value={p}>{p}</option>)}</select>
         <div className="toolbar-right">
           <span className="count-label">{filtered.length} inquiries</span>
           <Btn variant="ghost" sm onClick={() => exportToCSV(filtered, 'inquiries')}><Ic n={I.export} size={13} /> Export</Btn>
@@ -1862,7 +1944,7 @@ const InquiryList = () => {
                 <td><ChipPIC label={row.pic} /></td>
                 <td className="col-actions">
                   <div className="row-actions">
-                    <Btn variant="ghost" sm>View</Btn>
+                    <Btn variant="ghost" sm onClick={() => setViewRow(row)}>View</Btn>
                     <Btn variant="ghost" sm style={{ color: 'var(--purple)' }} onClick={() => setQuotationInquiryId(row.id)}>→ Quote</Btn>
                   </div>
                 </td>
@@ -1871,6 +1953,25 @@ const InquiryList = () => {
           </tbody>
         </table>
       </div>
+      {viewRow && (
+        <RecordDetailModal
+          title={`Inquiry ${viewRow.ref}`}
+          onClose={() => setViewRow(null)}
+          fields={[
+            { label: 'Company', value: viewRow.company },
+            { label: 'Contact', value: viewRow.contact },
+            { label: 'Channel', value: viewRow.channel },
+            { label: 'Status', value: <Badge status={viewRow.status as BadgeStatus} /> },
+            { label: 'Category', value: viewRow.category },
+            { label: 'Container size', value: viewRow.size },
+            { label: 'Condition', value: viewRow.condition },
+            { label: 'Quantity', value: viewRow.qty },
+            { label: 'Needed by', value: viewRow.neededBy },
+            { label: 'PIC', value: viewRow.pic },
+            { label: 'Received', value: `${viewRow.date} ${viewRow.time}` },
+          ]}
+        />
+      )}
     </div>
   )
 }
@@ -1882,8 +1983,20 @@ const QuotationList = () => {
   const [showQuotation, setShowQuotation] = useState(false)
   const [saleQuotationId, setSaleQuotationId] = useState<string | null>(null)
   const [actionError, setActionError] = useState('')
+  const [viewRow, setViewRow] = useState<any>(null)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [picFilter, setPicFilter] = useState('')
   const quotes = useQuotations(revision)
   const inquiries = useInquiries(revision)
+  const quotePics = [...new Set(quotes.map(q => q.pic).filter(Boolean))].sort() as string[]
+  const filteredQuotes = quotes.filter(q => {
+    const term = search.trim().toLowerCase()
+    const searchMatch = !term || [q.co, q.contact, q.ref, q.category].some(value => String(value).toLowerCase().includes(term))
+    const statusMatch = !statusFilter || q.status === statusFilter
+    const picMatch = !picFilter || q.pic === picFilter
+    return searchMatch && statusMatch && picMatch
+  })
 
   const acceptQuotation = async (id: string) => {
     setActionError('')
@@ -1939,11 +2052,19 @@ const QuotationList = () => {
         ))}
       </div>
       <div className="toolbar">
-        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search quotations…" /></div>
-        <select className="sel"><option>All Statuses</option></select>
-        <select className="sel"><option>All PICs</option></select>
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search quotations…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+        <select className="sel" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+          <option value="">All Statuses</option>
+          <option value="Draft">Draft</option>
+          <option value="Sent">Sent</option>
+          <option value="Viewed">Viewed</option>
+          <option value="Accepted">Accepted</option>
+          <option value="Rejected">Rejected</option>
+          <option value="Converted">Converted</option>
+        </select>
+        <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{quotePics.map(p => <option key={p} value={p}>{p}</option>)}</select>
         <div className="toolbar-right">
-          <Btn variant="ghost" sm onClick={() => exportToCSV(quotes, 'quotations')}><Ic n={I.export} size={13} /> Export</Btn>
+          <Btn variant="ghost" sm onClick={() => exportToCSV(filteredQuotes, 'quotations')}><Ic n={I.export} size={13} /> Export</Btn>
           <Btn variant="primary" sm onClick={() => setShowQuotation(true)}><Ic n={I.plus} size={13} /> Create Quotation</Btn>
         </div>
       </div>
@@ -1957,7 +2078,7 @@ const QuotationList = () => {
             <th className="r">Margin</th><th>Status</th><th>Source</th><th>PIC</th><th className="col-actions">Actions</th>
           </tr></thead>
           <tbody>
-            {quotes.map(q => (
+            {filteredQuotes.map(q => (
               <tr key={q.ref}>
                 <td className="col-check"><input type="checkbox" className="cb" /></td>
                 <td><span className="ref-id" style={{ color: 'var(--purple)' }}>{q.ref}</span></td>
@@ -1977,7 +2098,7 @@ const QuotationList = () => {
                 <td><ChipPIC label={q.pic} /></td>
                 <td className="col-actions">
                   <div className="row-actions">
-                    <Btn variant="ghost" sm>View</Btn>
+                    <Btn variant="ghost" sm onClick={() => setViewRow(q)}>View</Btn>
                     {['Draft', 'Sent', 'Viewed'].includes(q.status) && <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => acceptQuotation(q.id)}>Accept</Btn>}
                     {q.status === 'Accepted' && <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => setSaleQuotationId(q.id)}>→ Sale</Btn>}
                     {q.status !== 'Converted' && <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={() => removeQuotation(q.id)}>Remove</Btn>}
@@ -1988,6 +2109,25 @@ const QuotationList = () => {
           </tbody>
         </table>
       </div>
+      {viewRow && (
+        <RecordDetailModal
+          title={`Quotation ${viewRow.ref}`}
+          onClose={() => setViewRow(null)}
+          fields={[
+            { label: 'Company', value: viewRow.co },
+            { label: 'Contact', value: viewRow.contact },
+            { label: 'Status', value: <Badge status={viewRow.status as BadgeStatus} /> },
+            { label: 'Category', value: viewRow.category },
+            { label: 'Quantity', value: viewRow.qty },
+            { label: 'Total sell', value: `$${viewRow.sellTotal.toLocaleString()}` },
+            { label: 'Est. profit', value: `$${viewRow.profit.toLocaleString()}` },
+            { label: 'Margin', value: `${viewRow.margin.toFixed(1)}%` },
+            { label: 'Source inquiry', value: viewRow.source },
+            { label: 'PIC', value: viewRow.pic },
+            { label: 'Date', value: viewRow.date },
+          ]}
+        />
+      )}
     </div>
   )
 }
@@ -1998,12 +2138,39 @@ const SalesTracker = () => {
   const [revision, setRevision] = useState(0)
   const [showSale, setShowSale] = useState(false)
   const [showManualSale, setShowManualSale] = useState(false)
+  const [viewRow, setViewRow] = useState<any>(null)
+  const [search, setSearch] = useState('')
+  const [picFilter, setPicFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [dateRange, setDateRange] = useState('All Time')
   const SALES = useSales(revision)
   const quotations = useQuotations(revision)
-  const totalBuy = SALES.reduce((s, r) => s + r.totalBuy, 0)
-  const totalSell = SALES.reduce((s, r) => s + r.totalSell, 0)
-  const totalProfit = SALES.reduce((s, r) => s + r.profit, 0)
-  const totalUnits = SALES.reduce((s, r) => s + r.qty, 0)
+  const salesPics = [...new Set(SALES.map(s => s.pic).filter(Boolean))].sort() as string[]
+  const salesCategories = [...new Set(SALES.map(s => s.category).filter(Boolean))].sort() as string[]
+
+  const filteredSales = SALES.filter(s => {
+    const term = search.trim().toLowerCase()
+    const searchMatch = !term || [s.company, s.contact, s.ref, s.category].some(value => String(value).toLowerCase().includes(term))
+    const picMatch = !picFilter || s.pic === picFilter
+    const categoryMatch = !categoryFilter || s.category === categoryFilter
+    let dateMatch = true
+    if (dateRange !== 'All Time' && s.createdAt) {
+      const saleDate = new Date(s.createdAt)
+      const now = new Date()
+      if (dateRange === 'This Month') {
+        dateMatch = saleDate.getFullYear() === now.getFullYear() && saleDate.getMonth() === now.getMonth()
+      } else if (dateRange === 'Last Month') {
+        const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        dateMatch = saleDate.getFullYear() === lastMonth.getFullYear() && saleDate.getMonth() === lastMonth.getMonth()
+      }
+    }
+    return searchMatch && picMatch && categoryMatch && dateMatch
+  })
+
+  const totalBuy = filteredSales.reduce((s, r) => s + r.totalBuy, 0)
+  const totalSell = filteredSales.reduce((s, r) => s + r.totalSell, 0)
+  const totalProfit = filteredSales.reduce((s, r) => s + r.profit, 0)
+  const totalUnits = filteredSales.reduce((s, r) => s + r.qty, 0)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -2037,12 +2204,12 @@ const SalesTracker = () => {
       </div>
 
       <div className="toolbar">
-        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search sales…" /></div>
-        <select className="sel"><option>All PICs</option></select>
-        <select className="sel"><option>All Categories</option></select>
-        <select className="sel"><option>This Month</option><option>Last Month</option><option>All Time</option></select>
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search sales…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+        <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{salesPics.map(p => <option key={p} value={p}>{p}</option>)}</select>
+        <select className="sel" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">All Categories</option>{salesCategories.map(c => <option key={c} value={c}>{c}</option>)}</select>
+        <select className="sel" value={dateRange} onChange={e => setDateRange(e.target.value)}><option>This Month</option><option>Last Month</option><option>All Time</option></select>
         <div className="toolbar-right">
-          <Btn variant="ghost" sm onClick={() => exportToCSV(SALES, 'sales')}><Ic n={I.export} size={13} /> Export</Btn>
+          <Btn variant="ghost" sm onClick={() => exportToCSV(filteredSales, 'sales')}><Ic n={I.export} size={13} /> Export</Btn>
           <Btn variant="secondary" sm onClick={() => setShowManualSale(true)}><Ic n={I.plus} size={13} /> Record Sale Manually</Btn>
           <Btn variant="primary" sm onClick={() => setShowSale(true)}><Ic n={I.plus} size={13} /> From Quotation</Btn>
         </div>
@@ -2059,7 +2226,7 @@ const SalesTracker = () => {
             <th className="col-actions">Actions</th>
           </tr></thead>
           <tbody>
-            {SALES.map(s => (
+            {filteredSales.map(s => (
               <tr key={s.ref}>
                 <td className="col-check"><input type="checkbox" className="cb" /></td>
                 <td><span className="ref-id">{s.ref}</span></td>
@@ -2081,14 +2248,14 @@ const SalesTracker = () => {
                 <td><ChipPIC label={s.pic} /></td>
                 <td><Badge status={s.status as BadgeStatus} /></td>
                 <td className="col-actions">
-                  <div className="row-actions"><Btn variant="ghost" sm>View</Btn></div>
+                  <div className="row-actions"><Btn variant="ghost" sm onClick={() => setViewRow(s)}>View</Btn></div>
                 </td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr style={{ background: 'var(--s2)' }}>
-              <td colSpan={7} style={{ padding: '10px 14px', fontWeight: 700, color: 'var(--t1)' }}>Totals ({SALES.length} sales)</td>
+              <td colSpan={7} style={{ padding: '10px 14px', fontWeight: 700, color: 'var(--t1)' }}>Totals ({filteredSales.length} sales)</td>
               <td className="r mono bold" style={{ color: 'var(--t1)' }}>{totalUnits}</td>
               <td colSpan={2} />
               <td className="r cost-cell" style={{ fontWeight: 700 }}>${totalBuy.toLocaleString()}</td>
@@ -2100,6 +2267,26 @@ const SalesTracker = () => {
           </tfoot>
         </table>
       </div>
+      {viewRow && (
+        <RecordDetailModal
+          title={`Sale ${viewRow.ref}`}
+          onClose={() => setViewRow(null)}
+          fields={[
+            { label: 'Company', value: viewRow.company },
+            { label: 'Contact', value: viewRow.contact },
+            { label: 'Status', value: <Badge status={viewRow.status as BadgeStatus} /> },
+            { label: 'Category', value: viewRow.category },
+            { label: 'Condition', value: viewRow.condition },
+            { label: 'Quantity', value: viewRow.qty },
+            { label: 'Total buy', value: `$${viewRow.totalBuy.toLocaleString()}` },
+            { label: 'Total sell', value: `$${viewRow.totalSell.toLocaleString()}` },
+            { label: 'Profit', value: `$${viewRow.profit.toLocaleString()}` },
+            { label: 'Margin', value: `${viewRow.margin.toFixed(1)}%` },
+            { label: 'PIC', value: viewRow.pic },
+            { label: 'Date', value: viewRow.date },
+          ]}
+        />
+      )}
     </div>
   )
 }
@@ -2111,6 +2298,7 @@ const CustomerAccounts = () => {
   const [search, setSearch] = useState('');
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [viewRow, setViewRow] = useState<any>(null);
   const customers = useCustomers(tab, search, revision);
 
   return (
@@ -2127,9 +2315,7 @@ const CustomerAccounts = () => {
         {['All', 'Active', 'Floating'].map(t => <div key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</div>)}
       </div>
       <div className="toolbar">
-        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search customers…" /></div>
-        <select className="sel"><option>All Countries</option><option>USA</option><option>Canada</option></select>
-        <select className="sel"><option>All PICs</option></select>
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search customers…" value={search} onChange={e => setSearch(e.target.value)} /></div>
         <div className="toolbar-right">
           <span className="count-label">{customers.length} customers</span>
           <Btn variant="ghost" sm onClick={() => exportToCSV(customers, 'customers')}><Ic n={I.export} size={13} /> Export</Btn>
@@ -2162,13 +2348,32 @@ const CustomerAccounts = () => {
                 <td style={{ fontSize: 12, color: 'var(--t3)' }}>{c.last}</td>
                 <td><Badge status={c.status as BadgeStatus} /></td>
                 <td className="col-actions">
-                  <div className="row-actions"><Btn variant="ghost" sm>View</Btn></div>
+                  <div className="row-actions"><Btn variant="ghost" sm onClick={() => setViewRow(c)}>View</Btn></div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {viewRow && (
+        <RecordDetailModal
+          title={viewRow.co}
+          onClose={() => setViewRow(null)}
+          fields={[
+            { label: 'Contact', value: viewRow.contact },
+            { label: 'Phone', value: viewRow.phone },
+            { label: 'State', value: viewRow.state },
+            { label: 'Country', value: viewRow.country },
+            { label: 'Status', value: <Badge status={viewRow.status as BadgeStatus} /> },
+            { label: 'PIC', value: viewRow.pic },
+            { label: 'Sales', value: viewRow.sales },
+            { label: 'Units', value: viewRow.units },
+            { label: 'Revenue', value: `$${viewRow.revenue.toLocaleString()}` },
+            { label: 'Gross profit', value: `$${viewRow.profit.toLocaleString()}` },
+            { label: 'Last purchase', value: viewRow.last },
+          ]}
+        />
+      )}
     </div>
   )
 }
@@ -2177,25 +2382,52 @@ const CustomerAccounts = () => {
 
 const ContactOutreach = () => {
   const prospectsData = useProspects()
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
   const [copied, setCopied] = useState('')
-  const handleCopy = (type: string) => {
-    setCopied(type)
-    setTimeout(() => setCopied(''), 3000)
+
+  const term = search.trim().toLowerCase()
+  const filtered = prospectsData.filter(r =>
+    !term || [r.company, r.contact, r.phone, r.emailAddr].some(value => String(value ?? '').toLowerCase().includes(term))
+  )
+
+  const withElig = filtered.map(r => ({
+    ...r,
+    callable: r.cat === 'Proceed' && (r.sms === 'Call/Text' || r.sms === 'Calls Only'),
+    textable: r.cat === 'Proceed' && (r.sms === 'Call/Text' || r.sms === 'Text Only'),
+    emailable: r.cat === 'Proceed' && !!r.emailAddr,
+  }))
+
+  const allSelected = withElig.length > 0 && withElig.every(r => selected.includes(r.id))
+  const toggleAll = () => setSelected(allSelected ? [] : withElig.map(r => r.id))
+  const toggleOne = (id: string) => setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+
+  // Copying operates on the selection when one exists, otherwise every currently-filtered row
+  // -- so the buttons are useful with or without an explicit selection.
+  const activeRows = selected.length > 0 ? withElig.filter(r => selected.includes(r.id)) : withElig
+
+  const handleCopy = (type: string, build: (r: typeof withElig[number]) => string | null, eligibleOf: (r: typeof withElig[number]) => boolean) => {
+    const eligible = activeRows.filter(r => r.cat !== 'Removed' && eligibleOf(r))
+    const lines = eligible.map(build).filter((v): v is string => !!v)
+    navigator.clipboard.writeText(lines.join('\n')).catch(() => {})
+    setCopied(`${type}|${lines.length}|${activeRows.length - eligible.length}`)
+    setTimeout(() => setCopied(''), 4000)
   }
+
+  const [copyLabel, eligibleCount, excludedCount] = copied ? copied.split('|') : ['', '0', '0']
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="page-header">
         <div>
           <div className="page-title">Contact Outreach Sheet</div>
-          <div className="page-desc">Select contacts and copy for RingCentral, email, or SMS campaigns.</div>
+          <div className="page-desc">Select contacts (or leave none selected to use every row below) and copy for RingCentral, email, or SMS campaigns.</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          {['Copy Numbers', 'Copy Emails', 'Copy Name + Number', 'Copy Name + Email'].map(a => (
-            <Btn key={a} variant="secondary" sm onClick={() => handleCopy(a)}>
-              <Ic n={I.copy} size={13} /> {a}
-            </Btn>
-          ))}
+          <Btn variant="secondary" sm onClick={() => handleCopy('Numbers', r => r.phone || null, r => r.callable || r.textable)}><Ic n={I.copy} size={13} /> Copy Numbers</Btn>
+          <Btn variant="secondary" sm onClick={() => handleCopy('Emails', r => r.emailAddr || null, r => r.emailable)}><Ic n={I.copy} size={13} /> Copy Emails</Btn>
+          <Btn variant="secondary" sm onClick={() => handleCopy('Name + Number', r => r.phone ? `${r.contact || r.company}\t${r.phone}` : null, r => r.callable || r.textable)}><Ic n={I.copy} size={13} /> Copy Name + Number</Btn>
+          <Btn variant="secondary" sm onClick={() => handleCopy('Name + Email', r => r.emailAddr ? `${r.contact || r.company}\t${r.emailAddr}` : null, r => r.emailable)}><Ic n={I.copy} size={13} /> Copy Name + Email</Btn>
         </div>
       </div>
 
@@ -2203,7 +2435,7 @@ const ContactOutreach = () => {
         <div style={{ padding: '10px 20px', background: 'var(--green-bg)', borderBottom: '1px solid #D1FAE5', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <Ic n={I.check} size={14} style={{ color: 'var(--green)' }} />
           <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--green-text)' }}>
-            Copied "{copied}" — 7 eligible contacts. Excluded: 1 Removed, 0 Invalid, 0 Bounced.
+            Copied "{copyLabel}" — {eligibleCount} eligible contact{eligibleCount === '1' ? '' : 's'} to clipboard. Excluded: {excludedCount} not eligible/removed.
           </span>
           <Btn variant="ghost" sm onClick={() => setCopied('')}><Ic n={I.x} size={13} /></Btn>
         </div>
@@ -2212,55 +2444,51 @@ const ContactOutreach = () => {
       {/* Eligibility summary */}
       <div style={{ padding: '8px 20px', display: 'flex', gap: 16, fontSize: 12, color: 'var(--t3)', borderBottom: '1px solid var(--border-s)', flexShrink: 0 }}>
         {[
-          { label: 'Call Eligible', val: 0, color: 'var(--teal)' },
-          { label: 'Text Eligible', val: 0, color: 'var(--purple)' },
-          { label: 'Email Eligible', val: 0, color: 'var(--brand)' },
-          { label: 'Removed / Excluded', val: 0, color: 'var(--red)' },
+          { label: 'Call Eligible', val: withElig.filter(r => r.callable).length, color: 'var(--teal)' },
+          { label: 'Text Eligible', val: withElig.filter(r => r.textable).length, color: 'var(--purple)' },
+          { label: 'Email Eligible', val: withElig.filter(r => r.emailable).length, color: 'var(--brand)' },
+          { label: 'Removed / Excluded', val: withElig.filter(r => r.cat === 'Removed').length, color: 'var(--red)' },
         ].map(e => (
           <div key={e.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <strong style={{ color: e.color, fontFamily: 'var(--mono)' }}>{e.val}</strong> {e.label}
           </div>
         ))}
+        {selected.length > 0 && <div style={{ marginLeft: 'auto', fontWeight: 600 }}>{selected.length} selected</div>}
       </div>
 
       <div className="toolbar">
-        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search contacts…" /></div>
-        <select className="sel"><option>All PICs</option></select>
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search contacts…" value={search} onChange={e => setSearch(e.target.value)} /></div>
         <div className="toolbar-right">
-          <Btn variant="primary" sm style={{ background: '#1F2937' }}><Ic n={I.copy} size={13} /> Copy RingCentral Format</Btn>
+          <Btn variant="primary" sm style={{ background: '#1F2937' }} onClick={() => handleCopy('RingCentral Format', r => r.phone || null, r => r.callable || r.textable)}><Ic n={I.copy} size={13} /> Copy RingCentral Format</Btn>
         </div>
       </div>
 
       <div className="table-wrap">
         <table className="crm">
           <thead><tr>
-            <th className="col-check"><input type="checkbox" className="cb" /></th>
+            <th className="col-check"><input type="checkbox" className="cb" checked={allSelected} onChange={toggleAll} /></th>
             <th>Company</th><th>Contact</th><th>Phone</th><th>Email</th>
             <th>City / State</th><th>PIC</th><th style={{ textAlign: 'center' }}>Call</th>
             <th style={{ textAlign: 'center' }}>Text</th><th style={{ textAlign: 'center' }}>Email</th>
-            <th>Last Contacted</th>
           </tr></thead>
           <tbody>
-            {prospectsData.map(r => {
-              const callable = r.cat === 'Proceed' && (r.sms === 'Call/Text' || r.sms === 'Calls Only')
-              const textable = r.cat === 'Proceed' && (r.sms === 'Call/Text' || r.sms === 'Text Only')
-              const emailable = r.cat === 'Proceed' && !!r.emailAddr
-              return (
-                <tr key={r.id} style={{ background: r.cat === 'Removed' ? 'var(--red-bg)' : undefined }}>
-                  <td className="col-check"><input type="checkbox" className="cb" /></td>
-                  <td style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{r.company}</td>
-                  <td style={{ fontSize: 12.5 }}>{r.contact}</td>
-                  <td className="mono" style={{ fontSize: 12 }}>{r.phone}</td>
-                  <td className="mono" style={{ fontSize: 12, color: 'var(--brand)' }}>{r.emailAddr || <span style={{ color: 'var(--t4)' }}>—</span>}</td>
-                  <td style={{ fontSize: 12 }}>{r.city}, {r.state}</td>
-                  <td><ChipPIC label={r.pic} /></td>
-                  <td style={{ textAlign: 'center' }}><EligDot on={callable} /></td>
-                  <td style={{ textAlign: 'center' }}><EligDot on={textable} /></td>
-                  <td style={{ textAlign: 'center' }}><EligDot on={emailable} /></td>
-                  <td style={{ fontSize: 12, color: 'var(--t4)' }}>{r.id % 3 === 0 ? '2d ago' : r.id % 2 === 0 ? '1w ago' : 'Never'}</td>
-                </tr>
-              )
-            })}
+            {withElig.map(r => (
+              <tr key={r.id} style={{ background: r.cat === 'Removed' ? 'var(--red-bg)' : undefined }}>
+                <td className="col-check"><input type="checkbox" className="cb" checked={selected.includes(r.id)} onChange={() => toggleOne(r.id)} /></td>
+                <td style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{r.company}</td>
+                <td style={{ fontSize: 12.5 }}>{r.contact}</td>
+                <td className="mono" style={{ fontSize: 12 }}>{r.phone}</td>
+                <td className="mono" style={{ fontSize: 12, color: 'var(--brand)' }}>{r.emailAddr || <span style={{ color: 'var(--t4)' }}>—</span>}</td>
+                <td style={{ fontSize: 12 }}>{r.city}, {r.state}</td>
+                <td><ChipPIC label={r.pic} /></td>
+                <td style={{ textAlign: 'center' }}><EligDot on={r.callable} /></td>
+                <td style={{ textAlign: 'center' }}><EligDot on={r.textable} /></td>
+                <td style={{ textAlign: 'center' }}><EligDot on={r.emailable} /></td>
+              </tr>
+            ))}
+            {withElig.length === 0 && (
+              <tr><td colSpan={10} style={{ textAlign: 'center', padding: 30, color: 'var(--t4)', fontSize: 13 }}>No contacts match.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -2276,6 +2504,7 @@ const Contracts = () => {
   const [search, setSearch] = useState('');
   const [showNew, setShowNew] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [viewRow, setViewRow] = useState<any>(null);
   const contracts = useContracts(status, pickStatus, search);
   // Re-fetch sales when clicking New Contract
   const sales = useSales(revision);
@@ -2326,13 +2555,31 @@ const Contracts = () => {
                 <td><ChipPIC label={c.pic} /></td>
                 <td><span className="ref-id" style={{ color: 'var(--green)', fontSize: 11 }}>{c.sale}</span></td>
                 <td className="col-actions">
-                  <div className="row-actions"><Btn variant="ghost" sm>View</Btn></div>
+                  <div className="row-actions"><Btn variant="ghost" sm onClick={() => setViewRow(c)}>View</Btn></div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {viewRow && (
+        <RecordDetailModal
+          title={`Contract ${viewRow.ref}`}
+          onClose={() => setViewRow(null)}
+          fields={[
+            { label: 'Company', value: viewRow.co },
+            { label: 'Contact', value: viewRow.contact },
+            { label: 'Status', value: <Badge status={viewRow.status as BadgeStatus} /> },
+            { label: 'Pickup status', value: <Badge status={viewRow.pickStatus as BadgeStatus} /> },
+            { label: 'Container', value: `${viewRow.category} · ${viewRow.size}` },
+            { label: 'Quantity', value: viewRow.qty },
+            { label: 'Value', value: `$${viewRow.value.toLocaleString()}` },
+            { label: 'Pickup date', value: viewRow.pickup },
+            { label: 'PIC', value: viewRow.pic },
+            { label: 'Source sale', value: viewRow.sale },
+          ]}
+        />
+      )}
     </div>
   )
 }
@@ -2522,50 +2769,87 @@ const RemovedSheet = () => {
 
 // ─── Deliverability ───────────────────────────────────────────────────────────
 
+type RemovedMatchRow = {
+  raw_value: string
+  identity_type: 'email' | 'phone'
+  normalized_value: string
+  company_name: string | null
+  contact_name: string | null
+  was_new: boolean
+}
+
 const Deliverability = () => {
   const [tab, setTab] = useState('Email')
-  const results = [
-    { pasted: 'bounce@oldco.net', co: 'Sunset Trading Co', contact: 'Mike Ward', type: 'Hard Bounce', current: 'Mail Delivery Report', recommended: 'Removed', action: 'Apply' },
-    { pasted: 'info@closedco.com', co: '—', contact: '—', type: 'Domain Not Found', current: '—', recommended: 'Skip', action: 'Skip' },
-    { pasted: 'karen@nlgroup.com', co: 'Northern Logistics Group', contact: 'Karen Olson', type: 'Mailbox Full', current: 'Mail Delivery Report', recommended: 'Mail Delivery Report + Warning', action: 'Review' },
-  ]
+  const [pasteText, setPasteText] = useState('')
+  const [showPaste, setShowPaste] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [results, setResults] = useState<RemovedMatchRow[]>([])
+  const [error, setError] = useState('')
+
+  const detectedCount = pasteText.split('\n').map(l => l.trim()).filter(Boolean).length
+
+  const submitPaste = async () => {
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await api.post('/leads/removed/bulk', { text: pasteText, reason: `Bulk paste from Deliverability (${tab})` })
+      setResults(res.data.data || [])
+      setPasteText('')
+      setShowPaste(false)
+    } catch (err: any) {
+      setError(err.response?.data?.error?.message ?? err.message ?? 'Could not process the pasted list.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const visibleResults = tab === 'Unmatched'
+    ? results.filter(r => !r.company_name && !r.contact_name)
+    : tab === 'Phone / SMS'
+      ? results.filter(r => r.identity_type === 'phone')
+      : tab === 'Email'
+        ? results.filter(r => r.identity_type === 'email')
+        : results
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="tabs">
-        {['Email', 'Phone / SMS', 'Processing History', 'Unmatched'].map(t => (
+        {['Email', 'Phone / SMS', 'Unmatched'].map(t => (
           <div key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</div>
         ))}
       </div>
       <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border-s)', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
-        <Btn variant="secondary" sm><Ic n={I.copy} size={13} /> Paste {tab === 'Email' ? 'Bounced Emails' : 'Failed Numbers'}</Btn>
-        <Btn variant="secondary" sm><Ic n={I.upload} size={13} /> Upload CSV</Btn>
+        <Btn variant="secondary" sm onClick={() => setShowPaste(true)}><Ic n={I.copy} size={13} /> Paste {tab === 'Phone / SMS' ? 'Failed Numbers' : 'Bounced Emails'}</Btn>
         <div style={{ padding: '6px 12px', background: 'var(--s2)', borderRadius: 8, fontSize: 12, color: 'var(--t3)' }}>
-          Paste results from your email provider or RingCentral and the system will automatically match CRM records.
+          Paste one email or phone number per line. Each one is matched against existing contacts and added to the shared suppression list -- it's then filtered out of every prospect/warm-lead/inquiry list automatically.
         </div>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div className="card" style={{ overflow: 'hidden' }}>
-          <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border-s)', fontWeight: 600, fontSize: 13, color: 'var(--t1)' }}>Processing Results</div>
+          <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border-s)', fontWeight: 600, fontSize: 13, color: 'var(--t1)' }}>
+            Processing Results {results.length > 0 && <span style={{ color: 'var(--t4)', fontWeight: 500 }}>({visibleResults.length} of {results.length})</span>}
+          </div>
           <table className="crm">
-            <thead><tr><th>Pasted Value</th><th>Matched Company</th><th>Contact</th><th>Type</th><th>Current Status</th><th>Recommended</th><th className="col-actions">Action</th></tr></thead>
+            <thead><tr><th>Pasted Value</th><th>Matched Company</th><th>Contact</th><th>Type</th><th>Status</th></tr></thead>
             <tbody>
-              {results.map((r, i) => (
+              {visibleResults.map((r, i) => (
                 <tr key={i}>
-                  <td className="mono" style={{ fontSize: 12 }}>{r.pasted}</td>
-                  <td style={{ fontWeight: 600, fontSize: 12.5 }}>{r.co}</td>
-                  <td style={{ fontSize: 12.5 }}>{r.contact}</td>
-                  <td><span className="badge b-amber">{r.type}</span></td>
-                  <td style={{ fontSize: 12.5 }}>{r.current === '—' ? <span style={{ color: 'var(--t4)' }}>—</span> : r.current}</td>
-                  <td><span style={{ fontSize: 12.5, fontWeight: 600, color: r.recommended === 'Removed' ? 'var(--red)' : r.recommended === 'Skip' ? 'var(--t4)' : 'var(--amber)' }}>{r.recommended}</span></td>
-                  <td className="col-actions">
-                    <div className="row-actions" style={{ opacity: 1 }}>
-                      {r.action === 'Apply' && <Btn variant="danger" sm>Apply</Btn>}
-                      {r.action === 'Review' && <Btn variant="secondary" sm>Review</Btn>}
-                      {r.action === 'Skip' && <Btn variant="ghost" sm style={{ color: 'var(--t4)' }}>Skip</Btn>}
-                    </div>
+                  <td className="mono" style={{ fontSize: 12 }}>{r.raw_value}</td>
+                  <td style={{ fontWeight: 600, fontSize: 12.5 }}>{r.company_name || <span style={{ color: 'var(--t4)' }}>—</span>}</td>
+                  <td style={{ fontSize: 12.5 }}>{r.contact_name || <span style={{ color: 'var(--t4)' }}>—</span>}</td>
+                  <td><span className="badge b-blue">{r.identity_type}</span></td>
+                  <td>
+                    {r.was_new
+                      ? <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--red)' }}>Added to Removed list</span>
+                      : <span style={{ fontSize: 12.5, color: 'var(--t4)' }}>Already suppressed</span>}
                   </td>
                 </tr>
               ))}
+              {visibleResults.length === 0 && (
+                <tr><td colSpan={5} style={{ textAlign: 'center', padding: 30, color: 'var(--t4)', fontSize: 13 }}>
+                  {results.length === 0 ? 'Paste a list to get started.' : 'Nothing in this tab yet.'}
+                </td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -2599,6 +2883,35 @@ const Deliverability = () => {
           </div>
         </div>
       </div>
+      {showPaste && (
+        <div className="overlay" onClick={() => !submitting && setShowPaste(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Paste {tab === 'Phone / SMS' ? 'Failed Numbers' : 'Bounced Emails'}</div>
+              <Btn variant="ghost" sm onClick={() => setShowPaste(false)}><Ic n={I.x} size={16} /></Btn>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 12 }}>Paste phone numbers or email addresses (one per line). Matching CRM contacts are found automatically and added to the shared suppression list.</p>
+              {error && <div style={{ padding: '9px 11px', borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12, marginBottom: 10 }}>{error}</div>}
+              <textarea
+                className="inp"
+                rows={8}
+                value={pasteText}
+                onChange={e => setPasteText(e.target.value)}
+                placeholder={'+1-206-555-0088\nbounce@example.com\n+1-701-555-0341'}
+                style={{ height: 'auto', padding: '10px 12px', fontFamily: 'var(--mono)', fontSize: 12 }}
+              />
+              <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--t4)' }}>Detected: {detectedCount} {detectedCount === 1 ? 'entry' : 'entries'}</div>
+            </div>
+            <div className="modal-footer">
+              <Btn variant="ghost" onClick={() => setShowPaste(false)}>Cancel</Btn>
+              <button className="btn btn-danger" disabled={submitting || detectedCount === 0} onClick={submitPaste}>
+                {submitting ? 'Matching…' : 'Match & Remove'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -2767,6 +3080,132 @@ const ProfitAnalytics = () => {
   );
 }
 
+// ─── Best Clients ─────────────────────────────────────────────────────────────
+
+const BestClients = () => {
+  const [search, setSearch] = useState('')
+  const customers = useCustomers('All', search)
+  const ranked = [...customers].sort((a, b) => b.profit - a.profit)
+
+  return (
+    <div className="page-scroll">
+      <div className="page-content">
+        <div className="page-header" style={{ padding: 0, border: 'none', marginBottom: 16 }}>
+          <div>
+            <div className="page-title">Best Clients</div>
+            <div className="page-desc">Every customer, ranked by gross profit generated.</div>
+          </div>
+        </div>
+        <div className="toolbar" style={{ padding: 0, marginBottom: 14 }}>
+          <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search clients…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+          <div className="toolbar-right">
+            <span className="count-label">{ranked.length} clients</span>
+            <Btn variant="ghost" sm onClick={() => exportToCSV(ranked, 'best-clients')}><Ic n={I.export} size={13} /> Export</Btn>
+          </div>
+        </div>
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table className="crm" style={{ width: '100%' }}>
+            <thead><tr>
+              <th style={{ width: 44 }}>#</th><th>Company</th><th>Contact</th><th>PIC</th>
+              <th className="r">Sales</th><th className="r">Units</th><th className="r">Revenue</th>
+              <th className="r">Gross Profit</th><th>Last Purchase</th><th>Status</th>
+            </tr></thead>
+            <tbody>
+              {ranked.map((c, i) => (
+                <tr key={c.id}>
+                  <td>
+                    <span style={{ width: 22, height: 22, borderRadius: 6, background: i === 0 ? '#FEF3C7' : 'var(--s3)', color: i === 0 ? '#D97706' : 'var(--t4)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{i + 1}</span>
+                  </td>
+                  <td style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{c.co}</td>
+                  <td style={{ fontSize: 12.5 }}>{c.contact}</td>
+                  <td><ChipPIC label={c.pic} /></td>
+                  <td className="r mono bold">{c.sales}</td>
+                  <td className="r mono bold">{c.units}</td>
+                  <td className="r revenue-cell">${c.revenue.toLocaleString()}</td>
+                  <td className="r profit-cell">${c.profit.toLocaleString()}</td>
+                  <td style={{ fontSize: 12, color: 'var(--t3)' }}>{c.last}</td>
+                  <td><Badge status={c.status as BadgeStatus} /></td>
+                </tr>
+              ))}
+              {ranked.length === 0 && (
+                <tr><td colSpan={10} style={{ textAlign: 'center', padding: 30, color: 'var(--t4)', fontSize: 13 }}>No customers with a purchase history yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Inquiry Funnel ───────────────────────────────────────────────────────────
+
+// Real inquiry.status values, as actually set by the backend (see
+// create_inquiry_from_warm_lead / create_quotation / convert_to_sale in the SQL migrations)
+// -- not the larger aspirational status list in BadgeStatus, most of which nothing ever sets.
+const INQUIRY_FUNNEL_STAGES = [
+  { statuses: ['Under Review'], label: 'Under Review', color: '#315EF6' },
+  { statuses: ['Quotation Created'], label: 'Quotation Created', color: '#7C3AED' },
+  { statuses: ['Converted to Sale'], label: 'Converted to Sale', color: '#059669' },
+]
+
+const InquiryFunnel = () => {
+  const inquiries = useInquiries(0, 'all')
+  const stageCounts = INQUIRY_FUNNEL_STAGES.map(stage => ({
+    ...stage,
+    count: inquiries.filter(r => stage.statuses.includes(r.status)).length,
+  }))
+  const total = stageCounts.reduce((sum, s) => sum + s.count, 0)
+  const lostCount = inquiries.filter(r => ['Lost', 'Removed'].includes(r.status)).length
+  const maxCount = Math.max(1, ...stageCounts.map(s => s.count))
+
+  return (
+    <div className="page-scroll">
+      <div className="page-content">
+        <div className="page-header" style={{ padding: 0, border: 'none', marginBottom: 16 }}>
+          <div>
+            <div className="page-title">Inquiry Funnel</div>
+            <div className="page-desc">Where {total} tracked inquiries stand today, stage by stage.</div>
+          </div>
+        </div>
+        <div className="card" style={{ padding: 24, marginBottom: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {stageCounts.map((s, i) => {
+              const pctOfMax = (s.count / maxCount) * 100
+              const pctOfTotal = total > 0 ? (s.count / total) * 100 : 0
+              return (
+                <div key={s.label}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t2)' }}>{i + 1}. {s.label}</span>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--t1)' }}>{s.count} <span style={{ color: 'var(--t4)', fontWeight: 500 }}>({pctOfTotal.toFixed(0)}%)</span></span>
+                  </div>
+                  <div style={{ height: 22, borderRadius: 6, background: 'var(--s2)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${pctOfMax}%`, background: s.color, borderRadius: 6, transition: 'width 0.3s ease', minWidth: s.count > 0 ? 4 : 0 }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          <div className="card" style={{ padding: 18, textAlign: 'center' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 6 }}>Total Tracked Inquiries</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--t1)', fontFamily: 'var(--mono)' }}>{total}</div>
+          </div>
+          <div className="card" style={{ padding: 18, textAlign: 'center' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 6 }}>Converted to Sale</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--green)', fontFamily: 'var(--mono)' }}>{stageCounts[stageCounts.length - 1].count}</div>
+          </div>
+          <div className="card" style={{ padding: 18, textAlign: 'center' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 6 }}>Lost / Removed</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--red)', fontFamily: 'var(--mono)' }}>{lostCount}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Admin pages ──────────────────────────────────────────────────────────────
 
 const DailyTargets = () => (
@@ -2841,7 +3280,7 @@ type GoogleConnectionStatus = {
   email: string | null
 }
 
-const SystemSettings = () => {
+const SystemSettings = ({ onNav }: { onNav?: (s: Screen) => void }) => {
   const analytics = useAnalytics()
   const PIC_DATA: PicPerformanceRow[] = analytics?.charts?.PIC_DATA || []
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null)
@@ -2962,37 +3401,30 @@ const SystemSettings = () => {
         {/* Sales Reps */}
         <div className="card" style={{ padding: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)' }}>Sales Representatives (PICs)</div>
-            <Btn variant="primary" sm><Ic n={I.plus} size={13} /> Add PIC</Btn>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)' }}>Top Sales Representatives</div>
+              <div style={{ fontSize: 11, color: 'var(--t4)' }}>By profit this month. Manage PIC identities and roles in User Management.</div>
+            </div>
+            <Btn variant="primary" sm onClick={() => onNav?.('user-management')}><Ic n={I.plus} size={13} /> Manage PICs</Btn>
           </div>
           {PIC_DATA.map((p, i) => (
             <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border-s)' }}>
-              <div className="avatar" style={{ width: 34, height: 34, borderRadius: 9, fontSize: 12, background: ['#315EF620','#7C3AED20','#0D948820','#D9770620'][i], color: ['#315EF6','#7C3AED','#0D9488','#D97706'][i] }}>{p.initials}</div>
+              <div className="avatar" style={{ width: 34, height: 34, borderRadius: 9, fontSize: 12, background: ['#315EF620','#7C3AED20','#0D948820','#D9770620'][i % 4], color: ['#315EF6','#7C3AED','#0D9488','#D97706'][i % 4] }}>{p.initials}</div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div>
                 <div style={{ fontSize: 11, color: 'var(--t4)' }}>{p.sales} sales · ${p.profit.toLocaleString()} profit this month</div>
               </div>
-              <span className="badge b-green">Active</span>
-              <Btn variant="ghost" sm><Ic n={I.edit} size={13} /></Btn>
             </div>
           ))}
+          {PIC_DATA.length === 0 && (
+            <div style={{ padding: '16px 0', fontSize: 12.5, color: 'var(--t4)', textAlign: 'center' }}>No sales recorded yet this period.</div>
+          )}
         </div>
       </div>
     </div>
   </div>
   )
 }
-
-// ─── Generic placeholder ──────────────────────────────────────────────────────
-
-const Placeholder = ({ label }: { label: string }) => (
-  <div className="empty" style={{ padding: 80 }}>
-    <div className="empty-icon"><Ic n={I.container} size={48} /></div>
-    <div className="empty-title">{label}</div>
-    <div className="empty-desc">This module is fully structured and ready for data integration.</div>
-    <Btn variant="primary" sm style={{ marginTop: 16 }}><Ic n={I.plus} size={13} /> Get Started</Btn>
-  </div>
-)
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -3078,12 +3510,12 @@ export default function App() {
       case 'profit-analytics':    return <ProfitAnalytics />
       case 'daily-targets':       return <DailyTargets />
       case 'service-territories': return <ServiceTerritories />
-      case 'system-settings':     return <SystemSettings />
+      case 'system-settings':     return <SystemSettings onNav={handleNav} />
       case 'profile-settings':    return <UserProfileSettings session={session} />
       case 'user-management':     return currentProfile?.role === 'admin' ? <UserManagement /> : <Dashboard onNav={handleNav} session={session} />
       case 'pickups':             return <Pickups />
-      case 'best-clients':        return <Placeholder label="Best Clients" />
-      case 'inquiry-funnel':      return <Placeholder label="Inquiry Funnel" />
+      case 'best-clients':        return <BestClients />
+      case 'inquiry-funnel':      return <InquiryFunnel />
       default:                    return <Dashboard onNav={handleNav} session={session} />
     }
   }

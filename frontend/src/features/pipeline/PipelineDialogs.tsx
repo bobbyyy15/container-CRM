@@ -13,9 +13,9 @@ const useCatalog = (path: string) => {
   return options
 }
 
-type PicOption = { id: string; name: string }
+export type PicOption = { id: string; name: string }
 
-const usePics = () => {
+export const usePics = () => {
   const [options, setOptions] = useState<PicOption[]>([])
   useEffect(() => {
     let cancelled = false

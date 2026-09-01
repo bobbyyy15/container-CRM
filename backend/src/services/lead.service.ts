@@ -124,4 +124,40 @@ export class LeadService {
     if (error) throw new Error(`Failed to remove pipeline entry: ${error.message}`);
     return data;
   }
+
+  static async bulkAddRemovedEntries(text: string, reason: string | undefined, actorId: string) {
+    const identifiers = text.split('\n').map(line => line.trim()).filter(Boolean).slice(0, 1000);
+    if (identifiers.length === 0) return [];
+    const { data, error } = await supabaseAdmin.rpc('bulk_add_removed_entries', {
+      p_identifiers: identifiers,
+      p_reason: reason ?? null,
+      p_actor_id: actorId,
+    });
+    if (error) throw new Error(`Failed to process the pasted list: ${error.message}`);
+    return data;
+  }
+
+  static async assignPic(stage: 'prospect' | 'warm_lead', entityId: string, newPicId: string, actorPicId: string) {
+    const table = stage === 'prospect' ? 'prospect_clients' : 'warm_leads';
+
+    const { data: current, error: fetchError } = await supabaseAdmin
+      .from(table)
+      .select('id, pic_id')
+      .eq('id', entityId)
+      .maybeSingle();
+    if (fetchError) throw new Error(`Failed to look up the record: ${fetchError.message}`);
+    if (!current) throw new Error('Record not found.');
+    if (current.pic_id !== actorPicId) {
+      throw new Error('You can only reassign records currently owned by your own PIC.');
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from(table)
+      .update({ pic_id: newPicId })
+      .eq('id', entityId)
+      .select('id, pic_id')
+      .single();
+    if (error) throw new Error(`Failed to reassign PIC: ${error.message}`);
+    return data;
+  }
 }

@@ -8,6 +8,8 @@ import {
   CreateManualProspectSchema,
   LeadListQuerySchema,
   RemovePipelineEntrySchema,
+  AssignPicToEntrySchema,
+  BulkRemovedEntriesSchema,
 } from '../schemas/lead.schema';
 import { supabaseAdmin } from '../config/supabase';
 
@@ -54,8 +56,8 @@ const listActiveLeads = async (
   dbQuery = dbQuery.eq('pic_id', picId);
 
   if (table === 'prospect_clients' && query.status !== 'all') dbQuery = dbQuery.eq('lifecycle_status', query.status);
-  if (table === 'warm_leads') dbQuery = dbQuery.eq('status', 'active');
-  if (table === 'inquiries') dbQuery = dbQuery.not('status', 'in', '(Removed,Lost,Quotation Created,Converted to Sale)');
+  if (table === 'warm_leads' && query.status !== 'all') dbQuery = dbQuery.eq('status', 'active');
+  if (table === 'inquiries' && query.status !== 'all') dbQuery = dbQuery.not('status', 'in', '(Removed,Lost,Quotation Created,Converted to Sale)');
 
   const [{ data, error }, { data: removed, error: removedError }] = await Promise.all([
     dbQuery,
@@ -236,6 +238,16 @@ export class LeadController {
     }
   }
 
+  static async bulkRemove(req: Request, res: Response) {
+    try {
+      const payload = BulkRemovedEntriesSchema.parse(req.body);
+      const results = await LeadService.bulkAddRemovedEntries(payload.text, payload.reason, req.auth!.user.id);
+      res.json({ success: true, data: results });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
   static async removeEntry(req: Request, res: Response) {
     try {
       const payload = RemovePipelineEntrySchema.parse({
@@ -250,6 +262,22 @@ export class LeadController {
         payload.reason,
       );
       res.json({ success: true, data: removed });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async assignPic(req: Request, res: Response) {
+    try {
+      const payload = AssignPicToEntrySchema.parse({
+        stage: req.params.stage,
+        entityId: req.params.entityId,
+        picId: req.body.picId,
+      });
+      const actorPicId = requirePicId(req, res);
+      if (!actorPicId) return;
+      const updated = await LeadService.assignPic(payload.stage, payload.entityId, payload.picId, actorPicId);
+      res.json({ success: true, data: updated });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });
     }
