@@ -14,6 +14,7 @@ import picRoutes from './routes/pic.routes';
 import adminRoutes from './routes/admin.routes';
 import customerRoutes from './routes/customer.routes';
 import contractRoutes from './routes/contract.routes';
+import notificationRoutes from './routes/notification.routes';
 import { requireAuth } from './middleware/auth.middleware';
 import { requestContext } from './middleware/request-context.middleware';
 import { env } from './config/env';
@@ -50,6 +51,7 @@ app.use('/api/v1/outreach', outreachRoutes);
 app.use('/api/v1/catalog', catalogRoutes);
 app.use('/api/v1/pics', picRoutes);
 app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
 
 // Start Server
 app.listen(env.PORT, () => {

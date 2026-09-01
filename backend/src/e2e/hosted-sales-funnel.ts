@@ -267,6 +267,25 @@ const run = async () => {
     }),
   });
   ids.inquiry = inquiry.data.id;
+  // Business rule (see 031_inquiry_ticketing_and_notifications.sql): every new inquiry is a
+  // ticket that starts unquotable until Procurement approves it.
+  if (inquiry.data.status !== 'Pending Validation') {
+    throw new Error(`New inquiry ticket did not start at Pending Validation: ${JSON.stringify(inquiry.data)}`);
+  }
+  const quoteWhilePendingRejected = await fetch(`${apiBase}/deals/quotations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ inquiry_id: ids.inquiry, items: [{ description: 'Should be rejected', quantity: 1, unit_price: 1 }] }),
+  });
+  if (quoteWhilePendingRejected.ok) throw new Error('Quoting an inquiry still Pending Validation was not rejected');
+
+  const { data: approved, error: approveError } = await supabaseAdmin
+    .rpc('validate_inquiry_ticket', { p_inquiry_id: ids.inquiry, p_actor_id: ids.user, p_approved: true })
+    .single();
+  if (approveError || (approved as any)?.status !== 'Under Review') {
+    throw new Error(`Ticket approval did not transition to Under Review: ${JSON.stringify(approveError ?? approved)}`);
+  }
+
   // Business rule (see 017_manual_prospect_sale_and_flow_fixes.sql): creating an inquiry from
   // a warm lead does NOT remove it from the active Warm Leads list -- it stays visible and
   // can generate further inquiries later.

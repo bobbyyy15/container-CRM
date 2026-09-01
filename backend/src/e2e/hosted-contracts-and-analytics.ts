@@ -88,6 +88,8 @@ const run = async () => {
   });
   ids.inquiry = inquiry.data.id;
 
+  await supabaseAdmin.rpc('validate_inquiry_ticket', { p_inquiry_id: ids.inquiry, p_actor_id: ids.user, p_approved: true }).single();
+
   const quotation = await request(token, '/deals/quotations', {
     method: 'POST',
     body: JSON.stringify({ inquiry_id: ids.inquiry, items: [{ description: '40ft E2E contract test container', quantity: 1, unit_price: 5000 }] }),

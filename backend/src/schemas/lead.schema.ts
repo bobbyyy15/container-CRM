@@ -107,9 +107,19 @@ export const BulkRemovedEntriesSchema = z.object({
   reason: z.string().trim().max(500).optional(),
 });
 
+export const ValidateInquiryTicketSchema = z.object({
+  approved: z.boolean(),
+  rejectionReason: z.string().trim().min(3).max(1000).optional(),
+  alternativeOffer: z.string().trim().max(1000).optional(),
+}).refine(data => data.approved || !!data.rejectionReason, {
+  message: 'A reason is required to reject an inquiry ticket',
+  path: ['rejectionReason'],
+});
+
 export type CreateInquiryPayload = z.infer<typeof CreateInquirySchema>;
 export type CreateManualWarmLeadPayload = z.infer<typeof CreateManualWarmLeadSchema>;
 export type CreateManualInquiryPayload = z.infer<typeof CreateManualInquirySchema>;
 export type CreateManualProspectPayload = z.infer<typeof CreateManualProspectSchema>;
 export type AssignPicToEntryPayload = z.infer<typeof AssignPicToEntrySchema>;
 export type BulkRemovedEntriesPayload = z.infer<typeof BulkRemovedEntriesSchema>;
+export type ValidateInquiryTicketPayload = z.infer<typeof ValidateInquiryTicketSchema>;

@@ -160,4 +160,34 @@ export class LeadService {
     if (error) throw new Error(`Failed to reassign PIC: ${error.message}`);
     return data;
   }
+
+  static async getPendingValidationTickets() {
+    const { data, error } = await supabaseAdmin
+      .from('inquiries')
+      .select('*, companies(*), contacts(*), pics(name), container_sizes(id, name), container_conditions(id, name)')
+      .eq('status', 'Pending Validation')
+      .order('created_at', { ascending: true });
+    if (error) throw new Error(`Failed to load the validation queue: ${error.message}`);
+    return data;
+  }
+
+  static async validateInquiryTicket(
+    inquiryId: string,
+    actorId: string,
+    approved: boolean,
+    rejectionReason: string | undefined,
+    alternativeOffer: string | undefined,
+  ) {
+    const { data, error } = await supabaseAdmin
+      .rpc('validate_inquiry_ticket', {
+        p_inquiry_id: inquiryId,
+        p_actor_id: actorId,
+        p_approved: approved,
+        p_rejection_reason: rejectionReason ?? null,
+        p_alternative_offer: alternativeOffer ?? null,
+      })
+      .single();
+    if (error) throw new Error(`Failed to validate the inquiry ticket: ${error.message}`);
+    return data;
+  }
 }

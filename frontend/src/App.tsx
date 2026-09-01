@@ -109,6 +109,8 @@ const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') => {
           neededBy: row.needed_by_date ? new Date(row.needed_by_date).toLocaleDateString() : '—',
           status: row.status || 'Under Review',
           pic: row.pics?.name || 'Unassigned',
+          rejectionReason: row.rejection_reason || '',
+          alternativeOffer: row.alternative_offer || '',
         }
       }))
     }).catch(console.error)
@@ -192,6 +194,25 @@ const useAnalytics = () => {
     }).catch(console.error)
   }, [])
   return data
+}
+
+const useNotifications = (revision = 0) => {
+  const [data, setData] = useState<any[]>([])
+  const [unread, setUnread] = useState(0)
+  const refresh = useCallback(() => {
+    api.get('/notifications').then(res => {
+      if (res.data.success) {
+        setData(res.data.data || [])
+        setUnread(res.data.meta?.unread ?? 0)
+      }
+    }).catch(console.error)
+  }, [])
+  useEffect(() => {
+    refresh()
+    const interval = setInterval(refresh, 30000)
+    return () => clearInterval(interval)
+  }, [refresh, revision])
+  return { notifications: data, unread, refresh }
 }
 
 
@@ -327,11 +348,11 @@ type Screen =
   | 'container-catalog'
   | 'pic-performance' | 'best-clients' | 'profit-analytics' | 'inquiry-funnel'
   | 'service-territories' | 'daily-targets' | 'system-settings' | 'profile-settings'
-  | 'user-management'
+  | 'user-management' | 'inquiry-validation'
 
 // ─── Navigation ──────────────────────────────────────────────────────────────
 
-type NavItem = { id: Screen; label: string; icon: string }
+type NavItem = { id: Screen; label: string; icon: string; roles?: string[] }
 type NavGroup = { label: string; items: NavItem[] }
 
 const NAV: NavGroup[] = [
@@ -349,6 +370,7 @@ const NAV: NavGroup[] = [
       { id: 'prospects', label: 'Prospect Clients', icon: I.prospect },
       { id: 'warm-leads', label: 'Warm Leads', icon: I.lead },
       { id: 'inquiries', label: 'Inquiries', icon: I.inquiry },
+      { id: 'inquiry-validation', label: 'Inquiry Validation', icon: I.check, roles: ['admin', 'procurement'] },
       { id: 'quotations', label: 'Quotations', icon: I.quote },
       { id: 'sales-tracker', label: 'Sales Tracker', icon: I.sales },
     ],
@@ -428,6 +450,7 @@ const SCREEN_LABELS: Record<Screen, string> = {
   'system-settings': 'System Settings',
   'profile-settings': 'Profile Settings',
   'user-management': 'User Management',
+  'inquiry-validation': 'Inquiry Validation',
 }
 
 // ─── Sample Data ──────────────────────────────────────────────────────────────
@@ -467,13 +490,15 @@ type BadgeStatus =
   | 'Converted to Sale' | 'Converted' | 'Pending' | 'Cancelled' | 'Call/Text' | 'Calls Only'
   | 'Text Only' | 'Mail Delivery Report' | 'Overdue' | 'Scheduled' | 'Confirmed'
   | 'Picked Up' | 'Accepted' | 'Rejected' | 'Under Review' | 'Awaiting Response'
+  | 'Pending Validation' | 'Validation Rejected' | 'Quotation Created' | 'Quotation Rejected'
 
 const BADGE_MAP: Record<string, string> = {
   'Proceed': 'b-green', 'Active': 'b-green', 'Completed': 'b-green', 'Accepted': 'b-green',
   'Converted to Sale': 'b-green', 'Converted': 'b-green', 'Picked Up': 'b-green',
   'Removed': 'b-red', 'Lost': 'b-red', 'Rejected': 'b-red', 'Overdue': 'b-red', 'Cancelled': 'b-red',
-  'Pending': 'b-amber', 'Awaiting Response': 'b-amber', 'Under Review': 'b-amber',
-  'New Inquiry': 'b-blue', 'Draft': 'b-blue', 'Call/Text': 'b-green',
+  'Validation Rejected': 'b-red', 'Quotation Rejected': 'b-red',
+  'Pending': 'b-amber', 'Awaiting Response': 'b-amber', 'Under Review': 'b-amber', 'Pending Validation': 'b-amber',
+  'New Inquiry': 'b-blue', 'Draft': 'b-blue', 'Call/Text': 'b-green', 'Quotation Created': 'b-blue',
   'Calls Only': 'b-blue', 'Mail Delivery Report': 'b-blue', 'Scheduled': 'b-blue', 'Confirmed': 'b-blue', 'Sent': 'b-blue',
   'Text Only': 'b-purple', 'Negotiating': 'b-purple', 'Negotiation': 'b-purple',
   'Quotation Required': 'b-amber', 'Quotation Sent': 'b-teal',
@@ -597,10 +622,14 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange, role }: {
   role?: string;
 }) => {
   const [showModeMenu, setShowModeMenu] = useState(false)
-  // Administration (User Management) is the one nav group that's actually access-controlled
-  // today -- everything else is visible to any authenticated role, see docs/CUSTOMERS_MODULE.md
-  // §5 for why that's a known, not-yet-addressed gap.
-  const visibleGroups = role === 'admin' ? NAV : NAV.filter(group => group.label !== 'Administration')
+  // Administration (User Management) and individual items with a `roles` allowlist (e.g.
+  // Inquiry Validation, Procurement-only) are access-controlled; everything else is visible
+  // to any authenticated role, see docs/CUSTOMERS_MODULE.md §5 for why that's a known,
+  // not-yet-addressed gap for the rest of the app.
+  const visibleGroups = NAV
+    .filter(group => group.label !== 'Administration' || role === 'admin')
+    .map(group => ({ ...group, items: group.items.filter(item => !item.roles || (role && item.roles.includes(role))) }))
+    .filter(group => group.items.length > 0)
 
   return (
     <aside className={`sidebar${expanded ? ' expanded' : ''}`}>
@@ -682,6 +711,12 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange, role }: {
 
 // ─── TopBar ───────────────────────────────────────────────────────────────────
 
+const NOTIFICATION_STYLE: Record<string, { icon: string; color: string }> = {
+  inquiry_pending_validation: { icon: I.inquiry, color: 'var(--amber)' },
+  inquiry_approved: { icon: I.check, color: 'var(--green)' },
+  inquiry_rejected: { icon: I.x, color: 'var(--red)' },
+}
+
 const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolean; onToggleDark: () => void; session: any; onNav: (s: Screen) => void; role?: string }) => {
   const [showAccountMenu, setShowAccountMenu] = useState(false)
   const [showNotifs, setShowNotifs] = useState(false)
@@ -715,7 +750,17 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User'
   const initials = userName.substring(0, 2).toUpperCase()
   
-  const NOTIFICATIONS: any[] = [];
+  const { notifications, unread, refresh } = useNotifications()
+  const timeAgo = (iso: string) => {
+    const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    return `${Math.floor(hrs / 24)}d ago`
+  }
+  const markRead = (id: string) => api.patch(`/notifications/${id}/read`).then(refresh).catch(console.error)
+  const markAllRead = () => api.patch('/notifications/read-all').then(refresh).catch(console.error)
 
   return (
     <header className="topbar">
@@ -745,42 +790,41 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
               <div style={{ position: 'absolute', top: 'calc(100% + 10px)', right: -50, width: 320, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 10, zIndex: 100, boxShadow: '0 10px 25px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
                 <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--s2)' }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)' }}>Notifications</div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--brand)', cursor: 'pointer' }}>Mark all as read</div>
+                  {unread > 0 && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--brand)', cursor: 'pointer' }} onClick={markAllRead}>Mark all as read</div>}
                 </div>
-                
+
                 <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-                  {NOTIFICATIONS.length === 0 ? (
+                  {notifications.length === 0 ? (
                     <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--t3)', fontSize: 12.5 }}>
                       <Ic n={I.bell} size={24} style={{ opacity: 0.3, marginBottom: 8 }} />
                       <div>You have no new notifications.</div>
                     </div>
                   ) : (
-                    NOTIFICATIONS.map(n => (
-                      <div key={n.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-s)', display: 'flex', gap: 12, cursor: 'pointer', background: n.unread ? 'rgba(49, 94, 246, 0.03)' : 'transparent' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = n.unread ? 'rgba(49, 94, 246, 0.03)' : 'transparent'}>
-                        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${n.color}15`, color: n.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <Ic n={n.icon} size={14} />
-                        </div>
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                            <div style={{ fontSize: 13, fontWeight: n.unread ? 700 : 600, color: 'var(--t1)' }}>{n.title}</div>
-                            <div style={{ fontSize: 11, color: 'var(--t4)' }}>{n.time}</div>
+                    notifications.map(n => {
+                      const style = NOTIFICATION_STYLE[n.type] || { icon: I.bell, color: 'var(--brand)' }
+                      return (
+                        <div key={n.id} onClick={() => !n.read && markRead(n.id)} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-s)', display: 'flex', gap: 12, cursor: n.read ? 'default' : 'pointer', background: !n.read ? 'rgba(49, 94, 246, 0.03)' : 'transparent' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = !n.read ? 'rgba(49, 94, 246, 0.03)' : 'transparent'}>
+                          <div style={{ width: 32, height: 32, borderRadius: 8, background: `${style.color}15`, color: style.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <Ic n={style.icon} size={14} />
                           </div>
-                          <div style={{ fontSize: 12, color: 'var(--t3)', lineHeight: 1.4 }}>{n.desc}</div>
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4, gap: 8 }}>
+                              <div style={{ fontSize: 13, fontWeight: !n.read ? 700 : 600, color: 'var(--t1)' }}>{n.title}</div>
+                              <div style={{ fontSize: 11, color: 'var(--t4)', whiteSpace: 'nowrap' }}>{timeAgo(n.created_at)}</div>
+                            </div>
+                            <div style={{ fontSize: 12, color: 'var(--t3)', lineHeight: 1.4, whiteSpace: 'pre-line' }}>{n.message}</div>
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      )
+                    })
                   )}
-                </div>
-                
-                <div style={{ padding: '10px', textAlign: 'center', fontSize: 12, fontWeight: 600, color: 'var(--t3)', borderTop: '1px solid var(--border-s)', cursor: 'pointer' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--brand)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--t3)'}>
-                  View all notifications
                 </div>
               </div>
             </>
           )}
           <button className="tb-btn" onClick={() => setShowNotifs(!showNotifs)} title="Notifications">
             <Ic n={I.bell} size={17} />
-            {NOTIFICATIONS.some(n => n.unread) && <span className="notif-dot" />}
+            {unread > 0 && <span className="notif-dot" />}
           </button>
         </div>
 
@@ -1365,6 +1409,15 @@ const OutreachDashboard = () => {
 const InquiryDashboard = () => {
   const analytics = useAnalytics();
   const LOSS_REASONS: LossReasonRow[] = analytics?.charts?.LOSS_REASONS || [];
+  const inquiries = useInquiries(0, 'all')
+  const total = inquiries.length
+  const pendingValidation = inquiries.filter(r => r.status === 'Pending Validation').length
+  const validationRejected = inquiries.filter(r => r.status === 'Validation Rejected').length
+  const underReview = inquiries.filter(r => r.status === 'Under Review').length
+  const quotationCreated = inquiries.filter(r => r.status === 'Quotation Created').length
+  const convertedToSale = inquiries.filter(r => r.status === 'Converted to Sale').length
+  const funnelTotal = underReview + quotationCreated + convertedToSale
+  const pct = (v: number) => funnelTotal > 0 ? Math.round((v / funnelTotal) * 100) : 0
   return (
   <div className="page-scroll">
     <div className="greeting-bar">
@@ -1373,29 +1426,26 @@ const InquiryDashboard = () => {
     <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
         {[
-          { label: 'Total Inquiries', val: '0', trend: '0%', up: true },
-          { label: 'Need Quotation', val: '0', trend: '0', up: true },
-          { label: 'Awaiting Response', val: '0', trend: '0', up: false },
-          { label: 'Converted', val: '0', trend: '0%', up: true },
-          { label: 'Lost', val: '0', trend: '0', up: false },
+          { label: 'Total Inquiries', val: String(total) },
+          { label: 'Pending Validation', val: String(pendingValidation) },
+          { label: 'Approved / Under Review', val: String(underReview) },
+          { label: 'Converted to Sale', val: String(convertedToSale) },
+          { label: 'Validation Rejected', val: String(validationRejected) },
         ].map(k => (
           <div key={k.label} className="kpi-card">
             <div className="kpi-label">{k.label}</div>
             <div className="kpi-value" style={{ fontSize: 26 }}>{k.val}</div>
-            <Trend val={k.trend} up={k.up} />
           </div>
         ))}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <div className="chart-card">
           <div className="chart-title">Inquiry Conversion Funnel</div>
-          <div className="chart-sub" style={{ marginBottom: 14 }}>This month</div>
+          <div className="chart-sub" style={{ marginBottom: 14 }}>Approved tickets, by stage</div>
           {[
-            { label: 'Total Inquiries', v: 0, pct: 0, color: '#315EF6' },
-            { label: 'Quotation Requested', v: 0, pct: 0, color: '#7C3AED' },
-            { label: 'Quotation Sent', v: 0, pct: 0, color: '#0D9488' },
-            { label: 'Negotiating', v: 0, pct: 0, color: '#D97706' },
-            { label: 'Converted to Sale', v: 0, pct: 0, color: '#059669' },
+            { label: 'Under Review', v: underReview, pct: pct(underReview), color: '#315EF6' },
+            { label: 'Quotation Created', v: quotationCreated, pct: pct(quotationCreated), color: '#0D9488' },
+            { label: 'Converted to Sale', v: convertedToSale, pct: pct(convertedToSale), color: '#059669' },
           ].map(r => (
             <div key={r.label} style={{ marginBottom: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -1793,13 +1843,15 @@ const InquiryList = () => {
   const [tab, setTab] = useState('All')
   const [lookup, setLookup] = useState('')
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
-  const tabs = ['All', 'New', 'Quotation Required', 'Awaiting Response', 'Negotiating', 'Converted', 'Lost']
+  // These match the real inquiry.status values the backend actually sets (see
+  // 031_inquiry_ticketing_and_notifications.sql) -- not a larger aspirational list.
+  const tabs = ['All', 'Pending Validation', 'Under Review', 'Validation Rejected']
   const [channel, setChannel] = useState('')
   const [picFilter, setPicFilter] = useState('')
   const pics = [...new Set(INQUIRIES.map(r => r.pic).filter(Boolean))].sort() as string[]
 
   const filtered = INQUIRIES.filter(r => {
-    const tabMatch = tab === 'All' || r.status === tab || (tab === 'Converted' && r.status === 'Converted to Sale')
+    const tabMatch = tab === 'All' || r.status === tab
     const term = lookup.trim().toLowerCase()
     const channelMatch = !channel || r.channel === channel
     const picMatch = !picFilter || r.pic === picFilter
@@ -1834,13 +1886,12 @@ const InquiryList = () => {
       </div>
 
       {/* Status cards */}
-      <div className="status-strip" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+      <div className="status-strip" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
         {[
-          { label: 'New Inquiries', val: INQUIRIES.filter(r => ['New', 'Under Review'].includes(r.status)).length, color: '#315EF6' },
-          { label: 'Need Quotation', val: INQUIRIES.filter(r => r.status === 'Quotation Required').length, color: '#D97706' },
-          { label: 'Awaiting Response', val: INQUIRIES.filter(r => r.status === 'Awaiting Response').length, color: '#7C3AED' },
-          { label: 'Negotiating', val: INQUIRIES.filter(r => r.status === 'Negotiating').length, color: '#EA580C' },
-          { label: 'Converted', val: INQUIRIES.filter(r => ['Converted', 'Converted to Sale'].includes(r.status)).length, color: '#059669' },
+          { label: 'Pending Validation', val: INQUIRIES.filter(r => r.status === 'Pending Validation').length, color: '#D97706' },
+          { label: 'Approved / Under Review', val: INQUIRIES.filter(r => r.status === 'Under Review').length, color: '#315EF6' },
+          { label: 'Validation Rejected', val: INQUIRIES.filter(r => r.status === 'Validation Rejected').length, color: '#DC2626' },
+          { label: 'Quotation Rejected', val: INQUIRIES.filter(r => r.status === 'Quotation Rejected').length, color: '#EA580C' },
         ].map(s => (
           <div key={s.label} className="status-card" style={{ background: s.color }}>
             <div className="sc-label">{s.label}</div>
@@ -1945,7 +1996,9 @@ const InquiryList = () => {
                 <td className="col-actions">
                   <div className="row-actions">
                     <Btn variant="ghost" sm onClick={() => setViewRow(row)}>View</Btn>
-                    <Btn variant="ghost" sm style={{ color: 'var(--purple)' }} onClick={() => setQuotationInquiryId(row.id)}>→ Quote</Btn>
+                    {['Under Review', 'Quotation Rejected'].includes(row.status) && (
+                      <Btn variant="ghost" sm style={{ color: 'var(--purple)' }} onClick={() => setQuotationInquiryId(row.id)}>→ Quote</Btn>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -1969,6 +2022,8 @@ const InquiryList = () => {
             { label: 'Needed by', value: viewRow.neededBy },
             { label: 'PIC', value: viewRow.pic },
             { label: 'Received', value: `${viewRow.date} ${viewRow.time}` },
+            ...(viewRow.rejectionReason ? [{ label: 'Rejection reason', value: viewRow.rejectionReason }] : []),
+            ...(viewRow.alternativeOffer ? [{ label: 'Alternative offer suggested by Procurement', value: viewRow.alternativeOffer }] : []),
           ]}
         />
       )}
@@ -2918,50 +2973,53 @@ const Deliverability = () => {
 
 // ─── Container Catalog ────────────────────────────────────────────────────────
 
-const ContainerCatalog = () => (
-  <div className="page-scroll">
-    <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-        {[
-          { label: 'Dry Container', units: 142, color: '#315EF6' },
-          { label: 'High-Cube Container', units: 98, color: '#7C3AED' },
-          { label: 'Office Container', units: 28, color: '#0D9488' },
-          { label: 'Storage Container', units: 61, color: '#D97706' },
-          { label: 'Double-Door Container', units: 34, color: '#EA580C' },
-          { label: 'Refrigerated Container', units: 15, color: '#DC2626' },
-          { label: 'Open-Top Container', units: 22, color: '#059669' },
-          { label: 'Flat-Rack Container', units: 18, color: '#6B7280' },
-        ].map(cat => (
-          <div key={cat.label} className="kpi-card" style={{ borderTop: `3px solid ${cat.color}`, cursor: 'pointer' }}>
-            <div className="kpi-label">{cat.label}</div>
-            <div className="kpi-value" style={{ fontSize: 28, color: cat.color }}>{cat.units}</div>
-            <div className="kpi-sub">units available</div>
+const useCatalogList = (path: string) => {
+  const [data, setData] = useState<{ id: string; name: string }[]>([])
+  useEffect(() => {
+    api.get(path).then(res => { if (res.data.success) setData(res.data.data || []) }).catch(console.error)
+  }, [path])
+  return data
+}
+
+const ContainerCatalog = () => {
+  const sizes = useCatalogList('/catalog/sizes')
+  const conditions = useCatalogList('/catalog/conditions')
+
+  return (
+    <div className="page-scroll">
+      <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="page-header" style={{ padding: 0, border: 'none', marginBottom: 0 }}>
+          <div>
+            <div className="page-title">Container Catalog</div>
+            <div className="page-desc">Sizes and condition grades offered on quotations and inquiries. This CRM doesn't track physical unit inventory -- pricing is set per quotation.</div>
           </div>
-        ))}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <div className="card" style={{ padding: 18 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)', marginBottom: 14 }}>Available Sizes</div>
-          {['10 ft', '20 ft', '20 ft HC', '40 ft HC', '45 ft HC', '53 ft HC'].map(s => (
-            <div key={s} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid var(--border-s)' }}>
-              <span className="mono" style={{ fontWeight: 600, fontSize: 13 }}>{s}</span>
-              <span className="badge b-green">Available</span>
-            </div>
-          ))}
         </div>
-        <div className="card" style={{ padding: 18 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)', marginBottom: 14 }}>Condition Grades</div>
-          {['Brand New', 'One Trip', 'Cargo Worthy', 'Wind & Watertight', 'Refurbished', 'Modified', 'As-Is', 'Used'].map((c, i) => (
-            <div key={c} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid var(--border-s)' }}>
-              <span style={{ fontSize: 13 }}>{c}</span>
-              <span className="mono" style={{ fontWeight: 700, color: 'var(--t1)' }}>{[142, 98, 34, 22, 28, 18, 15, 61][i]}</span>
-            </div>
-          ))}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div className="card" style={{ padding: 18 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)', marginBottom: 14 }}>Available Sizes</div>
+            {sizes.map(s => (
+              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid var(--border-s)' }}>
+                <span className="mono" style={{ fontWeight: 600, fontSize: 13 }}>{s.name}</span>
+                <span className="badge b-green">Available</span>
+              </div>
+            ))}
+            {sizes.length === 0 && <div style={{ padding: '16px 0', fontSize: 12.5, color: 'var(--t4)', textAlign: 'center' }}>No sizes configured.</div>}
+          </div>
+          <div className="card" style={{ padding: 18 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)', marginBottom: 14 }}>Condition Grades</div>
+            {conditions.map(c => (
+              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid var(--border-s)' }}>
+                <span style={{ fontSize: 13 }}>{c.name}</span>
+                <span className="badge b-green">Available</span>
+              </div>
+            ))}
+            {conditions.length === 0 && <div style={{ padding: '16px 0', fontSize: 12.5, color: 'var(--t4)', textAlign: 'center' }}>No condition grades configured.</div>}
+          </div>
         </div>
       </div>
     </div>
-  </div>
-)
+  )
+}
 
 // ─── PIC Performance ─────────────────────────────────────────────────────────
 
@@ -3202,6 +3260,153 @@ const InquiryFunnel = () => {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── Inquiry Validation (Procurement) ──────────────────────────────────────────
+
+const useValidationQueue = (revision = 0) => {
+  const [data, setData] = useState<any[]>([])
+  useEffect(() => {
+    api.get('/leads/inquiries/pending-validation').then(res => {
+      if (res.data.success) setData((res.data.data || []).map((row: any) => ({
+        id: row.id,
+        ref: `INQ-${row.id.slice(0, 8).toUpperCase()}`,
+        date: new Date(row.created_at).toLocaleDateString(),
+        company: row.companies?.name || '',
+        contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
+        pic: row.pics?.name || 'Unassigned',
+        description: row.requirements || '—',
+        size: row.container_sizes?.name || '—',
+        condition: row.container_conditions?.name || '—',
+        location: [row.state_province, row.country].filter(Boolean).join(', ') || '—',
+        quantity: row.quantity ?? '—',
+        price: row.asking_price != null ? Number(row.asking_price) : null,
+      })));
+    }).catch(console.error)
+  }, [revision])
+  return data
+}
+
+const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
+  ticketRef: string
+  onClose: () => void
+  onReject: (reason: string, alternative: string) => Promise<void>
+}) => {
+  const [reason, setReason] = useState('')
+  const [alternative, setAlternative] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{ width: 460 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">Reject {ticketRef}</div>
+          <Btn variant="ghost" sm onClick={onClose}><Ic n={I.x} size={16} /></Btn>
+        </div>
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Reason (required)</label>
+            <textarea className="inp" rows={3} value={reason} onChange={e => setReason(e.target.value)} placeholder="Why isn't this ticket viable as-is?" style={{ height: 'auto', padding: '8px 12px' }} />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Alternative offer (optional)</label>
+            <textarea className="inp" rows={3} value={alternative} onChange={e => setAlternative(e.target.value)} placeholder="e.g. a different size/condition/price the Sales Manager could offer instead" style={{ height: 'auto', padding: '8px 12px' }} />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
+          <button className="btn btn-danger" disabled={!reason.trim() || submitting} onClick={async () => { setSubmitting(true); await onReject(reason.trim(), alternative.trim()) }}>
+            {submitting ? 'Rejecting…' : 'Reject Ticket'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const InquiryValidation = () => {
+  const [revision, setRevision] = useState(0)
+  const tickets = useValidationQueue(revision)
+  const [rejectingId, setRejectingId] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  const approve = async (id: string) => {
+    setError('')
+    try {
+      await api.post(`/leads/inquiries/${id}/validate`, { approved: true })
+      setRevision(v => v + 1)
+    } catch (err: any) {
+      setError(err.response?.data?.error?.message ?? 'Could not approve this ticket.')
+    }
+  }
+
+  const reject = async (id: string, reason: string, alternative: string) => {
+    setError('')
+    try {
+      await api.post(`/leads/inquiries/${id}/validate`, { approved: false, rejectionReason: reason, alternativeOffer: alternative || undefined })
+      setRejectingId(null)
+      setRevision(v => v + 1)
+    } catch (err: any) {
+      setError(err.response?.data?.error?.message ?? 'Could not reject this ticket.')
+    }
+  }
+
+  const rejectingTicket = tickets.find((t: any) => t.id === rejectingId)
+
+  return (
+    <div className="page-scroll">
+      <div className="page-content">
+        <div className="page-header" style={{ padding: 0, border: 'none', marginBottom: 16 }}>
+          <div>
+            <div className="page-title">Inquiry Validation</div>
+            <div className="page-desc">Every inquiry a Sales Manager creates lands here as a ticket before it can be quoted. Approve it, or reject it with a required reason and an optional alternative offer.</div>
+          </div>
+          <span className="count-label">{tickets.length} awaiting review</span>
+        </div>
+        {error && <div style={{ padding: '9px 11px', borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12, marginBottom: 12 }}>{error}</div>}
+        {tickets.length === 0 ? (
+          <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--t4)', fontSize: 13 }}>
+            No tickets waiting for validation.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {tickets.map((t: any) => (
+              <div key={t.id} className="card" style={{ padding: 18 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="ref-id" style={{ color: 'var(--teal)' }}>{t.ref}</span>
+                      <span style={{ fontSize: 12, color: 'var(--t4)' }}>{t.date}</span>
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--t1)', marginTop: 4 }}>{t.company}</div>
+                    <div style={{ fontSize: 12.5, color: 'var(--t3)' }}>{t.contact} · <ChipPIC label={t.pic} /></div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn btn-ghost" style={{ color: 'var(--red)' }} onClick={() => setRejectingId(t.id)}>Reject</button>
+                    <button className="btn btn-primary" onClick={() => approve(t.id)}>Approve</button>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, padding: '12px 0', borderTop: '1px solid var(--border-s)' }}>
+                  <div><div style={{ fontSize: 11, color: 'var(--t4)', marginBottom: 2 }}>Size</div><div style={{ fontSize: 13, fontWeight: 600 }}>{t.size}</div></div>
+                  <div><div style={{ fontSize: 11, color: 'var(--t4)', marginBottom: 2 }}>Condition</div><div style={{ fontSize: 13, fontWeight: 600 }}>{t.condition}</div></div>
+                  <div><div style={{ fontSize: 11, color: 'var(--t4)', marginBottom: 2 }}>Quantity</div><div style={{ fontSize: 13, fontWeight: 600 }}>{t.quantity}</div></div>
+                  <div><div style={{ fontSize: 11, color: 'var(--t4)', marginBottom: 2 }}>Asking price</div><div style={{ fontSize: 13, fontWeight: 600 }}>{t.price != null ? `$${t.price.toLocaleString()}` : '—'}</div></div>
+                  <div><div style={{ fontSize: 11, color: 'var(--t4)', marginBottom: 2 }}>Location</div><div style={{ fontSize: 13, fontWeight: 600 }}>{t.location}</div></div>
+                </div>
+                <div style={{ fontSize: 12.5, color: 'var(--t3)', paddingTop: 8, borderTop: '1px solid var(--border-s)' }}>{t.description}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {rejectingTicket && (
+        <RejectTicketModal
+          ticketRef={rejectingTicket.ref}
+          onClose={() => setRejectingId(null)}
+          onReject={(reason, alternative) => reject(rejectingTicket.id, reason, alternative)}
+        />
+      )}
     </div>
   )
 }
@@ -3513,6 +3718,7 @@ export default function App() {
       case 'system-settings':     return <SystemSettings onNav={handleNav} />
       case 'profile-settings':    return <UserProfileSettings session={session} />
       case 'user-management':     return currentProfile?.role === 'admin' ? <UserManagement /> : <Dashboard onNav={handleNav} session={session} />
+      case 'inquiry-validation':  return ['admin', 'procurement'].includes(currentProfile?.role ?? '') ? <InquiryValidation /> : <Dashboard onNav={handleNav} session={session} />
       case 'pickups':             return <Pickups />
       case 'best-clients':        return <BestClients />
       case 'inquiry-funnel':      return <InquiryFunnel />

@@ -10,6 +10,7 @@ import {
   RemovePipelineEntrySchema,
   AssignPicToEntrySchema,
   BulkRemovedEntriesSchema,
+  ValidateInquiryTicketSchema,
 } from '../schemas/lead.schema';
 import { supabaseAdmin } from '../config/supabase';
 
@@ -277,6 +278,35 @@ export class LeadController {
       const actorPicId = requirePicId(req, res);
       if (!actorPicId) return;
       const updated = await LeadService.assignPic(payload.stage, payload.entityId, payload.picId, actorPicId);
+      res.json({ success: true, data: updated });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  // Procurement's ticket queue is intentionally NOT silo-filtered by pic_id -- validating
+  // every Sales Manager's inquiry tickets is the whole point of the role, and this exposes
+  // only the inquiry spec (size/condition/quantity/price/location), not revenue or other
+  // Sales Manager-private data.
+  static async getPendingValidationTickets(req: Request, res: Response) {
+    try {
+      const data = await LeadService.getPendingValidationTickets();
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async validateTicket(req: Request, res: Response) {
+    try {
+      const payload = ValidateInquiryTicketSchema.parse(req.body);
+      const updated = await LeadService.validateInquiryTicket(
+        req.params.entityId as string,
+        req.auth!.user.id,
+        payload.approved,
+        payload.rejectionReason,
+        payload.alternativeOffer,
+      );
       res.json({ success: true, data: updated });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });

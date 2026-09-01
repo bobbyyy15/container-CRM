@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const UpdateUserSchema = z.object({
-  role: z.enum(['admin', 'sales_manager', 'procurement']).optional(),
+  role: z.enum(['admin', 'sales_manager', 'procurement', 'operations']).optional(),
   status: z.enum(['active', 'inactive']).optional(),
 }).refine(data => data.role !== undefined || data.status !== undefined, {
   message: 'At least one of role or status is required',

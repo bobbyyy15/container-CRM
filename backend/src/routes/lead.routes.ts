@@ -8,8 +8,12 @@ const router = Router();
 router.get('/prospects', LeadController.getProspects);
 router.get('/warm-leads', LeadController.getWarmLeads);
 router.get('/inquiries', LeadController.getInquiries);
+router.get('/inquiries/pending-validation', requireRoles('admin', 'procurement'), LeadController.getPendingValidationTickets);
 router.get('/removed', LeadController.getRemoved);
 router.post('/removed/bulk', requireRoles('admin', 'sales_manager'), LeadController.bulkRemove);
+
+// Inquiry ticket validation (Procurement approves/rejects before it's quotable)
+router.post('/inquiries/:entityId/validate', requireRoles('admin', 'procurement'), LeadController.validateTicket);
 
 // Prospect -> Warm Lead
 router.post('/prospects/:prospectId/convert-to-warm-lead', requireRoles('admin', 'sales_manager'), LeadController.convertProspect);
