@@ -91,14 +91,17 @@ const run = async () => {
   if (roleError) throw roleError;
 
   // Data-silos identity chain (see docs/ACCOUNT_MODULE.md): a profile owns nothing in the
-  // pipeline until an admin assigns it a PIC identity. Without this, every list/create call
-  // below would see or create nothing.
+  // pipeline until it has a PIC identity. handle_new_user() (025_auto_pic_creation.sql)
+  // creates one automatically on signup -- inserting a second one here would violate the
+  // one-active-PIC-per-profile constraint (028_unique_active_pic_per_profile.sql), so just
+  // read back the auto-created row (needed below for cleanup).
   const { data: pic, error: picError } = await supabaseAdmin
     .from('pics')
-    .insert({ profile_id: ids.user, name: 'CRM E2E Tester' })
     .select('id')
+    .eq('profile_id', ids.user)
+    .eq('status', 'active')
     .single();
-  if (picError || !pic) throw picError ?? new Error('Temporary PIC identity was not created');
+  if (picError || !pic) throw picError ?? new Error('Signup did not auto-create a PIC identity');
   ids.pic = pic.id;
 
   const { data: signedIn, error: signInError } = await publicClient.auth.signInWithPassword({ email, password });
