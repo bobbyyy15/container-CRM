@@ -673,9 +673,10 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Source sale</label>
             <select className="inp" value={saleId} onChange={e => setSaleId(e.target.value)} disabled={submitting}>
               <option value="">-- Select a sale --</option>
+
               {sales.map(s => (
                 <option key={s.id} value={s.id}>
-                  {s.companies?.name || 'Unknown Company'} (Total: ${(s.revenue || 0).toLocaleString()})
+                  {s.company || 'Unknown Company'} (Total: ${(s.totalSell || 0).toLocaleString()})
                 </option>
               ))}
             </select>
@@ -686,6 +687,7 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
             <input
               type="date"
               className="inp"
+
               value={pickupDate}
               onChange={e => setPickupDate(e.target.value)}
               disabled={submitting}
@@ -696,6 +698,7 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
           <button className="btn btn-primary" disabled={submitting || !saleId}>
             {submitting ? 'Generating…' : 'Generate Contract'}
+
           </button>
         </div>
       </form>

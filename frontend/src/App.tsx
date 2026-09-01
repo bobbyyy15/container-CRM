@@ -194,7 +194,7 @@ const useAnalytics = () => {
 
 
 
-const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses', search = '') => {
+const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses', search = '', revision = 0) => {
   const [data, setData] = useState<any[]>([]);
   useEffect(() => {
     api.get('/contracts', { params: { status, pickStatus, search } }).then(res => {
@@ -214,11 +214,11 @@ const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses
         sale: c.sale_number
       })));
     }).catch(console.error);
-  }, [status, pickStatus, search]);
+  }, [status, pickStatus, search, revision]);
   return data;
 }
 
-const useCustomers = (status = 'All', search = '') => {
+const useCustomers = (status = 'All', search = '', revision = 0) => {
   const [data, setData] = useState<any[]>([]);
   useEffect(() => {
     api.get('/customers', { params: { status, search } }).then(res => {
@@ -238,7 +238,7 @@ const useCustomers = (status = 'All', search = '') => {
         status: c.status
       })));
     }).catch(console.error);
-  }, [status, search]);
+  }, [status, search, revision]);
   return data;
 }
 
@@ -450,13 +450,8 @@ type PicPerformanceRow = {
 type OverduePickupRow = { contract: string; co: string; days: number; qty: number; size: string }
 type LossReasonRow = { reason: string; color: string; count: number }
 
-const profitChartData: ProfitChartPoint[] = []
-const categoryData: ChartSlice[] = []
-const inquiryStatusData: ChartSlice[] = []
-const PIC_DATA: PicPerformanceRow[] = []
 
-const OVERDUE_PICKUPS: OverduePickupRow[] = []
-const LOSS_REASONS: LossReasonRow[] = []
+
 
 // ─── Utility components ───────────────────────────────────────────────────────
 
@@ -778,12 +773,26 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: any }) => {
+  const analytics = useAnalytics();
+  const m = analytics?.metrics || {};
+  const funnel = analytics?.funnel || {};
+  const c = analytics?.charts || {};
+  
+  const profitChartData: ProfitChartPoint[] = c.profitChartData || [];
+  const categoryData: ChartSlice[] = c.categoryData || [];
+  const inquiryStatusData: ChartSlice[] = c.inquiryStatusData || [];
+  const PIC_DATA: PicPerformanceRow[] = c.PIC_DATA || [];
+  const LOSS_REASONS: LossReasonRow[] = c.LOSS_REASONS || [];
+
   const topCustomers = useCustomers('All', '').slice(0, 5);
+  const overdueContracts = useContracts('All Statuses', 'Overdue', '');
+  const OVERDUE_PICKUPS = overdueContracts.map(c => {
+    const targetDate = c.pickup === 'Unscheduled' ? new Date() : new Date(c.pickup);
+    const diff = Math.floor((new Date().getTime() - targetDate.getTime()) / (1000 * 3600 * 24));
+    return { contract: c.ref, co: c.co, days: diff > 0 ? diff : 1, qty: c.qty, size: c.size };
+  });
   const [chartMetric, setChartMetric] = useState<'profit' | 'revenue' | 'cost'>('profit')
   const chartColor = chartMetric === 'profit' ? '#315EF6' : chartMetric === 'revenue' ? '#059669' : '#6B7280'
-  const analytics = useAnalytics()
-  const m = analytics?.metrics || {}
-  const funnel = analytics?.funnel || {}
   const conversion = (value: number, previous: number) => previous > 0 ? `${Math.round((value / previous) * 100)}%` : '0%'
 
   const hour = new Date().getHours()
@@ -1296,7 +1305,10 @@ const OutreachDashboard = () => {
 
 // ─── Inquiry Dashboard ────────────────────────────────────────────────────────
 
-const InquiryDashboard = () => (
+const InquiryDashboard = () => {
+  const analytics = useAnalytics();
+  const LOSS_REASONS: LossReasonRow[] = analytics?.charts?.LOSS_REASONS || [];
+  return (
   <div className="page-scroll">
     <div className="greeting-bar">
       <p className="greeting-title">Inquiry Dashboard</p>
@@ -1356,7 +1368,8 @@ const InquiryDashboard = () => (
       </div>
     </div>
   </div>
-)
+  );
+}
 
 // ─── Prospect / Warm Lead Sheet ───────────────────────────────────────────────
 
@@ -2096,7 +2109,9 @@ const SalesTracker = () => {
 const CustomerAccounts = () => {
   const [tab, setTab] = useState('All');
   const [search, setSearch] = useState('');
-  const customers = useCustomers(tab, search);
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const customers = useCustomers(tab, search, revision);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -2105,7 +2120,8 @@ const CustomerAccounts = () => {
           <div className="page-title">Customer Accounts</div>
           <div className="page-desc">Companies with confirmed purchase history.</div>
         </div>
-        <Btn variant="primary" sm><Ic n={I.plus} size={13} /> Add Customer</Btn>
+        <Btn variant="primary" sm onClick={() => setShowNewCustomer(true)}><Ic n={I.plus} size={13} /> Add Customer</Btn>
+        {showNewCustomer && <NewManualSaleDialog onClose={() => setShowNewCustomer(false)} onSaved={() => { setShowNewCustomer(false); setRevision(r => r + 1); window.location.reload(); }} />}
       </div>
       <div className="tabs">
         {['All', 'Active', 'Floating'].map(t => <div key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</div>)}
@@ -2263,21 +2279,23 @@ const Contracts = () => {
   const contracts = useContracts(status, pickStatus, search);
   // Re-fetch sales when clicking New Contract
   const sales = useSales(revision);
+  const overdueContracts = contracts.filter(c => c.pickStatus === 'Overdue');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {contracts.some(c => c.pickStatus === 'Overdue') && (
+      {overdueContracts.length > 0 && (
         <div style={{ padding: '10px 20px', background: 'var(--red-bg)', borderBottom: '1px solid #FECACA', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
           <Ic n={I.warning} size={15} style={{ color: 'var(--red)', flexShrink: 0 }} />
           <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--red-text)' }}>
-            1 pickup is overdue — Bakken Industrial LLC · CT-2024-0037 · 11 days overdue
+            {overdueContracts.length === 1
+              ? `1 pickup is overdue — ${overdueContracts[0].co} · ${overdueContracts[0].ref}`
+              : `${overdueContracts.length} pickups are overdue`}
           </span>
-          <Btn variant="ghost" sm style={{ marginLeft: 'auto', color: 'var(--red)' }}>Reschedule</Btn>
         </div>
       )}
       <div className="toolbar">
         <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search contracts…" value={search} onChange={e => setSearch(e.target.value)} /></div>
-        <select className="sel"><option>All Statuses</option></select>
+        <select className="sel" value={status} onChange={e => setStatus(e.target.value)}><option>All Statuses</option><option>Pending Signature</option><option>Active</option><option>Completed</option></select>
         <select className="sel" value={pickStatus} onChange={e => setPickStatus(e.target.value)}><option>All Pickup Statuses</option><option>Pending</option><option>Scheduled</option><option>Confirmed</option><option>Picked Up</option><option>Overdue</option></select>
         <div className="toolbar-right">
           <Btn variant="primary" sm onClick={() => setShowNew(true)}><Ic n={I.plus} size={13} /> New Contract</Btn>
@@ -2634,7 +2652,10 @@ const ContainerCatalog = () => (
 
 // ─── PIC Performance ─────────────────────────────────────────────────────────
 
-const PICPerformance = () => (
+const PICPerformance = () => {
+  const analytics = useAnalytics();
+  const PIC_DATA: PicPerformanceRow[] = analytics?.charts?.PIC_DATA || [];
+  return (
   <div className="page-scroll">
     <div className="greeting-bar" style={{ marginBottom: 16 }}>
       <p className="greeting-title">PIC Performance</p>
@@ -2695,11 +2716,15 @@ const PICPerformance = () => (
       </div>
     </div>
   </div>
-)
+  );
+}
 
 // ─── Profit Analytics ─────────────────────────────────────────────────────────
 
-const ProfitAnalytics = () => (
+const ProfitAnalytics = () => {
+  const analytics = useAnalytics();
+  const profitChartData: ProfitChartPoint[] = analytics?.charts?.profitChartData || [];
+  return (
   <div className="page-scroll">
     <div className="greeting-bar" style={{ marginBottom: 0 }}>
       <p className="greeting-title">Profit Analytics</p>
@@ -2739,7 +2764,8 @@ const ProfitAnalytics = () => (
       </div>
     </div>
   </div>
-)
+  );
+}
 
 // ─── Admin pages ──────────────────────────────────────────────────────────────
 
@@ -2816,6 +2842,8 @@ type GoogleConnectionStatus = {
 }
 
 const SystemSettings = () => {
+  const analytics = useAnalytics()
+  const PIC_DATA: PicPerformanceRow[] = analytics?.charts?.PIC_DATA || []
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null)
   const [googleBusy, setGoogleBusy] = useState(false)
   const [googleError, setGoogleError] = useState('')
@@ -3053,7 +3081,7 @@ export default function App() {
       case 'system-settings':     return <SystemSettings />
       case 'profile-settings':    return <UserProfileSettings session={session} />
       case 'user-management':     return currentProfile?.role === 'admin' ? <UserManagement /> : <Dashboard onNav={handleNav} session={session} />
-      case 'pickups':             return <Placeholder label="Pickup Tracking" />
+      case 'pickups':             return <Pickups />
       case 'best-clients':        return <Placeholder label="Best Clients" />
       case 'inquiry-funnel':      return <Placeholder label="Inquiry Funnel" />
       default:                    return <Dashboard onNav={handleNav} session={session} />
@@ -3098,3 +3126,94 @@ export default function App() {
     </div>
   )
 }
+
+// ─── Pickup Tracking ──────────────────────────────────────────────────────────
+
+const Pickups = () => {
+  const [pickStatus, setPickStatus] = useState('All Pickup Statuses');
+  const [search, setSearch] = useState('');
+  const [revision, setRevision] = useState(0);
+  const contracts = useContracts('All Statuses', pickStatus, search, revision);
+
+  const handleUpdateStatus = async (id: string, newStatus: string) => {
+    try {
+      await api.patch(`/contracts/${id}`, { pickup_status: newStatus });
+      setRevision(r => r + 1);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to update status');
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="page-header">
+        <div>
+          <div className="page-title">Pickup Tracking</div>
+          <div className="page-desc">Manage container dispatch and warehouse fulfillment.</div>
+        </div>
+      </div>
+      
+      <div className="toolbar">
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search pickups…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+        <select className="sel" value={pickStatus} onChange={e => setPickStatus(e.target.value)}>
+          <option>All Pickup Statuses</option>
+          <option>Pending</option>
+          <option>Scheduled</option>
+          <option>Confirmed</option>
+          <option>Picked Up</option>
+          <option>Overdue</option>
+        </select>
+        <div className="toolbar-right">
+          <span className="count-label">{contracts.length} pickups</span>
+        </div>
+      </div>
+
+      <div className="table-wrap">
+        <table className="crm">
+          <thead><tr>
+            <th>Contract #</th><th>Company</th><th>Container</th><th className="r">Qty</th>
+            <th>Target Date</th><th>Status</th><th>PIC</th><th className="col-actions">Actions</th>
+          </tr></thead>
+          <tbody>
+            {contracts.map(c => (
+              <tr key={c.id} style={{ background: c.pickStatus === 'Overdue' ? 'var(--red-bg)' : undefined }}>
+                <td><span className="ref-id" style={{ color: 'var(--teal)' }}>{c.ref}</span></td>
+                <td>
+                  <div style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--t1)' }}>{c.co}</div>
+                  <div style={{ fontSize: 11, color: 'var(--t4)' }}>{c.contact}</div>
+                </td>
+                <td>
+                  <div style={{ fontWeight: 500, fontSize: 12 }}>{c.size}</div>
+                  <div style={{ fontSize: 11, color: 'var(--t3)' }}>{c.category}</div>
+                </td>
+                <td className="r" style={{ fontWeight: 600 }}>{c.qty}</td>
+                <td className="mono" style={{ fontSize: 12, color: c.pickStatus === 'Overdue' ? 'var(--red)' : undefined }}>{c.pickup}</td>
+                <td>
+                  <span className={`badge ${c.pickStatus === 'Picked Up' ? 'b-green' : c.pickStatus === 'Overdue' ? 'b-red' : c.pickStatus === 'Confirmed' ? 'b-brand' : 'b-amber'}`}>
+                    {c.pickStatus}
+                  </span>
+                </td>
+                <td style={{ fontSize: 12, color: 'var(--t2)' }}>{c.pic}</td>
+                <td className="col-actions">
+                  <select 
+                    className="sel" 
+                    value={c.pickStatus} 
+                    onChange={e => handleUpdateStatus(c.id, e.target.value)}
+                    style={{ padding: '4px 8px', fontSize: 11, minWidth: 110 }}
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="Scheduled">Scheduled</option>
+                    <option value="Confirmed">Confirmed</option>
+                    <option value="Picked Up">Picked Up</option>
+                    <option value="Overdue">Overdue</option>
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};

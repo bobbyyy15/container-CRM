@@ -68,4 +68,34 @@ export class ContractController {
       res.status(400).json({ success: false, error: { message: error.message } });
     }
   }
+
+  static async updateContract(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { pickup_status, pickup_date, status } = req.body;
+
+      // Verify the contract exists and belongs to the user
+      let contractQuery = supabaseAdmin.from('contracts').select('id, sale_id, sales(pic_id)').eq('id', id).single();
+      const { data: contract, error: contractErr } = await contractQuery;
+      
+      if (contractErr || !contract) throw new Error('Contract not found');
+
+      const saleData = Array.isArray(contract.sales) ? contract.sales[0] : contract.sales;
+      if (!req.auth?.profile.pic_id || (saleData as any)?.pic_id !== req.auth.profile.pic_id) {
+        throw new Error('Unauthorized to update this contract');
+      }
+
+      const updates: any = {};
+      if (pickup_status) updates.pickup_status = pickup_status;
+      if (pickup_date !== undefined) updates.pickup_date = pickup_date || null;
+      if (status) updates.status = status;
+
+      const { data, error } = await supabaseAdmin.from('contracts').update(updates).eq('id', id).select('*').single();
+
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
 }

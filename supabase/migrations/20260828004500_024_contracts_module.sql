@@ -45,6 +45,7 @@ UPDATE public.sales SET sale_number = 'SL-' || to_char(NOW(), 'YYYY') || '-' || 
 -- Create RLS for contracts
 ALTER TABLE public.contracts ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Contracts viewable by everyone in their silo" ON public.contracts;
 CREATE POLICY "Contracts viewable by everyone in their silo" ON public.contracts
 FOR SELECT USING (
     EXISTS (
@@ -54,6 +55,7 @@ FOR SELECT USING (
     )
 );
 
+DROP POLICY IF EXISTS "Contracts insertable by everyone in their silo" ON public.contracts;
 CREATE POLICY "Contracts insertable by everyone in their silo" ON public.contracts
 FOR INSERT WITH CHECK (
     EXISTS (
@@ -63,6 +65,7 @@ FOR INSERT WITH CHECK (
     )
 );
 
+DROP POLICY IF EXISTS "Contracts updatable by everyone in their silo" ON public.contracts;
 CREATE POLICY "Contracts updatable by everyone in their silo" ON public.contracts
 FOR UPDATE USING (
     EXISTS (
