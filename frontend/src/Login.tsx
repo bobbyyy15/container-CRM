@@ -64,7 +64,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           options: {
             data: {
               username,
-              full_name: fullName
+              full_name: fullName.trim() || undefined
             }
           }
         });

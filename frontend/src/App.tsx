@@ -1305,7 +1305,10 @@ const OutreachDashboard = () => {
 
 // ─── Inquiry Dashboard ────────────────────────────────────────────────────────
 
-const InquiryDashboard = () => (
+const InquiryDashboard = () => {
+  const analytics = useAnalytics();
+  const LOSS_REASONS: LossReasonRow[] = analytics?.charts?.LOSS_REASONS || [];
+  return (
   <div className="page-scroll">
     <div className="greeting-bar">
       <p className="greeting-title">Inquiry Dashboard</p>
@@ -1365,7 +1368,8 @@ const InquiryDashboard = () => (
       </div>
     </div>
   </div>
-)
+  );
+}
 
 // ─── Prospect / Warm Lead Sheet ───────────────────────────────────────────────
 
@@ -2275,21 +2279,23 @@ const Contracts = () => {
   const contracts = useContracts(status, pickStatus, search);
   // Re-fetch sales when clicking New Contract
   const sales = useSales(revision);
+  const overdueContracts = contracts.filter(c => c.pickStatus === 'Overdue');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {contracts.some(c => c.pickStatus === 'Overdue') && (
+      {overdueContracts.length > 0 && (
         <div style={{ padding: '10px 20px', background: 'var(--red-bg)', borderBottom: '1px solid #FECACA', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
           <Ic n={I.warning} size={15} style={{ color: 'var(--red)', flexShrink: 0 }} />
           <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--red-text)' }}>
-            1 pickup is overdue — Bakken Industrial LLC · CT-2024-0037 · 11 days overdue
+            {overdueContracts.length === 1
+              ? `1 pickup is overdue — ${overdueContracts[0].co} · ${overdueContracts[0].ref}`
+              : `${overdueContracts.length} pickups are overdue`}
           </span>
-          <Btn variant="ghost" sm style={{ marginLeft: 'auto', color: 'var(--red)' }}>Reschedule</Btn>
         </div>
       )}
       <div className="toolbar">
         <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search contracts…" value={search} onChange={e => setSearch(e.target.value)} /></div>
-        <select className="sel"><option>All Statuses</option></select>
+        <select className="sel" value={status} onChange={e => setStatus(e.target.value)}><option>All Statuses</option><option>Pending Signature</option><option>Active</option><option>Completed</option></select>
         <select className="sel" value={pickStatus} onChange={e => setPickStatus(e.target.value)}><option>All Pickup Statuses</option><option>Pending</option><option>Scheduled</option><option>Confirmed</option><option>Picked Up</option><option>Overdue</option></select>
         <div className="toolbar-right">
           <Btn variant="primary" sm onClick={() => setShowNew(true)}><Ic n={I.plus} size={13} /> New Contract</Btn>
@@ -2836,6 +2842,8 @@ type GoogleConnectionStatus = {
 }
 
 const SystemSettings = () => {
+  const analytics = useAnalytics()
+  const PIC_DATA: PicPerformanceRow[] = analytics?.charts?.PIC_DATA || []
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null)
   const [googleBusy, setGoogleBusy] = useState(false)
   const [googleError, setGoogleError] = useState('')

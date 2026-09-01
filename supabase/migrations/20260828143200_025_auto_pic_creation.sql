@@ -42,12 +42,15 @@ BEGIN
       RETURNING id INTO _profile_id;
   END;
 
-  -- Automatically create a PIC identity for the user so they can own pipeline data immediately
+  -- Automatically create a PIC identity for the user so they can own pipeline data immediately.
+  -- COALESCE only skips NULLs, not empty strings -- the "Full Name (Optional)" signup field
+  -- submits '' rather than NULL when left blank, so this must be NULLIF'd first or it locks
+  -- in a blank PIC name instead of falling back to the username.
   IF _profile_id IS NOT NULL THEN
       INSERT INTO public.pics (profile_id, name, status)
       VALUES (
-          _profile_id, 
-          COALESCE(_full_name, _username, split_part(NEW.email, '@', 1)), 
+          _profile_id,
+          COALESCE(NULLIF(btrim(_full_name), ''), NULLIF(btrim(_username), ''), split_part(NEW.email, '@', 1)),
           'active'
       )
       ON CONFLICT DO NOTHING;
@@ -63,12 +66,19 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Create PICs for existing profiles that don't have one
 INSERT INTO public.pics (profile_id, name, status)
-SELECT 
-    id, 
-    COALESCE(full_name, username, split_part(email, '@', 1)), 
+SELECT
+    id,
+    COALESCE(NULLIF(btrim(full_name), ''), NULLIF(btrim(username), ''), split_part(email, '@', 1)),
     'active'
 FROM public.profiles p
 WHERE NOT EXISTS (SELECT 1 FROM public.pics WHERE profile_id = p.id);
+
+-- The same empty-string bug (pre-fix, above) already ran once against this database and left
+-- blank-named PIC rows behind for any profile with full_name = '' -- repair those in place.
+UPDATE public.pics pc
+SET name = COALESCE(NULLIF(btrim(pr.full_name), ''), NULLIF(btrim(pr.username), ''), split_part(pr.email, '@', 1))
+FROM public.profiles pr
+WHERE pc.profile_id = pr.id AND btrim(COALESCE(pc.name, '')) = '';
 
 NOTIFY pgrst, 'reload schema';
 
