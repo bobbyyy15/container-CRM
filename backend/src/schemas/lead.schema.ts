@@ -110,7 +110,11 @@ export const BulkRemovedEntriesSchema = z.object({
 export const ValidateInquiryTicketSchema = z.object({
   approved: z.boolean(),
   rejectionReason: z.string().trim().min(3).max(1000).optional(),
-  alternativeOffer: z.string().trim().max(1000).optional(),
+  altContainerSizeId: z.string().uuid().optional(),
+  altContainerConditionId: z.string().uuid().optional(),
+  altQuantity: z.coerce.number().int().min(1).optional(),
+  altAskingPrice: z.coerce.number().min(0).optional(),
+  altNotes: z.string().trim().max(1000).optional(),
 }).refine(data => data.approved || !!data.rejectionReason, {
   message: 'A reason is required to reject an inquiry ticket',
   path: ['rejectionReason'],

@@ -34,6 +34,8 @@ const request = async (token: string, path: string, init: RequestInit = {}) => {
 
 const cleanup = async () => {
   await supabaseAdmin.from('notifications').delete().in('profile_id', [ids.salesUser, ids.procUser].filter(Boolean) as string[]);
+  await supabaseAdmin.from('quotation_items').delete().in('quotation_id', [ids.quotationA, ids.quotationB].filter(Boolean) as string[]);
+  await supabaseAdmin.from('quotations').delete().in('id', [ids.quotationA, ids.quotationB].filter(Boolean) as string[]);
   await supabaseAdmin.from('inquiries').delete().in('id', [ids.inquiryA, ids.inquiryB].filter(Boolean) as string[]);
   await supabaseAdmin.from('prospect_clients').delete().in('id', [ids.prospectA, ids.prospectB].filter(Boolean) as string[]);
   for (const [companyId, contactId] of [[ids.companyA, ids.contactA], [ids.companyB, ids.contactB]] as const) {
@@ -129,6 +131,7 @@ const run = async () => {
     body: JSON.stringify({ inquiry_id: ids.inquiryA, items: [{ description: '20ft ticket-A container', quantity: 2, unit_price: 4000 }] }),
   });
   if (!quoteAllowed.data.id) throw new Error('Approved ticket could not be quoted');
+  ids.quotationA = quoteAllowed.data.id;
 
   // --- Ticket B: will be rejected with a reason + alternative offer ---
   const ticketB = await request(salesToken, '/leads/inquiries', {
@@ -151,16 +154,26 @@ const run = async () => {
   });
   if (rejectNoReason.ok) throw new Error('Rejecting a ticket with no reason was not rejected');
 
+  const altSize = sizes.data[1] ?? sizes.data[0];
+  const altCondition = conditions.data.find((c: any) => c.name === 'WWT') ?? conditions.data[1] ?? conditions.data[0];
+
   const reject = await request(procToken, `/leads/inquiries/${ids.inquiryB}/validate`, {
     method: 'POST',
     body: JSON.stringify({
       approved: false,
       rejectionReason: 'Asking price is below our minimum margin threshold',
-      alternativeOffer: 'Offer a 20ft Wind & Watertight unit at $2,200 instead',
+      altContainerSizeId: altSize.id,
+      altContainerConditionId: altCondition.id,
+      altAskingPrice: 2200,
+      altNotes: 'Wind & Watertight units at this size clear our margin floor',
     }),
   });
-  if (reject.data.status !== 'Validation Rejected' || !reject.data.rejection_reason || !reject.data.alternative_offer) {
-    throw new Error(`Rejection did not persist reason/alternative: ${JSON.stringify(reject.data)}`);
+  if (
+    reject.data.status !== 'Validation Rejected' || !reject.data.rejection_reason ||
+    reject.data.alt_container_size_id !== altSize.id || reject.data.alt_container_condition_id !== altCondition.id ||
+    Number(reject.data.alt_asking_price) !== 2200
+  ) {
+    throw new Error(`Rejection did not persist reason/structured alternative: ${JSON.stringify(reject.data)}`);
   }
 
   const quoteAfterRejectBlocked = await fetch(`${apiBase}/deals/quotations`, {
@@ -172,11 +185,33 @@ const run = async () => {
 
   const salesNotifs2 = await request(salesToken, '/notifications');
   const rejectedNotif = salesNotifs2.data.find((n: any) => n.entity_id === ids.inquiryB && n.type === 'inquiry_rejected');
-  if (!rejectedNotif || !rejectedNotif.message.includes('below our minimum margin') || !rejectedNotif.message.includes('Wind & Watertight')) {
-    throw new Error(`Rejection notification missing reason/alternative: ${JSON.stringify(rejectedNotif)}`);
+  if (!rejectedNotif || !rejectedNotif.message.includes('below our minimum margin') || !rejectedNotif.message.includes(altCondition.name)) {
+    throw new Error(`Rejection notification missing reason/alternative summary: ${JSON.stringify(rejectedNotif)}`);
   }
 
-  console.log('PASS hosted inquiry ticketing: create -> Procurement queue (cross-silo, role-gated) -> notify on create -> approve -> notify + quotable -> re-validate rejected -> reject requires reason -> reject with alternative -> notify -> blocked from quoting');
+  // A stranger sales_manager must not be able to apply an alternative on someone else's ticket.
+  const strangerApplyForbidden = await fetch(`${apiBase}/leads/inquiries/${ids.inquiryB}/apply-alternative`, {
+    method: 'POST', headers: { Authorization: `Bearer ${procToken}` },
+  });
+  if (strangerApplyForbidden.ok) throw new Error('Procurement (wrong role, and not the ticket owner) was able to apply the alternative');
+
+  const applied = await request(salesToken, `/leads/inquiries/${ids.inquiryB}/apply-alternative`, { method: 'POST' });
+  if (
+    applied.data.status !== 'Under Review' || applied.data.container_size_id !== altSize.id ||
+    applied.data.container_condition_id !== altCondition.id || Number(applied.data.asking_price) !== 2200 ||
+    applied.data.alt_container_size_id !== null
+  ) {
+    throw new Error(`Applying the alternative did not update the ticket in place: ${JSON.stringify(applied.data)}`);
+  }
+
+  const quoteAfterApply = await request(salesToken, '/deals/quotations', {
+    method: 'POST',
+    body: JSON.stringify({ inquiry_id: ids.inquiryB, items: [{ description: 'WWT alternative container', quantity: 1, unit_price: 2200 }] }),
+  });
+  if (!quoteAfterApply.data.id) throw new Error('Ticket with an applied alternative could not be quoted');
+  ids.quotationB = quoteAfterApply.data.id;
+
+  console.log('PASS hosted inquiry ticketing: create -> Procurement queue (cross-silo, role-gated) -> notify on create -> approve -> notify + quotable -> re-validate rejected -> reject requires reason -> structured alternative -> notify -> blocked from quoting -> apply alternative (ownership-checked) -> quotable');
 };
 
 void (async () => {

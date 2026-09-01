@@ -110,7 +110,12 @@ const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') => {
           status: row.status || 'Under Review',
           pic: row.pics?.name || 'Unassigned',
           rejectionReason: row.rejection_reason || '',
-          alternativeOffer: row.alternative_offer || '',
+          altSize: row.alt_size?.name || '',
+          altCondition: row.alt_condition?.name || '',
+          altQuantity: row.alt_quantity ?? null,
+          altAskingPrice: row.alt_asking_price != null ? Number(row.alt_asking_price) : null,
+          altNotes: row.alt_notes || '',
+          hasAlternative: !!(row.alt_size || row.alt_condition || row.alt_quantity != null || row.alt_asking_price != null),
         }
       }))
     }).catch(console.error)
@@ -1849,6 +1854,17 @@ const InquiryList = () => {
   const [channel, setChannel] = useState('')
   const [picFilter, setPicFilter] = useState('')
   const pics = [...new Set(INQUIRIES.map(r => r.pic).filter(Boolean))].sort() as string[]
+  const [actionError, setActionError] = useState('')
+
+  const applyAlternative = async (id: string) => {
+    setActionError('')
+    try {
+      await api.post(`/leads/inquiries/${id}/apply-alternative`)
+      setRevision(v => v + 1)
+    } catch (err: any) {
+      setActionError(err.response?.data?.error?.message ?? 'Could not apply the alternative offer.')
+    }
+  }
 
   const filtered = INQUIRIES.filter(r => {
     const tabMatch = tab === 'All' || r.status === tab
@@ -1921,6 +1937,7 @@ const InquiryList = () => {
           <Btn variant="ghost" sm onClick={() => exportToCSV(filtered, 'inquiries')}><Ic n={I.export} size={13} /> Export</Btn>
         </div>
       </div>
+      {actionError && <div style={{ margin: '0 20px 10px', padding: 9, borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12 }}>{actionError}</div>}
 
       {/* Table */}
       <div className="table-wrap">
@@ -1999,6 +2016,9 @@ const InquiryList = () => {
                     {['Under Review', 'Quotation Rejected'].includes(row.status) && (
                       <Btn variant="ghost" sm style={{ color: 'var(--purple)' }} onClick={() => setQuotationInquiryId(row.id)}>→ Quote</Btn>
                     )}
+                    {row.status === 'Validation Rejected' && row.hasAlternative && (
+                      <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => applyAlternative(row.id)}>Use Alternative</Btn>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -2023,7 +2043,11 @@ const InquiryList = () => {
             { label: 'PIC', value: viewRow.pic },
             { label: 'Received', value: `${viewRow.date} ${viewRow.time}` },
             ...(viewRow.rejectionReason ? [{ label: 'Rejection reason', value: viewRow.rejectionReason }] : []),
-            ...(viewRow.alternativeOffer ? [{ label: 'Alternative offer suggested by Procurement', value: viewRow.alternativeOffer }] : []),
+            ...(viewRow.altSize ? [{ label: 'Alternative size', value: viewRow.altSize }] : []),
+            ...(viewRow.altCondition ? [{ label: 'Alternative condition', value: viewRow.altCondition }] : []),
+            ...(viewRow.altQuantity != null ? [{ label: 'Alternative quantity', value: viewRow.altQuantity }] : []),
+            ...(viewRow.altAskingPrice != null ? [{ label: 'Alternative asking price', value: `$${viewRow.altAskingPrice.toLocaleString()}` }] : []),
+            ...(viewRow.altNotes ? [{ label: 'Alternative offer notes', value: viewRow.altNotes }] : []),
           ]}
         />
       )}
@@ -3289,17 +3313,43 @@ const useValidationQueue = (revision = 0) => {
   return data
 }
 
+type AlternativeOffer = {
+  containerSizeId?: string
+  containerConditionId?: string
+  quantity?: number
+  askingPrice?: number
+  notes?: string
+}
+
 const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
   ticketRef: string
   onClose: () => void
-  onReject: (reason: string, alternative: string) => Promise<void>
+  onReject: (reason: string, alternative: AlternativeOffer) => Promise<void>
 }) => {
+  const sizes = useCatalogList('/catalog/sizes')
+  const conditions = useCatalogList('/catalog/conditions')
   const [reason, setReason] = useState('')
-  const [alternative, setAlternative] = useState('')
+  const [altSize, setAltSize] = useState('')
+  const [altCondition, setAltCondition] = useState('')
+  const [altQuantity, setAltQuantity] = useState('')
+  const [altPrice, setAltPrice] = useState('')
+  const [altNotes, setAltNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  const submit = async () => {
+    setSubmitting(true)
+    await onReject(reason.trim(), {
+      containerSizeId: altSize || undefined,
+      containerConditionId: altCondition || undefined,
+      quantity: altQuantity ? Number(altQuantity) : undefined,
+      askingPrice: altPrice ? Number(altPrice) : undefined,
+      notes: altNotes.trim() || undefined,
+    })
+  }
+
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 460 }} onClick={e => e.stopPropagation()}>
+      <div className="modal" style={{ width: 500 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">Reject {ticketRef}</div>
           <Btn variant="ghost" sm onClick={onClose}><Ic n={I.x} size={16} /></Btn>
@@ -3309,14 +3359,42 @@ const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Reason (required)</label>
             <textarea className="inp" rows={3} value={reason} onChange={e => setReason(e.target.value)} placeholder="Why isn't this ticket viable as-is?" style={{ height: 'auto', padding: '8px 12px' }} />
           </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Alternative offer (optional)</label>
-            <textarea className="inp" rows={3} value={alternative} onChange={e => setAlternative(e.target.value)} placeholder="e.g. a different size/condition/price the Sales Manager could offer instead" style={{ height: 'auto', padding: '8px 12px' }} />
+          <div style={{ borderTop: '1px solid var(--border-s)', paddingTop: 12 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--t1)', marginBottom: 8 }}>Alternative offer (optional)</div>
+            <div style={{ fontSize: 11.5, color: 'var(--t4)', marginBottom: 10 }}>Leave any field blank to keep the ticket's original value. The Sales Manager can apply this with one click.</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Size</label>
+                <select className="inp" value={altSize} onChange={e => setAltSize(e.target.value)}>
+                  <option value="">Unchanged</option>
+                  {sizes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Condition</label>
+                <select className="inp" value={altCondition} onChange={e => setAltCondition(e.target.value)}>
+                  <option value="">Unchanged</option>
+                  {conditions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Quantity</label>
+                <input className="inp" type="number" min={1} value={altQuantity} onChange={e => setAltQuantity(e.target.value)} placeholder="Unchanged" />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Asking price</label>
+                <input className="inp" type="number" min={0} value={altPrice} onChange={e => setAltPrice(e.target.value)} placeholder="Unchanged" />
+              </div>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Notes</label>
+              <textarea className="inp" rows={2} value={altNotes} onChange={e => setAltNotes(e.target.value)} placeholder="Any context that doesn't fit the fields above" style={{ height: 'auto', padding: '8px 12px' }} />
+            </div>
           </div>
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
-          <button className="btn btn-danger" disabled={!reason.trim() || submitting} onClick={async () => { setSubmitting(true); await onReject(reason.trim(), alternative.trim()) }}>
+          <button className="btn btn-danger" disabled={!reason.trim() || submitting} onClick={submit}>
             {submitting ? 'Rejecting…' : 'Reject Ticket'}
           </button>
         </div>
@@ -3341,10 +3419,18 @@ const InquiryValidation = () => {
     }
   }
 
-  const reject = async (id: string, reason: string, alternative: string) => {
+  const reject = async (id: string, reason: string, alternative: AlternativeOffer) => {
     setError('')
     try {
-      await api.post(`/leads/inquiries/${id}/validate`, { approved: false, rejectionReason: reason, alternativeOffer: alternative || undefined })
+      await api.post(`/leads/inquiries/${id}/validate`, {
+        approved: false,
+        rejectionReason: reason,
+        altContainerSizeId: alternative.containerSizeId,
+        altContainerConditionId: alternative.containerConditionId,
+        altQuantity: alternative.quantity,
+        altAskingPrice: alternative.askingPrice,
+        altNotes: alternative.notes,
+      })
       setRejectingId(null)
       setRevision(v => v + 1)
     } catch (err: any) {

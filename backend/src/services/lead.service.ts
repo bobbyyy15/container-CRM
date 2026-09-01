@@ -164,7 +164,9 @@ export class LeadService {
   static async getPendingValidationTickets() {
     const { data, error } = await supabaseAdmin
       .from('inquiries')
-      .select('*, companies(*), contacts(*), pics(name), container_sizes(id, name), container_conditions(id, name)')
+      // Disambiguate: inquiries now has two FKs to container_sizes/container_conditions
+      // (the ticket's own spec, and the Procurement-suggested alternative on rejection).
+      .select('*, companies(*), contacts(*), pics(name), container_sizes!container_size_id(id, name), container_conditions!container_condition_id(id, name)')
       .eq('status', 'Pending Validation')
       .order('created_at', { ascending: true });
     if (error) throw new Error(`Failed to load the validation queue: ${error.message}`);
@@ -176,7 +178,13 @@ export class LeadService {
     actorId: string,
     approved: boolean,
     rejectionReason: string | undefined,
-    alternativeOffer: string | undefined,
+    alt: {
+      containerSizeId?: string;
+      containerConditionId?: string;
+      quantity?: number;
+      askingPrice?: number;
+      notes?: string;
+    },
   ) {
     const { data, error } = await supabaseAdmin
       .rpc('validate_inquiry_ticket', {
@@ -184,10 +192,33 @@ export class LeadService {
         p_actor_id: actorId,
         p_approved: approved,
         p_rejection_reason: rejectionReason ?? null,
-        p_alternative_offer: alternativeOffer ?? null,
+        p_alt_container_size_id: alt.containerSizeId ?? null,
+        p_alt_container_condition_id: alt.containerConditionId ?? null,
+        p_alt_quantity: alt.quantity ?? null,
+        p_alt_asking_price: alt.askingPrice ?? null,
+        p_alt_notes: alt.notes ?? null,
       })
       .single();
     if (error) throw new Error(`Failed to validate the inquiry ticket: ${error.message}`);
+    return data;
+  }
+
+  static async applyInquiryAlternative(inquiryId: string, actorId: string, actorPicId: string) {
+    const { data: current, error: fetchError } = await supabaseAdmin
+      .from('inquiries')
+      .select('id, pic_id')
+      .eq('id', inquiryId)
+      .maybeSingle();
+    if (fetchError) throw new Error(`Failed to look up the ticket: ${fetchError.message}`);
+    if (!current) throw new Error('Inquiry not found.');
+    if (current.pic_id !== actorPicId) {
+      throw new Error('You can only act on tickets currently owned by your own PIC.');
+    }
+
+    const { data, error } = await supabaseAdmin
+      .rpc('apply_inquiry_alternative', { p_inquiry_id: inquiryId, p_actor_id: actorId })
+      .single();
+    if (error) throw new Error(`Failed to apply the alternative: ${error.message}`);
     return data;
   }
 }

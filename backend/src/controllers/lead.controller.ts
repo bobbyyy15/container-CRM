@@ -37,8 +37,13 @@ const listActiveLeads = async (
   req: Request,
 ) => {
   const query = LeadListQuerySchema.parse(req.query);
+  // Two FKs to container_sizes/container_conditions (the ticket's own spec, and the
+  // Procurement-suggested alternative) means PostgREST needs the !column disambiguation
+  // hint -- an unqualified container_sizes(...) errors with "more than one relationship".
   const select = table === 'inquiries'
-    ? '*, companies(*), contacts(*), pics(name), container_sizes(id, name), container_conditions(id, name)'
+    ? '*, companies(*), contacts(*), pics(name), '
+      + 'container_sizes!container_size_id(id, name), container_conditions!container_condition_id(id, name), '
+      + 'alt_size:container_sizes!alt_container_size_id(id, name), alt_condition:container_conditions!alt_container_condition_id(id, name)'
     : '*, companies(*), contacts(*), pics(name)';
   let dbQuery = supabaseAdmin
     .from(table)
@@ -305,8 +310,25 @@ export class LeadController {
         req.auth!.user.id,
         payload.approved,
         payload.rejectionReason,
-        payload.alternativeOffer,
+        {
+          containerSizeId: payload.altContainerSizeId,
+          containerConditionId: payload.altContainerConditionId,
+          quantity: payload.altQuantity,
+          askingPrice: payload.altAskingPrice,
+          notes: payload.altNotes,
+        },
       );
+      res.json({ success: true, data: updated });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async applyAlternative(req: Request, res: Response) {
+    try {
+      const actorPicId = requirePicId(req, res);
+      if (!actorPicId) return;
+      const updated = await LeadService.applyInquiryAlternative(req.params.entityId as string, req.auth!.user.id, actorPicId);
       res.json({ success: true, data: updated });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });
