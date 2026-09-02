@@ -3582,15 +3582,11 @@ const InquiryValidation = () => {
   return (
     <div className="page-scroll">
       <div className="page-content">
-        <div style={{
-          background: 'linear-gradient(120deg, #0B1E4D 0%, #1E3A8A 55%, #2D4FE0 100%)',
-          borderRadius: 14, padding: '26px 28px', marginBottom: 16, position: 'relative', overflow: 'hidden',
-        }}>
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Procurement</div>
-          <div style={{ fontSize: 26, fontWeight: 800, color: 'white', marginBottom: 6 }}>Inquiry Validation</div>
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)', maxWidth: 520 }}>Every inquiry a Sales Manager creates lands here as a ticket before it can be quoted. Approve it, or reject it with a reason and an optional alternative.</div>
-          <div style={{ position: 'absolute', right: -20, top: -20, width: 160, height: 160, borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
-          <div style={{ position: 'absolute', right: 60, bottom: -40, width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
+        <div className="page-header" style={{ padding: 0, border: 'none', marginBottom: 16 }}>
+          <div>
+            <div className="page-title">Inquiry Validation</div>
+            <div className="page-desc">Every inquiry a Sales Manager creates lands here as a ticket before it can be quoted. Approve it, or reject it with a reason and an optional alternative.</div>
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
