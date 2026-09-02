@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from './config/supabase';
 import { api } from './lib/api';
+import { toast } from './lib/notify';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [isRegistering, setIsRegistering] = useState(false);
@@ -76,7 +77,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
         // bug: it claimed success while the account couldn't actually sign in until the
         // confirmation link was clicked.
         if (!signUpData.session) {
-          alert("Registration successful! Check your email to confirm your account before signing in.");
+          toast("Registration successful! Check your email to confirm your account before signing in.", 'success');
           setIsRegistering(false);
           setIdentifier(email);
         } else {

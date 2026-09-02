@@ -624,35 +624,6 @@ body {
 
 .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
-/* ─── Status Summary Strip ──────────────────────────────────────────── */
-.status-strip {
-  display: grid;
-  gap: 12px;
-  padding: 16px 20px;
-  flex-shrink: 0;
-  background: var(--ws);
-  border-bottom: 1px solid var(--border-s);
-}
-
-.status-card {
-  border-radius: var(--r-card);
-  padding: 14px 16px;
-  color: white;
-  position: relative;
-  overflow: hidden;
-}
-.status-card::after {
-  content: '';
-  position: absolute;
-  bottom: -15px; right: -15px;
-  width: 70px; height: 70px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.1);
-}
-.sc-label { font-size: 11.5px; font-weight: 500; opacity: 0.85; margin-bottom: 6px; }
-.sc-value { font-size: 26px; font-weight: 700; line-height: 1.1; }
-.sc-trend { font-size: 11px; opacity: 0.8; margin-top: 4px; }
-
 /* ─── Tables ────────────────────────────────────────────────────────── */
 .table-wrap { overflow: auto; flex: 1; }
 
@@ -953,5 +924,6 @@ tr:hover .row-actions { opacity: 1; }
 }
 
 @keyframes spin { 100% { transform: rotate(360deg); } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .trend-neutral { background: #E5E7EB; color: #4B5563; }
 [data-theme="dark"] .trend-neutral { background: #374151; color: #9CA3AF; }

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { supabase } from '../../config/supabase'
+import { toast } from '../../lib/notify'
 
 // Rendered when Supabase's password-recovery link redirects back here (detected via the
 // PASSWORD_RECOVERY auth event -- see App.tsx). The recovery link itself already establishes
@@ -25,7 +26,7 @@ export default function ResetPassword({ onDone }: { onDone: () => void }) {
     try {
       const { error: updateError } = await supabase.auth.updateUser({ password })
       if (updateError) throw updateError
-      alert('Password updated. You are now signed in with your new password.')
+      toast('Password updated. You are now signed in with your new password.', 'success')
       onDone()
     } catch (err: any) {
       setError(err.message ?? 'Could not update the password.')

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../../lib/api';
+import { toast, askReason } from '../../lib/notify';
 
 type Profile = {
   id: string;
@@ -31,7 +32,7 @@ export const UserManagement = () => {
       setUsers(usersRes.data.data);
       setSelfId(meRes.data.data.id);
     } catch (err: any) {
-      alert(`Error loading users: ${err.response?.data?.error?.message ?? err.message}`);
+      toast(`Error loading users: ${err.response?.data?.error?.message ?? err.message}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -45,21 +46,26 @@ export const UserManagement = () => {
       const res = await api.patch(`/admin/users/${id}`, payload);
       setUsers(prev => prev.map(u => (u.id === id ? { ...u, ...res.data.data } : u)));
     } catch (err: any) {
-      alert(`Error updating user: ${err.response?.data?.error?.message ?? err.message}`);
+      toast(`Error updating user: ${err.response?.data?.error?.message ?? err.message}`, 'error');
     } finally {
       setSavingId(null);
     }
   };
 
   const assignPic = async (id: string, fullName: string | null) => {
-    const picName = prompt("Enter the PIC Name to create and assign to this user:", fullName || '');
-    if (!picName) return;
+    const { confirmed, reason: picName } = await askReason({
+      title: 'Assign PIC identity',
+      message: 'Enter the PIC name to create and assign to this user.',
+      confirmLabel: 'Assign',
+      defaultValue: fullName || '',
+    });
+    if (!confirmed || !picName) return;
     setSavingId(id);
     try {
       await api.post(`/admin/users/${id}/pic`, { name: picName });
       load(); // Reload to fetch the join properly
     } catch (err: any) {
-      alert(`Error assigning PIC: ${err.response?.data?.error?.message ?? err.message}`);
+      toast(`Error assigning PIC: ${err.response?.data?.error?.message ?? err.message}`, 'error');
     } finally {
       setSavingId(null);
     }

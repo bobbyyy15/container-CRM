@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { supabase } from './config/supabase'
 import { api } from './lib/api'
+import { toast, askConfirm, askReason, ToastHost, ConfirmHost } from './lib/notify'
 import Login from './Login'
 import ProspectImportDialog from './features/import/ProspectImportDialog'
 import { UserProfileSettings } from './features/settings/UserProfileSettings'
@@ -1542,19 +1543,23 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
       setSelected(current => current.filter(value => value !== id))
       setRevision(value => value + 1)
     } catch (e: any) {
-      alert(e.response?.data?.error?.message ?? 'Conversion failed.')
+      toast(e.response?.data?.error?.message ?? 'Conversion failed.', 'error')
     }
   }
 
   const handleRemove = async (id: string) => {
-    const reason = window.prompt('Why should this contact be removed from active CRM lists?')?.trim()
-    if (!reason) return
+    const { confirmed, reason } = await askReason({
+      title: 'Remove from active lists',
+      message: 'Why should this contact be removed from active CRM lists?',
+      confirmLabel: 'Remove',
+    })
+    if (!confirmed || !reason) return
     try {
       await api.post(`/leads/${mode === 'prospect' ? 'prospect' : 'warm_lead'}/${id}/remove`, { reason })
       setSelected(current => current.filter(value => value !== id))
       setRevision(value => value + 1)
     } catch (e: any) {
-      alert(e.response?.data?.error?.message ?? 'Removal failed.')
+      toast(e.response?.data?.error?.message ?? 'Removal failed.', 'error')
     }
   }
 
@@ -1567,7 +1572,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     setShowAssignPic(false)
     setSelected([])
     setRevision(value => value + 1)
-    if (failed > 0) alert(`${failed} of ${selected.length} records could not be reassigned.`)
+    if (failed > 0) toast(`${failed} of ${selected.length} records could not be reassigned.`, 'error')
   }
 
   const label = mode === 'prospect' ? 'Prospect Clients' : 'Warm Leads'
@@ -1725,7 +1730,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                   const dataToCopy = filtered.map(r => getVal(r, contextMenu.colField)).filter(Boolean).join('\n');
                   navigator.clipboard.writeText(dataToCopy);
                   setContextMenu(null);
-                  alert(`Copied ${filtered.map(r => getVal(r, contextMenu.colField)).filter(Boolean).length} ${contextMenu.colLabel}s to clipboard!`);
+                  toast(`Copied ${filtered.map(r => getVal(r, contextMenu.colField)).filter(Boolean).length} ${contextMenu.colLabel}s to clipboard.`, 'success');
                 }}
               >
                 <Ic n={I.copy} size={14} style={{ color: 'var(--brand)' }} />
@@ -1930,17 +1935,21 @@ const InquiryList = () => {
       </div>
 
       {/* Status cards */}
-      <div className="status-strip" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, padding: '16px 20px', flexShrink: 0, background: 'var(--ws)', borderBottom: '1px solid var(--border-s)' }}>
         {[
-          { label: 'Pending Validation', val: INQUIRIES.filter(r => r.status === 'Pending Validation').length, color: '#D97706' },
-          { label: 'Approved / Under Review', val: INQUIRIES.filter(r => r.status === 'Under Review').length, color: '#315EF6' },
-          { label: 'Validation Rejected', val: INQUIRIES.filter(r => r.status === 'Validation Rejected').length, color: '#DC2626' },
-          { label: 'Quotation Rejected', val: INQUIRIES.filter(r => r.status === 'Quotation Rejected').length, color: '#EA580C' },
+          { label: 'Pending Validation', val: INQUIRIES.filter(r => r.status === 'Pending Validation').length, icon: I.warning, color: '#D97706' },
+          { label: 'Approved / Under Review', val: INQUIRIES.filter(r => r.status === 'Under Review').length, icon: I.check, color: '#315EF6' },
+          { label: 'Validation Rejected', val: INQUIRIES.filter(r => r.status === 'Validation Rejected').length, icon: I.x, color: '#DC2626' },
+          { label: 'Quotation Rejected', val: INQUIRIES.filter(r => r.status === 'Quotation Rejected').length, icon: I.x, color: '#EA580C' },
         ].map(s => (
-          <div key={s.label} className="status-card" style={{ background: s.color }}>
-            <div className="sc-label">{s.label}</div>
-            <div className="sc-value">{s.val}</div>
-            <div className="sc-trend">↑ this month</div>
+          <div key={s.label} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 11 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 8, background: `${s.color}15`, color: s.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Ic n={s.icon} size={15} />
+            </div>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--t1)' }}>{s.val}</div>
+              <div style={{ fontSize: 11, color: 'var(--t4)' }}>{s.label}</div>
+            </div>
           </div>
         ))}
       </div>
@@ -1981,7 +1990,7 @@ const InquiryList = () => {
                   const dataToCopy = filtered.map((r: any) => r[contextMenu.colField]).filter(Boolean).join('\n');
                   navigator.clipboard.writeText(dataToCopy);
                   setContextMenu(null);
-                  alert(`Copied ${filtered.map((r: any) => r[contextMenu.colField]).filter(Boolean).length} ${contextMenu.colLabel.toLowerCase()}!`);
+                  toast(`Copied ${filtered.map((r: any) => r[contextMenu.colField]).filter(Boolean).length} ${contextMenu.colLabel.toLowerCase()}.`, 'success');
                 }}
               >
                 <Ic n={I.copy} size={14} style={{ color: 'var(--brand)' }} />
@@ -2116,8 +2125,12 @@ const QuotationList = () => {
   }
 
   const removeQuotation = async (id: string) => {
-    const reason = window.prompt('Why should this quotation be removed?')?.trim()
-    if (!reason) return
+    const { confirmed, reason } = await askReason({
+      title: 'Remove quotation',
+      message: 'Why should this quotation be removed?',
+      confirmLabel: 'Remove',
+    })
+    if (!confirmed || !reason) return
     setActionError('')
     try {
       await api.post(`/leads/quotation/${id}/remove`, { reason })
@@ -2144,17 +2157,23 @@ const QuotationList = () => {
           onSaved={() => setRevision(value => value + 1)}
         />
       )}
-      <div className="status-strip" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12, padding: '16px 20px', flexShrink: 0, background: 'var(--ws)', borderBottom: '1px solid var(--border-s)' }}>
         {[
-          { label: 'Draft', val: quotes.filter(q => q.status === 'Draft').length, color: '#6B7280' },
-          { label: 'Sent', val: quotes.filter(q => q.status === 'Sent').length, color: '#315EF6' },
-          { label: 'Viewed', val: quotes.filter(q => q.status === 'Viewed').length, color: '#7C3AED' },
-          { label: 'Accepted', val: quotes.filter(q => q.status === 'Accepted').length, color: '#059669' },
-          { label: 'Rejected', val: quotes.filter(q => q.status === 'Rejected').length, color: '#DC2626' },
-          { label: 'Converted', val: quotes.filter(q => q.status === 'Converted').length, color: '#0D9488' },
+          { label: 'Draft', val: quotes.filter(q => q.status === 'Draft').length, icon: I.edit, color: '#6B7280' },
+          { label: 'Sent', val: quotes.filter(q => q.status === 'Sent').length, icon: I.mail, color: '#315EF6' },
+          { label: 'Viewed', val: quotes.filter(q => q.status === 'Viewed').length, icon: I.search, color: '#7C3AED' },
+          { label: 'Accepted', val: quotes.filter(q => q.status === 'Accepted').length, icon: I.check, color: '#059669' },
+          { label: 'Rejected', val: quotes.filter(q => q.status === 'Rejected').length, icon: I.x, color: '#DC2626' },
+          { label: 'Converted', val: quotes.filter(q => q.status === 'Converted').length, icon: I.sales, color: '#0D9488' },
         ].map(s => (
-          <div key={s.label} className="status-card" style={{ background: s.color }}>
-            <div className="sc-label">{s.label}</div><div className="sc-value">{s.val}</div>
+          <div key={s.label} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 11 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 8, background: `${s.color}15`, color: s.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Ic n={s.icon} size={15} />
+            </div>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--t1)' }}>{s.val}</div>
+              <div style={{ fontSize: 11, color: 'var(--t4)' }}>{s.label}</div>
+            </div>
           </div>
         ))}
       </div>
@@ -2416,7 +2435,7 @@ const CustomerAccounts = () => {
           <div className="page-desc">Companies with confirmed purchase history.</div>
         </div>
         <Btn variant="primary" sm onClick={() => setShowNewCustomer(true)}><Ic n={I.plus} size={13} /> Add Customer</Btn>
-        {showNewCustomer && <NewManualSaleDialog onClose={() => setShowNewCustomer(false)} onSaved={() => { setShowNewCustomer(false); setRevision(r => r + 1); window.location.reload(); }} />}
+        {showNewCustomer && <NewManualSaleDialog onClose={() => setShowNewCustomer(false)} onSaved={() => { setShowNewCustomer(false); setRevision(r => r + 1); }} />}
       </div>
       <div className="tabs">
         {['All', 'Active', 'Floating'].map(t => <div key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</div>)}
@@ -2635,7 +2654,7 @@ const Contracts = () => {
         <select className="sel" value={pickStatus} onChange={e => setPickStatus(e.target.value)}><option>All Pickup Statuses</option><option>Pending</option><option>Scheduled</option><option>Confirmed</option><option>Picked Up</option><option>Overdue</option></select>
         <div className="toolbar-right">
           <Btn variant="primary" sm onClick={() => setShowNew(true)}><Ic n={I.plus} size={13} /> New Contract</Btn>
-          {showNew && <NewContractDialog sales={sales} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); setRevision(r => r + 1); window.location.reload(); }} />}
+          {showNew && <NewContractDialog sales={sales} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); setRevision(r => r + 1); }} />}
         </div>
       </div>
       <div className="table-wrap">
@@ -3679,10 +3698,10 @@ const InquiryValidation = () => {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
           {[
-            { label: 'Total Tickets', val: tickets.length, icon: I.inquiry, color: 'var(--brand)' },
-            { label: 'Pending Validation', val: pendingCount, icon: I.warning, color: 'var(--amber)' },
-            { label: 'Converted to Sale', val: wonCount, icon: I.check, color: 'var(--green)' },
-            { label: 'Rejected', val: rejectedCount, icon: I.x, color: 'var(--red)' },
+            { label: 'Total Tickets', val: tickets.length, icon: I.inquiry, color: '#315EF6' },
+            { label: 'Pending Validation', val: pendingCount, icon: I.warning, color: '#D97706' },
+            { label: 'Converted to Sale', val: wonCount, icon: I.check, color: '#059669' },
+            { label: 'Rejected', val: rejectedCount, icon: I.x, color: '#DC2626' },
           ].map(k => (
             <div key={k.label} className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ width: 38, height: 38, borderRadius: 9, background: `${k.color}15`, color: k.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -3800,13 +3819,19 @@ const InventoryManagement = ({ role }: { role?: string }) => {
         delta_reserved:  field === 'reserved'  ? delta : 0,
       })
       refresh()
-    } catch (e: any) { alert(e?.response?.data?.error?.message || 'Failed to adjust stock') }
+    } catch (e: any) { toast(e?.response?.data?.error?.message || 'Failed to adjust stock', 'error') }
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this inventory record? This cannot be undone.')) return
+    const { confirmed } = await askConfirm({
+      title: 'Delete inventory record',
+      message: 'Delete this inventory record? This cannot be undone.',
+      danger: true,
+      confirmLabel: 'Delete',
+    })
+    if (!confirmed) return
     try { await api.delete(`/inventory/${id}`); refresh() }
-    catch (e: any) { alert(e?.response?.data?.error?.message || 'Failed to delete') }
+    catch (e: any) { toast(e?.response?.data?.error?.message || 'Failed to delete', 'error') }
   }
 
   // ── New / Edit form ──────────────────────────────────────────────────────
@@ -3878,7 +3903,7 @@ const InventoryManagement = ({ role }: { role?: string }) => {
     const handleImport = async () => {
       if (!rows.length) return; setImporting(true)
       try { const res = await api.post('/inventory/bulk', { rows }); setResult(res.data.data); refresh() }
-      catch (e: any) { alert(e?.response?.data?.error?.message || 'Import failed') }
+      catch (e: any) { toast(e?.response?.data?.error?.message || 'Import failed', 'error') }
       finally { setImporting(false) }
     }
     return (
@@ -3942,7 +3967,7 @@ const InventoryManagement = ({ role }: { role?: string }) => {
     const handleImport = async () => {
       if (!rows.length) return; setImporting(true)
       try { const res = await api.post('/inventory/bulk', { rows }); setResult(res.data.data); refresh() }
-      catch (e: any) { alert(e?.response?.data?.error?.message || 'Import failed') }
+      catch (e: any) { toast(e?.response?.data?.error?.message || 'Import failed', 'error') }
       finally { setImporting(false) }
     }
     return (
@@ -4366,8 +4391,8 @@ export default function App() {
   const handleNav = useCallback((s: Screen) => setScreen(s), [])
 
   if (authChecking) return null;
-  if (isPasswordRecovery) return <ResetPassword onDone={() => setIsPasswordRecovery(false)} />;
-  if (!session) return <Login onLogin={() => {}} />;
+  if (isPasswordRecovery) return <><ResetPassword onDone={() => setIsPasswordRecovery(false)} /><ToastHost /></>;
+  if (!session) return <><Login onLogin={() => {}} /><ToastHost /></>;
 
   const renderScreen = () => {
     switch (screen) {
@@ -4437,6 +4462,8 @@ export default function App() {
           {renderScreen()}
         </div>
       </div>
+      <ToastHost />
+      <ConfirmHost />
     </div>
   )
 }
@@ -4455,7 +4482,7 @@ const Pickups = () => {
       setRevision(r => r + 1);
     } catch (err) {
       console.error(err);
-      alert('Failed to update status');
+      toast('Failed to update status', 'error');
     }
   };
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../config/supabase';
 import { api } from '../../lib/api';
+import { toast } from '../../lib/notify';
 
 export const UserProfileSettings = ({ session }: { session: any }) => {
   const [loading, setLoading] = useState(true);
@@ -53,9 +54,9 @@ export const UserProfileSettings = ({ session }: { session: any }) => {
       .eq('id', session.user.id);
 
     if (error) {
-      alert(`Error updating profile: ${error.message}`);
+      toast(`Error updating profile: ${error.message}`, 'error');
     } else {
-      alert('Profile updated successfully!');
+      toast('Profile updated successfully.', 'success');
       setProfile({ ...profile, ...formData });
     }
     setSaving(false);
