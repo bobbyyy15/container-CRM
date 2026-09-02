@@ -16,6 +16,7 @@ import customerRoutes from './routes/customer.routes';
 import contractRoutes from './routes/contract.routes';
 import notificationRoutes from './routes/notification.routes';
 import inventoryRoutes from './routes/inventory.routes';
+import settingsRoutes from './routes/settings.routes';
 
 import { requireAuth } from './middleware/auth.middleware';
 import { requestContext } from './middleware/request-context.middleware';
@@ -55,6 +56,7 @@ app.use('/api/v1/pics', picRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/inventory',     inventoryRoutes);
+app.use('/api/v1/settings',      settingsRoutes);
 
 
 // Start Server

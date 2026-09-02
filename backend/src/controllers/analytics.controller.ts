@@ -66,9 +66,41 @@ export class AnalyticsController {
 
       if (chartError) throw chartError;
 
+      // 4. Month-to-date outreach actuals + the configured targets, so the Outreach
+      //    Dashboard can show real "X of Y" progress instead of hardcoded numbers.
+      //    Summed here rather than derived from PIC_DATA because that array is capped
+      //    at the top 5 PICs and would undercount a larger team.
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      const monthStartStr = monthStart.toISOString().slice(0, 10);
+
+      let activityQuery = supabaseAdmin
+        .from('daily_activity')
+        .select('emails_completed, calls_completed, texts_completed, email_replies, text_replies, calls_answered')
+        .gte('entry_date', monthStartStr);
+      if (!isAdmin) activityQuery = activityQuery.eq('pic_id', picId);
+
+      const [{ data: activityRows, error: activityErr }, { data: targetsRow }] = await Promise.all([
+        activityQuery,
+        supabaseAdmin.from('daily_targets').select('*').eq('id', true).single(),
+      ]);
+      if (activityErr) throw activityErr;
+
+      const outreach = (activityRows || []).reduce((acc, row: any) => ({
+        emails:         acc.emails         + (row.emails_completed || 0),
+        calls:          acc.calls          + (row.calls_completed  || 0),
+        texts:          acc.texts          + (row.texts_completed  || 0),
+        email_replies:  acc.email_replies  + (row.email_replies    || 0),
+        text_replies:   acc.text_replies   + (row.text_replies     || 0),
+        calls_answered: acc.calls_answered + (row.calls_answered   || 0),
+      }), { emails: 0, calls: 0, texts: 0, email_replies: 0, text_replies: 0, calls_answered: 0 });
+
       res.json({
         success: true,
         data: {
+          outreach,
+          targets: targetsRow || {},
           metrics: {
             total_units,
             total_revenue,
