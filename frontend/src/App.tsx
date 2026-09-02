@@ -3449,6 +3449,83 @@ const TicketCard = ({ t, onView, onApprove, onReject }: {
   </div>
 )
 
+const InfoBox = ({ label, children, accent }: { label: string; children: React.ReactNode; accent?: string }) => (
+  <div style={{ background: accent ? `${accent}0d` : 'var(--s2)', border: `1px solid ${accent ? accent + '40' : 'var(--border-s)'}`, borderRadius: 10, padding: 14 }}>
+    <div style={{ fontSize: 10.5, fontWeight: 700, color: accent || 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>{label}</div>
+    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)' }}>{children}</div>
+  </div>
+)
+
+const TicketDetailModal = ({ t, onClose, onApprove, onReject }: {
+  t: any
+  onClose: () => void
+  onApprove?: () => void
+  onReject?: () => void
+}) => (
+  <div className="overlay" onClick={onClose}>
+    <div className="modal" style={{ width: 560, maxHeight: '86vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+      <div className="modal-header" style={{ alignItems: 'flex-start' }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t4)', letterSpacing: 0.3, marginBottom: 4 }}>
+            {t.ref} · REQUESTED BY {(t.pic || 'UNASSIGNED').toUpperCase()}
+          </div>
+          <div className="modal-title" style={{ fontSize: 19, lineHeight: 1.3 }}>{t.company}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--t3)', marginTop: 2 }}>{t.contact}</div>
+        </div>
+        <Btn variant="ghost" sm onClick={onClose}><Ic n={I.x} size={16} /></Btn>
+      </div>
+      <div style={{ overflowY: 'auto', padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <InfoBox label="Status"><Badge status={t.status as BadgeStatus} /></InfoBox>
+          <InfoBox label="Location">{t.location}</InfoBox>
+          <InfoBox label="Container Size">{t.size}</InfoBox>
+          <InfoBox label="Condition">{t.condition}</InfoBox>
+          <InfoBox label="Quantity">{t.quantity}</InfoBox>
+          <InfoBox label="Asking Price">{t.price != null ? `$${t.price.toLocaleString()}` : '—'}</InfoBox>
+        </div>
+
+        <div style={{ background: 'var(--s2)', border: '1px solid var(--border-s)', borderRadius: 10, padding: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>
+            <Ic n={I.calendar} size={12} /> Ticket Timeline
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div><div style={{ fontSize: 10.5, color: 'var(--t4)', marginBottom: 2 }}>Received</div><div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>{t.date}</div></div>
+            <div><div style={{ fontSize: 10.5, color: 'var(--t4)', marginBottom: 2 }}>Status</div><div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>{t.status}</div></div>
+          </div>
+        </div>
+
+        <div style={{ background: 'var(--s2)', border: '1px solid var(--border-s)', borderRadius: 10, padding: 14 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>Description</div>
+          <div style={{ fontSize: 13, color: 'var(--t2)', lineHeight: 1.5 }}>{t.description}</div>
+        </div>
+
+        {t.rejectionReason && (
+          <InfoBox label="Rejection Reason" accent="var(--red)">
+            <span style={{ fontSize: 13, fontWeight: 500 }}>{t.rejectionReason}</span>
+          </InfoBox>
+        )}
+
+        {(t.altSize || t.altCondition || t.altAskingPrice != null || t.altNotes) && (
+          <div style={{ background: 'var(--amber-bg, #FFFBEB)', border: '1px solid var(--amber)40', borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--amber)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>Alternative Offer</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: t.altNotes ? 8 : 0 }}>
+              {t.altSize && <span className="badge b-amber">{t.altSize}</span>}
+              {t.altCondition && <span className="badge b-amber">{t.altCondition}</span>}
+              {t.altAskingPrice != null && <span className="badge b-amber">${t.altAskingPrice.toLocaleString()}</span>}
+            </div>
+            {t.altNotes && <div style={{ fontSize: 12.5, color: 'var(--t2)', lineHeight: 1.5 }}>{t.altNotes}</div>}
+          </div>
+        )}
+      </div>
+      <div className="modal-footer">
+        <Btn variant="ghost" onClick={onClose}>Close</Btn>
+        {onReject && <button className="btn btn-ghost" style={{ color: 'var(--red)' }} onClick={onReject}>Reject</button>}
+        {onApprove && <button className="btn btn-primary" onClick={onApprove}>Approve</button>}
+      </div>
+    </div>
+  </div>
+)
+
 const InquiryValidation = () => {
   const [revision, setRevision] = useState(0)
   const tickets = useInquiryBoard(revision)
@@ -3505,11 +3582,15 @@ const InquiryValidation = () => {
   return (
     <div className="page-scroll">
       <div className="page-content">
-        <div className="page-header" style={{ padding: 0, border: 'none', marginBottom: 16 }}>
-          <div>
-            <div className="page-title">Inquiry Validation</div>
-            <div className="page-desc">Every inquiry a Sales Manager creates lands here as a ticket before it can be quoted.</div>
-          </div>
+        <div style={{
+          background: 'linear-gradient(120deg, #0B1E4D 0%, #1E3A8A 55%, #2D4FE0 100%)',
+          borderRadius: 14, padding: '26px 28px', marginBottom: 16, position: 'relative', overflow: 'hidden',
+        }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Procurement</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: 'white', marginBottom: 6 }}>Inquiry Validation</div>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)', maxWidth: 520 }}>Every inquiry a Sales Manager creates lands here as a ticket before it can be quoted. Approve it, or reject it with a reason and an optional alternative.</div>
+          <div style={{ position: 'absolute', right: -20, top: -20, width: 160, height: 160, borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
+          <div style={{ position: 'absolute', right: 60, bottom: -40, width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
@@ -3571,32 +3652,11 @@ const InquiryValidation = () => {
         </div>
       </div>
       {viewingTicket && (
-        <RecordDetailModal
-          title={`${viewingTicket.ref} — ${viewingTicket.company}`}
+        <TicketDetailModal
+          t={viewingTicket}
           onClose={() => setViewingId(null)}
-          fields={[
-            { label: 'Status', value: <Badge status={viewingTicket.status as BadgeStatus} /> },
-            { label: 'PIC', value: viewingTicket.pic },
-            { label: 'Contact', value: viewingTicket.contact },
-            { label: 'Location', value: viewingTicket.location },
-            { label: 'Size', value: viewingTicket.size },
-            { label: 'Condition', value: viewingTicket.condition },
-            { label: 'Quantity', value: viewingTicket.quantity },
-            { label: 'Asking price', value: viewingTicket.price != null ? `$${viewingTicket.price.toLocaleString()}` : '—' },
-            { label: 'Received', value: viewingTicket.date },
-            { label: 'Description', value: viewingTicket.description },
-            ...(viewingTicket.rejectionReason ? [{ label: 'Rejection reason', value: viewingTicket.rejectionReason }] : []),
-            ...(viewingTicket.altSize ? [{ label: 'Alternative size', value: viewingTicket.altSize }] : []),
-            ...(viewingTicket.altCondition ? [{ label: 'Alternative condition', value: viewingTicket.altCondition }] : []),
-            ...(viewingTicket.altAskingPrice != null ? [{ label: 'Alternative price', value: `$${viewingTicket.altAskingPrice.toLocaleString()}` }] : []),
-            ...(viewingTicket.altNotes ? [{ label: 'Alternative notes', value: viewingTicket.altNotes }] : []),
-          ]}
-          footerExtra={viewingTicket.status === 'Pending Validation' ? (
-            <>
-              <button className="btn btn-ghost" style={{ color: 'var(--red)' }} onClick={() => setRejectingId(viewingTicket.id)}>Reject</button>
-              <button className="btn btn-primary" onClick={() => approve(viewingTicket.id)}>Approve</button>
-            </>
-          ) : undefined}
+          onApprove={viewingTicket.status === 'Pending Validation' ? () => approve(viewingTicket.id) : undefined}
+          onReject={viewingTicket.status === 'Pending Validation' ? () => setRejectingId(viewingTicket.id) : undefined}
         />
       )}
       {rejectingTicket && (

@@ -10,6 +10,10 @@ export default defineConfig(({ mode }) => {
   // .figma/make/deploy-preview passes `--mode development` for cached-preview builds.
   const emitSourcemaps = mode === 'development'
   const backendEnv = loadEnv(mode, path.resolve(import.meta.dirname, '../backend'), '')
+  // Personal, per-machine overrides (e.g. PORT when another project already holds 8443) --
+  // frontend/.env.local is gitignored, so this never affects anyone else's checkout.
+  const localEnv = loadEnv(mode, import.meta.dirname, '')
+  const devPort = parseInt(process.env.PORT || localEnv.PORT || '8443')
 
   return {
     base: process.env.FIGMA_PUBLIC_URL ? `${process.env.FIGMA_PUBLIC_URL}/` : '/',
@@ -37,7 +41,7 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: '0.0.0.0',
-      port: parseInt(process.env.PORT || '8443'),
+      port: devPort,
       strictPort: true,
       watch: { ignored: ['**/.figma/**'] },
       proxy: {
@@ -49,7 +53,7 @@ export default defineConfig(({ mode }) => {
     },
     preview: {
       host: '0.0.0.0',
-      port: parseInt(process.env.PORT || '8443'),
+      port: devPort,
     },
   }
 })
