@@ -40,6 +40,10 @@ const cleanup = async () => {
   if (createdInventoryIds.length > 0) {
     await supabaseAdmin.from('inventory').delete().in('id', createdInventoryIds);
   }
+  // bulk_insert_inventory doesn't return the inserted rows' ids, so the bulk-imported test
+  // rows aren't in createdInventoryIds -- every test depot name is stamped, so sweep by that
+  // instead of leaving them orphaned in the hosted DB on every run.
+  await supabaseAdmin.from('inventory').delete().ilike('depot_name', `%${stamp}%`);
   const userIds = [ids.userOpsA, ids.userOpsB, ids.userProc, ids.userSales].filter(Boolean) as string[];
   if (userIds.length > 0) {
     await supabaseAdmin.from('pics').delete().in('profile_id', userIds);
@@ -78,12 +82,24 @@ const run = async () => {
 
   console.log('✔ Created test users (Operations A, Operations B, Procurement, Sales)');
 
+  // Inventory has to speak the exact same size/condition vocabulary as the real
+  // container_sizes/container_conditions catalog -- that's what an inquiry ticket's
+  // size/condition actually are (via container_size_id/container_condition_id), and it's
+  // what the "Live Stock Check" widget on a ticket looks up by exact name. Made-up strings
+  // like '40ft High Cube' would silently never match a real ticket's '40ft HC'.
+  const catalogSizes = await request(sales.token, '/catalog/sizes');
+  const catalogConditions = await request(sales.token, '/catalog/conditions');
+  const size40hc = catalogSizes.data.find((s: any) => s.name === '40ft HC') ?? catalogSizes.data[0];
+  const size20 = catalogSizes.data.find((s: any) => s.name === '20ft') ?? catalogSizes.data[1];
+  const conditionCW = catalogConditions.data.find((c: any) => c.name === 'Cargo Worthy') ?? catalogConditions.data[0];
+  const conditionBrandNew = catalogConditions.data.find((c: any) => c.name === 'Brand New') ?? catalogConditions.data[1];
+
   // 2. Operations A creates single inventory record
   const invA = await request(opsA.token, '/inventory', {
     method: 'POST',
     body: JSON.stringify({
-      container_size: '40ft High Cube',
-      container_condition: 'Cargo Worthy (CW)',
+      container_size: size40hc.name,
+      container_condition: conditionCW.name,
       depot_name: `E2E Yard Alpha ${stamp}`,
       vendor_supplier: 'Maersk E2E',
       city: 'Long Beach',
@@ -104,8 +120,8 @@ const run = async () => {
     body: JSON.stringify({
       rows: [
         {
-          container_size: '20ft Standard',
-          container_condition: 'Brand New / One Trip',
+          container_size: size20.name,
+          container_condition: conditionBrandNew.name,
           depot_name: `E2E Yard Beta ${stamp}`,
           vendor_supplier: 'Evergreen E2E',
           quantity_available: 2, // Should trigger 'Low Stock'
@@ -113,8 +129,8 @@ const run = async () => {
           target_sell_price: 3900,
         },
         {
-          container_size: '40ft High Cube',
-          container_condition: 'Cargo Worthy (CW)',
+          container_size: size40hc.name,
+          container_condition: conditionCW.name,
           depot_name: `E2E Yard Gamma ${stamp}`,
           vendor_supplier: 'CMA CGM E2E',
           quantity_available: 0, // Should trigger 'Out of Stock'
@@ -168,10 +184,15 @@ const run = async () => {
   if (adjusted.data.status !== 'Out of Stock') throw new Error(`Expected 'Out of Stock', got ${adjusted.data.status}`);
   console.log('✔ Inline stock adjustment and auto-status trigger verified (0 qty -> Out of Stock)');
 
-  // 8. Stock availability lookup RPC
-  const stockCheck = await request(proc.token, `/inventory/stock-check?size=40ft%20High%20Cube&condition=Cargo%20Worthy%20(CW)`);
+  // 8. Stock availability lookup RPC -- called with the exact catalog name a real inquiry
+  // ticket would report (this is what LiveStockWidget on a ticket actually sends), not a
+  // made-up label, to prove the two systems' vocabularies actually line up.
+  const stockCheck = await request(proc.token, `/inventory/stock-check?size=${encodeURIComponent(size40hc.name)}&condition=${encodeURIComponent(conditionCW.name)}`);
   if (!stockCheck.data || !Array.isArray(stockCheck.data.depots)) throw new Error('Invalid stock-check response shape');
-  console.log('✔ Live stock lookup RPC returned accurate availability counts and depot breakdown');
+  if (!stockCheck.data.depots.some((d: any) => d.depot === `E2E Yard Gamma ${stamp}`)) {
+    throw new Error(`Stock check for the real catalog name "${size40hc.name}"/"${conditionCW.name}" did not find the matching inventory: ${JSON.stringify(stockCheck.data)}`);
+  }
+  console.log('✔ Live stock lookup RPC matched inventory using the real container catalog vocabulary');
 
   console.log('--- All Inventory & Operations E2E Tests Passed Successfully! ---');
 };

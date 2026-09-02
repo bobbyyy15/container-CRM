@@ -3821,9 +3821,13 @@ const InventoryManagement = ({ role }: { role?: string }) => {
       unit_cost: initial?.unit_cost ?? 0, target_sell_price: initial?.target_sell_price ?? 0, notes: initial?.notes || '',
     })
     const set = (k: string) => (e: React.ChangeEvent<any>) => setForm(f => ({ ...f, [k]: e.target.value }))
-    const SZ = ['10ft Standard','20ft Standard','40ft Standard','40ft High Cube','45ft High Cube']
-    const CD = ['Brand New / One Trip','Cargo Worthy (CW)','Wind & Water Tight (WWT)','As-Is']
-    const CT = ['Dry','High-Cube','Reefer','Open Top','Flat Rack','Tank']
+    // Reuse the same container_sizes/container_conditions/container_categories catalog that
+    // Inquiries and Quotations already draw from -- the "Live Stock Check" widget on a ticket
+    // matches by exact name against this catalog, so inventory has to speak the same
+    // vocabulary or that lookup silently never finds a match.
+    const SZ = useCatalogList('/catalog/sizes').map(s => s.name)
+    const CD = useCatalogList('/catalog/conditions').map(c => c.name)
+    const CT = useCatalogList('/catalog/categories').map(c => c.name)
     const handleSubmit = async () => {
       if (!form.container_size || !form.container_condition || !form.depot_name) { setFormError('Size, condition, and depot are required.'); return }
       setSaving(true); setFormError('')
