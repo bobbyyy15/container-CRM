@@ -384,67 +384,72 @@ const NAV: NavGroup[] = [
   {
     label: 'Overview',
     items: [
-      { id: 'dashboard', label: 'Executive Overview', icon: I.dashboard },
-      { id: 'outreach-dashboard', label: 'Outreach Dashboard', icon: I.target },
-      { id: 'inquiry-dashboard', label: 'Inquiry Dashboard', icon: I.inquiry },
+      { id: 'dashboard', label: 'Executive Overview', icon: I.dashboard, roles: ['admin', 'sales_manager'] },
+      { id: 'outreach-dashboard', label: 'Outreach Dashboard', icon: I.target, roles: ['admin', 'sales_manager'] },
+      { id: 'inquiry-dashboard', label: 'Inquiry Dashboard', icon: I.inquiry, roles: ['admin', 'sales_manager', 'procurement'] },
     ],
   },
   {
     label: 'Sales Core',
     items: [
-      { id: 'prospects', label: 'Prospect Clients', icon: I.prospect },
-      { id: 'warm-leads', label: 'Warm Leads', icon: I.lead },
-      { id: 'inquiries', label: 'Inquiries', icon: I.inquiry },
+      { id: 'prospects', label: 'Prospect Clients', icon: I.prospect, roles: ['admin', 'sales_manager'] },
+      { id: 'warm-leads', label: 'Warm Leads', icon: I.lead, roles: ['admin', 'sales_manager'] },
+      { id: 'inquiries', label: 'Inquiries', icon: I.inquiry, roles: ['admin', 'sales_manager'] },
+      { id: 'quotations', label: 'Quotations', icon: I.quote, roles: ['admin', 'sales_manager'] },
+      { id: 'sales-tracker', label: 'Sales Tracker', icon: I.sales, roles: ['admin', 'sales_manager'] },
+    ],
+  },
+  {
+    label: 'Procurement Core',
+    items: [
       { id: 'inquiry-validation', label: 'Inquiry Validation', icon: I.check, roles: ['admin', 'procurement'] },
-      { id: 'quotations', label: 'Quotations', icon: I.quote },
-      { id: 'sales-tracker', label: 'Sales Tracker', icon: I.sales },
     ],
   },
   {
-    label: 'Customers',
+    label: 'Operations Core',
     items: [
-      { id: 'customers', label: 'Customer Accounts', icon: I.customer },
-      { id: 'contact-outreach', label: 'Contact Outreach', icon: I.outreach },
-      { id: 'contracts', label: 'Contracts', icon: I.contract },
-      { id: 'pickups', label: 'Pickup Tracking', icon: I.pickup },
-    ],
-  },
-  {
-    label: 'Outreach & Data',
-    items: [
-      { id: 'daily-tasks', label: 'Daily Tasks', icon: I.tasks },
-      { id: 'removed', label: 'Removed Sheet', icon: I.removed },
-      { id: 'deliverability', label: 'Deliverability', icon: I.deliverabil },
+      { id: 'pickups', label: 'Pickup Tracking', icon: I.pickup, roles: ['admin', 'operations', 'sales_manager'] },
+      { id: 'contracts', label: 'Customer Contracts', icon: I.contract, roles: ['admin', 'operations', 'sales_manager'] },
+      { id: 'customers', label: 'Customer Accounts', icon: I.customer, roles: ['admin', 'operations', 'sales_manager'] },
     ],
   },
   {
     label: 'Catalog & Stock',
     items: [
-      { id: 'inventory-management', label: 'Inventory Management', icon: I.upload },
-      { id: 'container-catalog', label: 'Container Catalog', icon: I.container },
+      { id: 'inventory-management', label: 'Inventory Management', icon: I.upload, roles: ['admin', 'operations', 'procurement', 'sales_manager'] },
+      { id: 'container-catalog', label: 'Container Catalog', icon: I.container, roles: ['admin', 'operations', 'procurement', 'sales_manager'] },
+    ],
+  },
+  {
+    label: 'Outreach & Data',
+    items: [
+      { id: 'contact-outreach', label: 'Contact Outreach', icon: I.outreach, roles: ['admin', 'sales_manager'] },
+      { id: 'daily-tasks', label: 'Daily Tasks', icon: I.tasks, roles: ['admin', 'sales_manager'] },
+      { id: 'removed', label: 'Removed Sheet', icon: I.removed, roles: ['admin', 'sales_manager'] },
+      { id: 'deliverability', label: 'Deliverability', icon: I.deliverabil, roles: ['admin', 'sales_manager'] },
     ],
   },
   {
     label: 'Analytics',
     items: [
-      { id: 'pic-performance', label: 'PIC Performance', icon: I.analytics },
-      { id: 'best-clients', label: 'Best Clients', icon: I.flag },
-      { id: 'profit-analytics', label: 'Profit Analytics', icon: I.profit },
-      { id: 'inquiry-funnel', label: 'Inquiry Funnel', icon: I.inquiry },
+      { id: 'pic-performance', label: 'PIC Performance', icon: I.analytics, roles: ['admin', 'sales_manager'] },
+      { id: 'best-clients', label: 'Best Clients', icon: I.flag, roles: ['admin', 'sales_manager'] },
+      { id: 'profit-analytics', label: 'Profit Analytics', icon: I.profit, roles: ['admin', 'sales_manager'] },
+      { id: 'inquiry-funnel', label: 'Inquiry Funnel', icon: I.inquiry, roles: ['admin', 'sales_manager'] },
     ],
   },
   {
     label: 'Configuration',
     items: [
-      { id: 'service-territories', label: 'Service Territories', icon: I.map },
-      { id: 'daily-targets', label: 'Daily Targets', icon: I.target },
-      { id: 'system-settings', label: 'System Settings', icon: I.config },
+      { id: 'service-territories', label: 'Service Territories', icon: I.map, roles: ['admin'] },
+      { id: 'daily-targets', label: 'Daily Targets', icon: I.target, roles: ['admin'] },
+      { id: 'system-settings', label: 'System Settings', icon: I.config, roles: ['admin'] },
     ],
   },
   {
     label: 'Administration',
     items: [
-      { id: 'user-management', label: 'User Management', icon: I.customer },
+      { id: 'user-management', label: 'User Management', icon: I.customer, roles: ['admin'] },
     ],
   },
 ]
@@ -4312,7 +4317,15 @@ export default function App() {
 
   useEffect(() => {
     if (!session) { setCurrentProfile(null); return }
-    api.get('/auth/me').then(res => setCurrentProfile(res.data.data)).catch(console.error)
+    api.get('/auth/me').then(res => {
+      const p = res.data.data
+      setCurrentProfile(p)
+      if (p?.role === 'operations') {
+        setScreen(s => s === 'dashboard' ? 'pickups' : s)
+      } else if (p?.role === 'procurement') {
+        setScreen(s => s === 'dashboard' ? 'inquiry-validation' : s)
+      }
+    }).catch(console.error)
   }, [session])
 
   useEffect(() => {
