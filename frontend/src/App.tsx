@@ -3471,7 +3471,7 @@ const TicketCard = ({ t, onView, onApprove, onReject }: {
   onApprove?: () => void
   onReject?: () => void
 }) => (
-  <div className="card" style={{ padding: 14, marginBottom: 10, cursor: 'pointer' }} onClick={onView}>
+  <div className="card ticket-card" style={{ padding: 14, marginBottom: 10, cursor: 'pointer' }} onClick={onView}>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
       <span className="ref-id" style={{ color: 'var(--teal)', fontSize: 11 }}>{t.ref}</span>
       <Badge status={t.status as BadgeStatus} />
