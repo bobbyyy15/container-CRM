@@ -173,6 +173,20 @@ export class LeadService {
     return data;
   }
 
+  // The full ticket board (every status, every PIC) -- Procurement needs to see where every
+  // ticket stands, not just the ones still awaiting their own action. Deliberately not
+  // silo-filtered by pic_id, same reasoning as the pending-validation queue above.
+  static async getInquiryBoard() {
+    const { data, error } = await supabaseAdmin
+      .from('inquiries')
+      .select('*, companies(*), contacts(*), pics(name), container_sizes!container_size_id(id, name), container_conditions!container_condition_id(id, name), alt_size:container_sizes!alt_container_size_id(id, name), alt_condition:container_conditions!alt_container_condition_id(id, name)')
+      .not('status', 'eq', 'Removed')
+      .order('created_at', { ascending: false })
+      .limit(1000);
+    if (error) throw new Error(`Failed to load the ticket board: ${error.message}`);
+    return data;
+  }
+
   static async validateInquiryTicket(
     inquiryId: string,
     actorId: string,

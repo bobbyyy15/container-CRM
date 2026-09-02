@@ -92,6 +92,15 @@ const run = async () => {
     throw new Error(`Ticket A did not appear in Procurement's validation queue: ${JSON.stringify(queue.data.map((t: any) => t.id))}`);
   }
 
+  // The full board (every status, cross-silo) backs the kanban UI -- must also show it, and
+  // its "Pending Validation" bucket must match the dedicated queue endpoint above.
+  const board = await request(procToken, '/leads/inquiries/board');
+  if (!board.data.some((t: any) => t.id === ids.inquiryA)) {
+    throw new Error(`Ticket A did not appear on the ticket board: ${JSON.stringify(board.data.map((t: any) => t.id))}`);
+  }
+  const boardForbidden = await fetch(`${apiBase}/leads/inquiries/board`, { headers: { Authorization: `Bearer ${salesToken}` } });
+  if (boardForbidden.ok) throw new Error('Sales manager was able to access the Procurement ticket board');
+
   // A sales_manager must not be able to see or hit the procurement-only queue/validate routes.
   const queueForbidden = await fetch(`${apiBase}/leads/inquiries/pending-validation`, {
     headers: { Authorization: `Bearer ${salesToken}` },
@@ -211,7 +220,7 @@ const run = async () => {
   if (!quoteAfterApply.data.id) throw new Error('Ticket with an applied alternative could not be quoted');
   ids.quotationB = quoteAfterApply.data.id;
 
-  console.log('PASS hosted inquiry ticketing: create -> Procurement queue (cross-silo, role-gated) -> notify on create -> approve -> notify + quotable -> re-validate rejected -> reject requires reason -> structured alternative -> notify -> blocked from quoting -> apply alternative (ownership-checked) -> quotable');
+  console.log('PASS hosted inquiry ticketing: create -> Procurement queue + board (cross-silo, role-gated) -> notify on create -> approve -> notify + quotable -> re-validate rejected -> reject requires reason -> structured alternative -> notify -> blocked from quoting -> apply alternative (ownership-checked) -> quotable');
 };
 
 void (async () => {
