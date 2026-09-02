@@ -71,7 +71,7 @@ export const UserManagement = () => {
     }
   };
 
-  if (loading) return <div style={{ padding: 40, color: 'var(--t3)' }}>Loading users...</div>;
+  if (loading) return <div className="loading-row"><span className="spinner" />Loading users…</div>;
 
   return (
     <div className="page-scroll">

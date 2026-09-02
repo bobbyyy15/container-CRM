@@ -62,7 +62,7 @@ export const UserProfileSettings = ({ session }: { session: any }) => {
     setSaving(false);
   };
 
-  if (loading) return <div style={{ padding: 40, color: 'var(--t3)' }}>Loading profile...</div>;
+  if (loading) return <div className="loading-row"><span className="spinner" />Loading profile…</div>;
 
   const googleValue = !googleStatus
     ? 'Checking…'

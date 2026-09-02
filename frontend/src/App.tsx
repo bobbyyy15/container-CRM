@@ -650,12 +650,11 @@ const RecordDetailModal = ({ title, fields, onClose, footerExtra }: { title: str
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-const Sidebar = ({ active, onNav, expanded, mode, onModeChange, role }: {
+const Sidebar = ({ active, onNav, expanded, pinned, onTogglePin, role }: {
   active: Screen; onNav: (s: Screen) => void; expanded: boolean;
-  mode: 'expanded' | 'collapsed' | 'hover'; onModeChange: (m: 'expanded' | 'collapsed' | 'hover') => void;
+  pinned: boolean; onTogglePin: () => void;
   role?: string;
 }) => {
-  const [showModeMenu, setShowModeMenu] = useState(false)
   // Administration (User Management) and individual items with a `roles` allowlist (e.g.
   // Inquiry Validation, Procurement-only) are access-controlled; everything else is visible
   // to any authenticated role, see docs/CUSTOMERS_MODULE.md §5 for why that's a known,
@@ -707,37 +706,18 @@ const Sidebar = ({ active, onNav, expanded, mode, onModeChange, role }: {
 
       {/* Bottom */}
       <div className="sb-bottom">
-        <div style={{ position: 'relative' }}>
-          {showModeMenu && (
-            <>
-              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowModeMenu(false)} />
-              <div style={{ position: 'absolute', bottom: 'calc(100% + 10px)', left: expanded ? 0 : 4, width: 200, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 10, padding: 6, zIndex: 100, boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t4)', padding: '6px 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sidebar Mode</div>
-                {[
-                  { m: 'expanded', label: 'Pinned Open', icon: I.chevRight },
-                  { m: 'hover', label: 'Hover to Expand', icon: I.sidebar },
-                  { m: 'collapsed', label: 'Pinned Closed', icon: I.chevLeft },
-                ].map(opt => (
-                  <div key={opt.m} onClick={() => { onModeChange(opt.m as any); setShowModeMenu(false); }} style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6, cursor: 'pointer', background: mode === opt.m ? 'var(--brand-bg)' : 'transparent', color: mode === opt.m ? 'var(--brand)' : 'var(--t2)', fontSize: 13, fontWeight: 500 }}>
-                    <Ic n={opt.icon} size={14} style={{ color: mode === opt.m ? 'var(--brand)' : 'var(--t3)' }} />
-                    {opt.label}
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-          <button
-            type="button"
-            className="sb-item"
-            data-tooltip="Toggle Navigation Mode"
-            title={expanded ? undefined : 'Toggle Navigation Mode'}
-            onClick={() => setShowModeMenu(!showModeMenu)}
-          >
-            <div className="sb-icon-wrap">
-              <Ic n={I.sidebar} size={16} style={{ color: 'var(--sb-icon)' }} />
-            </div>
-          </button>
-        </div>
+        <button
+          type="button"
+          className="sb-item"
+          data-tooltip={pinned ? 'Collapse Sidebar' : 'Pin Sidebar Open'}
+          title={pinned ? 'Collapse Sidebar' : 'Pin Sidebar Open'}
+          onClick={onTogglePin}
+        >
+          <div className="sb-icon-wrap">
+            <Ic n={pinned ? I.chevLeft : I.chevRight} size={16} style={{ color: 'var(--sb-icon)' }} />
+          </div>
+          <span className="sb-item-label">{pinned ? 'Collapse' : 'Pin Open'}</span>
+        </button>
       </div>
     </aside>
   )
@@ -4329,12 +4309,13 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>(() =>
     new URLSearchParams(window.location.search).has('google_sync') ? 'system-settings' : 'dashboard'
   )
-  const [sidebarMode, setSidebarModeState] = useState<'expanded' | 'collapsed' | 'hover'>(() => {
-    return (localStorage.getItem('sidebarMode') as any) || 'expanded'
+  const [sidebarPinned, setSidebarPinnedState] = useState<boolean>(() => {
+    const stored = localStorage.getItem('sidebarMode')
+    return stored ? stored === 'expanded' : true
   })
-  const setSidebarMode = (mode: 'expanded' | 'collapsed' | 'hover') => {
-    localStorage.setItem('sidebarMode', mode)
-    setSidebarModeState(mode)
+  const setSidebarPinned = (pinned: boolean) => {
+    localStorage.setItem('sidebarMode', pinned ? 'expanded' : 'collapsed')
+    setSidebarPinnedState(pinned)
   }
   const [isHoveringSidebar, setIsHoveringSidebar] = useState(false)
   const [isDark, setIsDark] = useState(false)
@@ -4427,31 +4408,33 @@ export default function App() {
     }
   }
 
-  const isSidebarExpanded = sidebarMode === 'expanded' || (sidebarMode === 'hover' && isHoveringSidebar)
+  // Pinned = always expanded. Unpinned = collapsed rail that peeks open on hover,
+  // so users still get quick access without needing a click every time.
+  const isSidebarExpanded = sidebarPinned || isHoveringSidebar
 
   return (
     <div data-theme={isDark ? 'dark' : undefined} style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)', position: 'relative' }}>
-      
+
       {/* Physical spacer for layout so it doesn't push when hovering */}
-      <div style={{ 
-        width: sidebarMode === 'expanded' ? 240 : 68, 
-        minWidth: sidebarMode === 'expanded' ? 240 : 68,
+      <div style={{
+        width: sidebarPinned ? 240 : 68,
+        minWidth: sidebarPinned ? 240 : 68,
         flexShrink: 0,
-        transition: 'width 0.2s ease, min-width 0.2s ease' 
+        transition: 'width 0.2s ease, min-width 0.2s ease'
       }} />
 
       {/* Floating Sidebar */}
-      <div 
-        onMouseEnter={() => setIsHoveringSidebar(true)} 
+      <div
+        onMouseEnter={() => setIsHoveringSidebar(true)}
         onMouseLeave={() => setIsHoveringSidebar(false)}
         style={{ position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 90, display: 'flex' }}
       >
-        <Sidebar 
-          active={screen} 
-          onNav={handleNav} 
-          expanded={isSidebarExpanded} 
-          mode={sidebarMode}
-          onModeChange={setSidebarMode}
+        <Sidebar
+          active={screen}
+          onNav={handleNav}
+          expanded={isSidebarExpanded}
+          pinned={sidebarPinned}
+          onTogglePin={() => setSidebarPinned(!sidebarPinned)}
           role={currentProfile?.role}
         />
       </div>
