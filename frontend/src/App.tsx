@@ -103,6 +103,10 @@ const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') => {
           channel: row.requirements?.match(/email/i) ? 'Email' : 'Direct',
           company: row.companies?.name || '',
           contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
+          // Carried so the Quick Contact Lookup bar can actually match on phone/email,
+          // which is what its placeholder promises.
+          phone: row.contacts?.phone_direct || row.contacts?.phone_2 || '',
+          email: row.contacts?.email_active || row.contacts?.email_2 || '',
           category: row.requirements || 'To be qualified',
           size: row.container_sizes?.name || '—',
           condition: row.container_conditions?.name || '—',
@@ -574,13 +578,14 @@ const Prog = ({ pct, color = '#315EF6', tall }: { pct: number; color?: string; t
 
 const Divider = () => <div className="divider" />
 
-const Btn = ({ children, variant = 'secondary', sm, className = '', onClick, style }: {
+const Btn = ({ children, variant = 'secondary', sm, className = '', onClick, style, disabled, title }: {
   children: React.ReactNode; variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
   sm?: boolean; className?: string; onClick?: React.MouseEventHandler<HTMLButtonElement>; style?: React.CSSProperties
+  disabled?: boolean; title?: string
 }) => (
   <button
     className={`btn btn-${variant}${sm ? ' btn-sm' : ''} ${className}`}
-    onClick={onClick} style={style}
+    onClick={onClick} style={style} disabled={disabled} title={title}
   >{children}</button>
 )
 
@@ -1884,7 +1889,12 @@ const InquiryList = () => {
     const term = lookup.trim().toLowerCase()
     const channelMatch = !channel || r.channel === channel
     const picMatch = !picFilter || r.pic === picFilter
-    return tabMatch && channelMatch && picMatch && (!term || [r.company, r.contact, r.ref, r.category].some(value => String(value).toLowerCase().includes(term)))
+    // Phone matching ignores formatting so "2065550088" finds "+1-206-555-0088".
+    const digits = term.replace(/\D/g, '')
+    const phoneMatch = digits.length >= 4 && String(r.phone).replace(/\D/g, '').includes(digits)
+    return tabMatch && channelMatch && picMatch && (!term
+      || phoneMatch
+      || [r.company, r.contact, r.ref, r.category, r.phone, r.email].some(value => String(value).toLowerCase().includes(term)))
   })
 
   return (
@@ -1908,10 +1918,15 @@ const InquiryList = () => {
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-s)', background: 'var(--ws)', flexShrink: 0 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Quick Contact Lookup</div>
         <div style={{ display: 'flex', gap: 8, maxWidth: 480 }}>
-          <input className="inp sm" placeholder="Enter phone number or email address…" value={lookup} onChange={e => setLookup(e.target.value)} style={{ flex: 1 }} />
-          <Btn variant="primary" sm><Ic n={I.search} size={13} /> Lookup</Btn>
+          <input className="inp sm" placeholder="Enter phone number, email, company or ref…" value={lookup} onChange={e => setLookup(e.target.value)} style={{ flex: 1 }} />
+          {lookup.trim() && <Btn variant="secondary" sm onClick={() => setLookup('')}><Ic n={I.x} size={13} /> Clear</Btn>}
           <Btn variant="primary" sm onClick={() => setShowNewInquiry(true)}><Ic n={I.plus} size={13} /> New Inquiry</Btn>
         </div>
+        {lookup.trim() && (
+          <div style={{ fontSize: 11.5, color: 'var(--t4)', marginTop: 6 }}>
+            {filtered.length === 0 ? 'No inquiries match that contact.' : `${filtered.length} matching ${filtered.length === 1 ? 'inquiry' : 'inquiries'}`}
+          </div>
+        )}
       </div>
 
       {/* Status cards */}
@@ -2780,8 +2795,31 @@ const DailyTasks = () => (
 
 const RemovedSheet = () => {
   const [showPaste, setShowPaste] = useState(false)
+  const [pasteText, setPasteText] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [revision, setRevision] = useState(0)
   const [data, setData] = useState<any[]>([])
   const [search, setSearch] = useState('')
+
+  const detectedCount = pasteText.split('\n').map(line => line.trim()).filter(Boolean).length
+
+  const submitPaste = async () => {
+    if (!detectedCount) return
+    setSubmitting(true)
+    try {
+      const res = await api.post('/leads/removed/bulk', { text: pasteText, reason: 'Added from Removed Sheet' })
+      const matched = (res.data.data || []).filter((r: any) => r.company_name || r.contact_name).length
+      toast(`${detectedCount} ${detectedCount === 1 ? 'entry' : 'entries'} suppressed — ${matched} matched an existing CRM contact.`, 'success')
+      setPasteText('')
+      setShowPaste(false)
+      setRevision(r => r + 1)
+    } catch (err: any) {
+      toast(err.response?.data?.error?.message ?? 'Could not process the pasted list.', 'error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   useEffect(() => {
     api.get('/leads/removed').then(response => {
       if (response.data.success) setData((response.data.data || []).map((row: any) => ({
@@ -2799,7 +2837,7 @@ const RemovedSheet = () => {
         currStatus: 'Removed',
       })))
     }).catch(console.error)
-  }, [])
+  }, [revision])
   const filtered = data.filter(row => {
     const term = search.trim().toLowerCase()
     return !term || [row.co, row.contact, row.phone, row.email, row.reason]
@@ -2818,7 +2856,7 @@ const RemovedSheet = () => {
         <div className="toolbar-right">
           <Btn variant="secondary" sm onClick={() => setShowPaste(true)}><Ic n={I.copy} size={13} /> Paste Opted-Out</Btn>
           <Btn variant="ghost" sm onClick={() => exportToCSV(data, 'removed')}><Ic n={I.export} size={13} /> Export</Btn>
-          <Btn variant="danger" sm><Ic n={I.plus} size={13} /> Add Entry</Btn>
+          <Btn variant="danger" sm onClick={() => setShowPaste(true)}><Ic n={I.plus} size={13} /> Add Entry</Btn>
         </div>
       </div>
       <div className="table-wrap">
@@ -2859,12 +2897,12 @@ const RemovedSheet = () => {
             </div>
             <div className="modal-body">
               <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 12 }}>Paste phone numbers or email addresses (one per line). The system will find and update matching CRM records.</p>
-              <textarea className="inp" rows={8} placeholder={'+1-206-555-0088\nbounce@example.com\n+1-701-555-0341'} style={{ height: 'auto', padding: '10px 12px', fontFamily: 'var(--mono)', fontSize: 12 }} />
-              <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--t4)' }}>Detected: 0 entries</div>
+              <textarea className="inp" rows={8} autoFocus value={pasteText} onChange={e => setPasteText(e.target.value)} placeholder={'+1-206-555-0088\nbounce@example.com\n+1-701-555-0341'} style={{ height: 'auto', padding: '10px 12px', fontFamily: 'var(--mono)', fontSize: 12 }} />
+              <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--t4)' }}>Detected: {detectedCount} {detectedCount === 1 ? 'entry' : 'entries'}</div>
             </div>
             <div className="modal-footer">
               <Btn variant="ghost" onClick={() => setShowPaste(false)}>Cancel</Btn>
-              <Btn variant="danger">Match &amp; Remove</Btn>
+              <Btn variant="danger" onClick={submitPaste} disabled={submitting || !detectedCount}>{submitting ? 'Removing…' : 'Match & Remove'}</Btn>
             </div>
           </div>
         </div>
@@ -3146,6 +3184,13 @@ const PICPerformance = () => {
 const ProfitAnalytics = () => {
   const analytics = useAnalytics();
   const profitChartData: ProfitChartPoint[] = analytics?.charts?.profitChartData || [];
+  const revenue = analytics?.metrics?.total_revenue ?? 0;
+  const grossProfit = analytics?.metrics?.total_gross_profit ?? 0;
+  // Buying cost isn't returned separately -- it's the difference by definition, since
+  // gross_profit is computed as revenue - buying_cost when a sale is recorded.
+  const buyingCost = revenue - grossProfit;
+  const margin = analytics?.metrics?.profit_margin ?? 0;
+  const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
   return (
   <div className="page-scroll">
     <div className="greeting-bar" style={{ marginBottom: 0 }}>
@@ -3155,10 +3200,10 @@ const ProfitAnalytics = () => {
     <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
         {[
-          { label: 'YTD Revenue', val: '$0', color: 'var(--brand)' },
-          { label: 'YTD Buying Cost', val: '$0', color: 'var(--t3)' },
-          { label: 'YTD Gross Profit', val: '$0', color: 'var(--green)' },
-          { label: 'Avg Profit Margin', val: '0%', color: 'var(--teal)' },
+          { label: 'YTD Revenue', val: money(revenue), color: 'var(--brand)' },
+          { label: 'YTD Buying Cost', val: money(buyingCost), color: 'var(--t3)' },
+          { label: 'YTD Gross Profit', val: money(grossProfit), color: 'var(--green)' },
+          { label: 'Avg Profit Margin', val: `${margin.toFixed(1)}%`, color: 'var(--teal)' },
         ].map(k => (
           <div key={k.label} className="kpi-card">
             <div className="kpi-label">{k.label}</div>

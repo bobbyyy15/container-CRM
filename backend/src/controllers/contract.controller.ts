@@ -80,8 +80,16 @@ export class ContractController {
       
       if (contractErr || !contract) throw new Error('Contract not found');
 
+      // Pickup/contract status is operational data: admins and the operations team move it
+      // for whoever owns the sale, so gate on role first and fall back to PIC ownership for
+      // sales_manager users (who may only touch their own book).
       const saleData = Array.isArray(contract.sales) ? contract.sales[0] : contract.sales;
-      if (!req.auth?.profile.pic_id || (saleData as any)?.pic_id !== req.auth.profile.pic_id) {
+      const actorRole = req.auth?.profile.role;
+      const canManageAnyContract = actorRole === 'admin' || actorRole === 'operations';
+      const ownsContract = Boolean(req.auth?.profile.pic_id)
+        && (saleData as any)?.pic_id === req.auth!.profile.pic_id;
+
+      if (!canManageAnyContract && !ownsContract) {
         throw new Error('Unauthorized to update this contract');
       }
 

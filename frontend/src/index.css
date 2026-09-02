@@ -578,6 +578,7 @@ body {
 .btn-ghost:hover { background: var(--s2); color: var(--t1); }
 .btn-danger { background: var(--red-bg); color: var(--red); }
 .btn-danger:hover { background: #FEE2E2; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-sm { padding: 5px 10px; font-size: 12px; gap: 5px; border-radius: var(--r-xs); }
 .btn-xs { padding: 3px 8px; font-size: 11.5px; gap: 4px; border-radius: var(--r-xs); }
 .btn-icon { padding: 7px; border-radius: var(--r-sm); }
