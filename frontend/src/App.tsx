@@ -597,7 +597,7 @@ const AssignPicModal = ({ count, onClose, onAssign }: { count: number; onClose: 
 // Sales, Contracts, Customers, etc). No extra API call needed -- the row already has every
 // field the table shows, this just lays them out full-size instead of squeezed into a table cell.
 type DetailField = { label: string; value: React.ReactNode }
-const RecordDetailModal = ({ title, fields, onClose }: { title: string; fields: DetailField[]; onClose: () => void }) => (
+const RecordDetailModal = ({ title, fields, onClose, footerExtra }: { title: string; fields: DetailField[]; onClose: () => void; footerExtra?: React.ReactNode }) => (
   <div className="overlay" onClick={onClose}>
     <div className="modal" style={{ width: 480 }} onClick={e => e.stopPropagation()}>
       <div className="modal-header">
@@ -614,6 +614,7 @@ const RecordDetailModal = ({ title, fields, onClose }: { title: string; fields: 
       </div>
       <div className="modal-footer">
         <Btn variant="ghost" onClick={onClose}>Close</Btn>
+        {footerExtra}
       </div>
     </div>
   </div>
@@ -3290,14 +3291,23 @@ const InquiryFunnel = () => {
 
 // ─── Inquiry Validation (Procurement) ──────────────────────────────────────────
 
-const useValidationQueue = (revision = 0) => {
+const BOARD_COLUMNS: { key: string; label: string; statuses: string[]; dot: string }[] = [
+  { key: 'pending', label: 'Pending Validation', statuses: ['Pending Validation'], dot: '#D97706' },
+  { key: 'review', label: 'Under Review', statuses: ['Under Review'], dot: '#315EF6' },
+  { key: 'quoted', label: 'Quotation Created', statuses: ['Quotation Created'], dot: '#7C3AED' },
+  { key: 'won', label: 'Converted to Sale', statuses: ['Converted to Sale'], dot: '#059669' },
+  { key: 'rejected', label: 'Rejected', statuses: ['Validation Rejected', 'Quotation Rejected'], dot: '#DC2626' },
+]
+
+const useInquiryBoard = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
   useEffect(() => {
-    api.get('/leads/inquiries/pending-validation').then(res => {
+    api.get('/leads/inquiries/board').then(res => {
       if (res.data.success) setData((res.data.data || []).map((row: any) => ({
         id: row.id,
         ref: `INQ-${row.id.slice(0, 8).toUpperCase()}`,
         date: new Date(row.created_at).toLocaleDateString(),
+        status: row.status,
         company: row.companies?.name || '',
         contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
         pic: row.pics?.name || 'Unassigned',
@@ -3307,6 +3317,12 @@ const useValidationQueue = (revision = 0) => {
         location: [row.state_province, row.country].filter(Boolean).join(', ') || '—',
         quantity: row.quantity ?? '—',
         price: row.asking_price != null ? Number(row.asking_price) : null,
+        rejectionReason: row.rejection_reason || '',
+        altSize: row.alt_size?.name || '',
+        altCondition: row.alt_condition?.name || '',
+        altQuantity: row.alt_quantity ?? null,
+        altAskingPrice: row.alt_asking_price != null ? Number(row.alt_asking_price) : null,
+        altNotes: row.alt_notes || '',
       })));
     }).catch(console.error)
   }, [revision])
@@ -3403,16 +3419,57 @@ const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
   )
 }
 
+const TicketCard = ({ t, onView, onApprove, onReject }: {
+  t: any
+  onView: () => void
+  onApprove?: () => void
+  onReject?: () => void
+}) => (
+  <div className="card" style={{ padding: 14, marginBottom: 10, cursor: 'pointer' }} onClick={onView}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
+      <span className="ref-id" style={{ color: 'var(--teal)', fontSize: 11 }}>{t.ref}</span>
+      <Badge status={t.status as BadgeStatus} />
+    </div>
+    <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--t1)', marginBottom: 2 }}>{t.company}</div>
+    <div style={{ fontSize: 12, color: 'var(--t3)', marginBottom: 8 }}>{t.contact}</div>
+    <div style={{ fontSize: 11.5, color: 'var(--t3)', marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as any }}>{t.description}</div>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: onApprove || onReject ? 10 : 0 }}>
+      <span className="badge b-gray" style={{ fontSize: 10.5 }}>{t.size}</span>
+      <span className="badge b-gray" style={{ fontSize: 10.5 }}>{t.condition}</span>
+      <span className="badge b-gray" style={{ fontSize: 10.5 }}>Qty {t.quantity}</span>
+      {t.price != null && <span className="badge b-gray" style={{ fontSize: 10.5 }}>${t.price.toLocaleString()}</span>}
+      <ChipPIC label={t.pic} />
+    </div>
+    {(onApprove || onReject) && (
+      <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
+        {onReject && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', flex: 1 }} onClick={onReject}>Reject</button>}
+        {onApprove && <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={onApprove}>Approve</button>}
+      </div>
+    )}
+  </div>
+)
+
 const InquiryValidation = () => {
   const [revision, setRevision] = useState(0)
-  const tickets = useValidationQueue(revision)
+  const tickets = useInquiryBoard(revision)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
+  const [viewingId, setViewingId] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [search, setSearch] = useState('')
+  const [picFilter, setPicFilter] = useState('')
+
+  const pics = [...new Set(tickets.map((t: any) => t.pic).filter(Boolean))].sort() as string[]
+  const term = search.trim().toLowerCase()
+  const filtered = tickets.filter((t: any) =>
+    (!picFilter || t.pic === picFilter) &&
+    (!term || [t.company, t.contact, t.ref].some(v => String(v).toLowerCase().includes(term)))
+  )
 
   const approve = async (id: string) => {
     setError('')
     try {
       await api.post(`/leads/inquiries/${id}/validate`, { approved: true })
+      setViewingId(null)
       setRevision(v => v + 1)
     } catch (err: any) {
       setError(err.response?.data?.error?.message ?? 'Could not approve this ticket.')
@@ -3432,6 +3489,7 @@ const InquiryValidation = () => {
         altNotes: alternative.notes,
       })
       setRejectingId(null)
+      setViewingId(null)
       setRevision(v => v + 1)
     } catch (err: any) {
       setError(err.response?.data?.error?.message ?? 'Could not reject this ticket.')
@@ -3439,6 +3497,10 @@ const InquiryValidation = () => {
   }
 
   const rejectingTicket = tickets.find((t: any) => t.id === rejectingId)
+  const viewingTicket = tickets.find((t: any) => t.id === viewingId)
+  const pendingCount = tickets.filter((t: any) => t.status === 'Pending Validation').length
+  const rejectedCount = tickets.filter((t: any) => ['Validation Rejected', 'Quotation Rejected'].includes(t.status)).length
+  const wonCount = tickets.filter((t: any) => t.status === 'Converted to Sale').length
 
   return (
     <div className="page-scroll">
@@ -3446,46 +3508,97 @@ const InquiryValidation = () => {
         <div className="page-header" style={{ padding: 0, border: 'none', marginBottom: 16 }}>
           <div>
             <div className="page-title">Inquiry Validation</div>
-            <div className="page-desc">Every inquiry a Sales Manager creates lands here as a ticket before it can be quoted. Approve it, or reject it with a required reason and an optional alternative offer.</div>
+            <div className="page-desc">Every inquiry a Sales Manager creates lands here as a ticket before it can be quoted.</div>
           </div>
-          <span className="count-label">{tickets.length} awaiting review</span>
         </div>
-        {error && <div style={{ padding: '9px 11px', borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12, marginBottom: 12 }}>{error}</div>}
-        {tickets.length === 0 ? (
-          <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--t4)', fontSize: 13 }}>
-            No tickets waiting for validation.
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {tickets.map((t: any) => (
-              <div key={t.id} className="card" style={{ padding: 18 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span className="ref-id" style={{ color: 'var(--teal)' }}>{t.ref}</span>
-                      <span style={{ fontSize: 12, color: 'var(--t4)' }}>{t.date}</span>
-                    </div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--t1)', marginTop: 4 }}>{t.company}</div>
-                    <div style={{ fontSize: 12.5, color: 'var(--t3)' }}>{t.contact} · <ChipPIC label={t.pic} /></div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button className="btn btn-ghost" style={{ color: 'var(--red)' }} onClick={() => setRejectingId(t.id)}>Reject</button>
-                    <button className="btn btn-primary" onClick={() => approve(t.id)}>Approve</button>
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, padding: '12px 0', borderTop: '1px solid var(--border-s)' }}>
-                  <div><div style={{ fontSize: 11, color: 'var(--t4)', marginBottom: 2 }}>Size</div><div style={{ fontSize: 13, fontWeight: 600 }}>{t.size}</div></div>
-                  <div><div style={{ fontSize: 11, color: 'var(--t4)', marginBottom: 2 }}>Condition</div><div style={{ fontSize: 13, fontWeight: 600 }}>{t.condition}</div></div>
-                  <div><div style={{ fontSize: 11, color: 'var(--t4)', marginBottom: 2 }}>Quantity</div><div style={{ fontSize: 13, fontWeight: 600 }}>{t.quantity}</div></div>
-                  <div><div style={{ fontSize: 11, color: 'var(--t4)', marginBottom: 2 }}>Asking price</div><div style={{ fontSize: 13, fontWeight: 600 }}>{t.price != null ? `$${t.price.toLocaleString()}` : '—'}</div></div>
-                  <div><div style={{ fontSize: 11, color: 'var(--t4)', marginBottom: 2 }}>Location</div><div style={{ fontSize: 13, fontWeight: 600 }}>{t.location}</div></div>
-                </div>
-                <div style={{ fontSize: 12.5, color: 'var(--t3)', paddingTop: 8, borderTop: '1px solid var(--border-s)' }}>{t.description}</div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+          {[
+            { label: 'Total Tickets', val: tickets.length, icon: I.inquiry, color: 'var(--brand)' },
+            { label: 'Pending Validation', val: pendingCount, icon: I.warning, color: 'var(--amber)' },
+            { label: 'Converted to Sale', val: wonCount, icon: I.check, color: 'var(--green)' },
+            { label: 'Rejected', val: rejectedCount, icon: I.x, color: 'var(--red)' },
+          ].map(k => (
+            <div key={k.label} className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 38, height: 38, borderRadius: 9, background: `${k.color}15`, color: k.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Ic n={k.icon} size={17} />
               </div>
-            ))}
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--t1)' }}>{k.val}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--t4)' }}>{k.label}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="toolbar" style={{ padding: 0, marginBottom: 14 }}>
+          <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{pics.map(p => <option key={p} value={p}>{p}</option>)}</select>
+          <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search tickets, company, contact…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+          <div className="toolbar-right">
+            <span className="count-label">Showing {filtered.length} of {tickets.length} tickets</span>
           </div>
-        )}
+        </div>
+
+        {error && <div style={{ padding: '9px 11px', borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12, marginBottom: 12 }}>{error}</div>}
+
+        <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 8, alignItems: 'flex-start' }}>
+          {BOARD_COLUMNS.map(col => {
+            const colTickets = filtered.filter((t: any) => col.statuses.includes(t.status))
+            return (
+              <div key={col.key} style={{ minWidth: 260, width: 260, flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, padding: '0 2px' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: col.dot, flexShrink: 0 }} />
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--t1)' }}>{col.label}</span>
+                  <span style={{ fontSize: 11, color: 'var(--t4)', marginLeft: 'auto' }}>{colTickets.length}</span>
+                </div>
+                <div style={{ maxHeight: 560, overflowY: 'auto', paddingRight: 2 }}>
+                  {colTickets.map((t: any) => (
+                    <TicketCard
+                      key={t.id}
+                      t={t}
+                      onView={() => setViewingId(t.id)}
+                      onApprove={col.key === 'pending' ? () => approve(t.id) : undefined}
+                      onReject={col.key === 'pending' ? () => setRejectingId(t.id) : undefined}
+                    />
+                  ))}
+                  {colTickets.length === 0 && (
+                    <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--t4)', fontSize: 11.5 }}>No tickets</div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
+      {viewingTicket && (
+        <RecordDetailModal
+          title={`${viewingTicket.ref} — ${viewingTicket.company}`}
+          onClose={() => setViewingId(null)}
+          fields={[
+            { label: 'Status', value: <Badge status={viewingTicket.status as BadgeStatus} /> },
+            { label: 'PIC', value: viewingTicket.pic },
+            { label: 'Contact', value: viewingTicket.contact },
+            { label: 'Location', value: viewingTicket.location },
+            { label: 'Size', value: viewingTicket.size },
+            { label: 'Condition', value: viewingTicket.condition },
+            { label: 'Quantity', value: viewingTicket.quantity },
+            { label: 'Asking price', value: viewingTicket.price != null ? `$${viewingTicket.price.toLocaleString()}` : '—' },
+            { label: 'Received', value: viewingTicket.date },
+            { label: 'Description', value: viewingTicket.description },
+            ...(viewingTicket.rejectionReason ? [{ label: 'Rejection reason', value: viewingTicket.rejectionReason }] : []),
+            ...(viewingTicket.altSize ? [{ label: 'Alternative size', value: viewingTicket.altSize }] : []),
+            ...(viewingTicket.altCondition ? [{ label: 'Alternative condition', value: viewingTicket.altCondition }] : []),
+            ...(viewingTicket.altAskingPrice != null ? [{ label: 'Alternative price', value: `$${viewingTicket.altAskingPrice.toLocaleString()}` }] : []),
+            ...(viewingTicket.altNotes ? [{ label: 'Alternative notes', value: viewingTicket.altNotes }] : []),
+          ]}
+          footerExtra={viewingTicket.status === 'Pending Validation' ? (
+            <>
+              <button className="btn btn-ghost" style={{ color: 'var(--red)' }} onClick={() => setRejectingId(viewingTicket.id)}>Reject</button>
+              <button className="btn btn-primary" onClick={() => approve(viewingTicket.id)}>Approve</button>
+            </>
+          ) : undefined}
+        />
+      )}
       {rejectingTicket && (
         <RejectTicketModal
           ticketRef={rejectingTicket.ref}
