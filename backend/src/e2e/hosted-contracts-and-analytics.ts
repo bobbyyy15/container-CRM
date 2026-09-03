@@ -42,8 +42,11 @@ const cleanup = async () => {
   }
   await supabaseAdmin.from('contacts').delete().in('id', [ids.contact].filter(Boolean) as string[]);
   await supabaseAdmin.from('companies').delete().in('id', [ids.company].filter(Boolean) as string[]);
-  await supabaseAdmin.from('pics').delete().in('profile_id', [ids.user].filter(Boolean) as string[]);
-  if (ids.user) await supabaseAdmin.auth.admin.deleteUser(ids.user);
+  // stranger/ops are normally torn down inline mid-run; these are the fallbacks for a
+  // mid-test failure, so a crashed run doesn't leak users or their auto-created PICs.
+  const users = [ids.user, ids.stranger, ids.ops].filter(Boolean) as string[];
+  await supabaseAdmin.from('pics').delete().in('profile_id', users);
+  for (const id of users) await supabaseAdmin.auth.admin.deleteUser(id).catch(() => {});
 };
 
 const run = async () => {
@@ -146,13 +149,50 @@ const run = async () => {
   await supabaseAdmin.from('pics').delete().eq('profile_id', ids.stranger);
   await supabaseAdmin.auth.admin.deleteUser(ids.stranger);
 
+  // An operations user owns no sales PIC, but Pickup Tracking / Customer Contracts are
+  // in its nav and updateContract explicitly authorises it to manage ANY contract. The
+  // listing used to filter strictly by pic_id, so operations saw an empty screen for
+  // contracts it was allowed to update -- visibility must match that authority.
+  const { data: opsUser, error: opsErr } = await supabaseAdmin.auth.admin.createUser({
+    email: `crm-e2e-ops-${stamp}@example.test`, password, email_confirm: true,
+    user_metadata: { username: `crm_e2e_ops_${stamp}` },
+  });
+  if (opsErr || !opsUser.user) throw opsErr ?? new Error('Operations user was not created');
+  ids.ops = opsUser.user.id;
+  await supabaseAdmin.from('profiles').update({ role: 'operations' }).eq('id', ids.ops);
+  const { data: opsSignIn } = await publicClient.auth.signInWithPassword({ email: `crm-e2e-ops-${stamp}@example.test`, password });
+  const opsToken = opsSignIn!.session!.access_token;
+
+  const opsContracts = await request(opsToken, '/contracts');
+  if (!opsContracts.data.some((c: any) => c.id === ids.contract)) {
+    throw new Error("An operations user could not see a contract it is authorised to update (listing/update authority mismatch)");
+  }
+
+  const opsPatch = await fetch(`${apiBase}/contracts/${ids.contract}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${opsToken}` },
+    body: JSON.stringify({ pickup_status: 'Picked Up' }),
+  });
+  if (!opsPatch.ok) {
+    throw new Error(`An operations user could not update a contract it is authorised to manage: ${opsPatch.status}`);
+  }
+
+  // Customer Accounts is in the same operations nav group and must not 403 either.
+  const opsCustomers = await request(opsToken, '/customers');
+  if (!Array.isArray(opsCustomers.data)) {
+    throw new Error('An operations user could not list customers.');
+  }
+
+  await supabaseAdmin.from('pics').delete().eq('profile_id', ids.ops);
+  await supabaseAdmin.auth.admin.deleteUser(ids.ops);
+
   // Dashboard analytics RPC
   const dashboard = await request(token, '/analytics/dashboard');
   if (!dashboard.data.charts || !Array.isArray(dashboard.data.charts.profitChartData)) {
     throw new Error(`Dashboard analytics did not return charts: ${JSON.stringify(dashboard.data)}`);
   }
 
-  console.log('PASS hosted contracts + pickup tracking + dashboard analytics: create contract -> list -> update pickup status -> cross-PIC access denied -> dashboard charts present');
+  console.log('PASS hosted contracts + pickup tracking + dashboard analytics: create contract -> list -> update pickup status -> cross-PIC access denied -> operations sees + updates any contract -> dashboard charts present');
 };
 
 void (async () => {

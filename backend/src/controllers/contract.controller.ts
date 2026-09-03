@@ -9,15 +9,23 @@ export class ContractController {
       const pickStatus = req.query.pickStatus as string;
       const search = req.query.search as string;
 
-      // DATA SILOS ENFORCEMENT -- consistent with every other pipeline module: no PIC
-      // assigned (including every admin, by design) means nothing to see.
+      // Contracts are operational fulfilment records, so visibility has to match the
+      // update authorization in updateContract below: admin and operations manage any
+      // contract regardless of which sales PIC owns the underlying sale, so they must
+      // be able to SEE them too. Previously this filtered strictly by pic_id, which
+      // left operations staring at an empty Pickup Tracking screen for contracts they
+      // were explicitly allowed to update.
+      const actorRole = req.auth?.profile.role;
       const picId = req.auth?.profile.pic_id;
-      if (!picId) return res.json({ success: true, data: [] });
+      const seesAllContracts = actorRole === 'admin' || actorRole === 'operations';
+
+      if (!seesAllContracts && !picId) return res.json({ success: true, data: [] });
 
       let dbQuery = supabaseAdmin
         .from('contracts_view')
-        .select('*')
-        .eq('pic_id', picId);
+        .select('*');
+
+      if (!seesAllContracts) dbQuery = dbQuery.eq('pic_id', picId);
 
       // 2. STATUS FILTERING
       if (status && status !== 'All Statuses') {
@@ -52,7 +60,13 @@ export class ContractController {
       const { data: sale, error: saleErr } = await saleQuery;
       if (saleErr || !sale) throw new Error('Sale not found');
 
-      if (!req.auth?.profile.pic_id || sale.pic_id !== req.auth.profile.pic_id) {
+      // Mirrors the list/update rules: admin and operations raise contracts against any
+      // sale, a sales_manager only against their own.
+      const actorRole = req.auth?.profile.role;
+      const canManageAnySale = actorRole === 'admin' || actorRole === 'operations';
+      const ownsSale = Boolean(req.auth?.profile.pic_id) && sale.pic_id === req.auth!.profile.pic_id;
+
+      if (!canManageAnySale && !ownsSale) {
         throw new Error('Unauthorized to create a contract for this sale');
       }
 

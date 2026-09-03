@@ -130,10 +130,24 @@ records created and cleaned up), not just locally:
 - Username login and the false-success signup message (see backend commit history — unrelated
   to this batch of work but fixed the same day).
 
-## 8. Explicitly NOT built yet — Inventory module + Inquiry ticketing
+## 8. Inventory module + Inquiry ticketing — BUILT (was: "not built yet")
 
-This was described in the same conversation but is a distinct subsystem large enough that it
-wasn't guess-built. Recorded here so the shape isn't lost before it's picked up.
+> **STATUS 2026-09-03: both are built, merged, and covered by hosted e2e tests.** This section
+> originally read "Explicitly NOT built yet" and is retained for the reasoning trail. Current
+> state:
+>
+> - **Inquiry ticketing** — migrations `031_inquiry_ticketing_and_notifications.sql` and
+>   `032_structured_inquiry_alternative.sql`. Every inquiry routes to Procurement's validation
+>   queue for approve / reject-with-structured-alternative before it becomes quotable, with in-app
+>   notifications both directions. UI is the kanban board in `InquiryValidation`.
+> - **Inventory** — migration `033_inventory_module.sql`, owned by the `operations` role, with
+>   full CRUD, bulk Excel import, stock adjustment, and a view-all / edit-own / admin-delete
+>   ownership model. See `docs/OPERATIONS_MODULE.md` for the shipped shape and the answers to
+>   every open question listed below.
+> - Hosted e2e coverage: `hosted-inquiry-ticketing.ts`, `hosted-inventory-operations.ts`.
+>
+> The open questions below have all been answered by the implementation. Do not treat them as
+> outstanding.
 
 **What was described:**
 - A new **Inventory** module. Read access is shared (everyone can view all inventory), but each
@@ -167,8 +181,11 @@ assumed):
    a genuinely separate concept (e.g. tracking specific physical units by serial/unit number
    rather than aggregate quantity)?
 
-**Do not start building this without the above answered** — the risk of guessing wrong on the
-ticket-routing model in particular is a rebuild, not a patch.
+~~**Do not start building this without the above answered**~~ — resolved; see the status note at
+the top of this section. (The warning proved justified: the first Inventory implementation used
+made-up size/condition strings instead of the real `container_sizes`/`container_conditions`
+catalog, which silently broke the live stock lookup on every real ticket. Caught in review and
+fixed before merge.)
 
 ## 9. Also still pending (from earlier in this project, unrelated to today's batch)
 

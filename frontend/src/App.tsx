@@ -645,14 +645,17 @@ const Prog = ({ pct, color = '#315EF6', tall }: { pct: number; color?: string; t
 
 const Divider = () => <div className="divider" />
 
-const Btn = ({ children, variant = 'secondary', sm, className = '', onClick, style, disabled, title }: {
+const Btn = ({ children, variant = 'secondary', sm, className = '', onClick, style, disabled, title, ariaLabel }: {
   children: React.ReactNode; variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
   sm?: boolean; className?: string; onClick?: React.MouseEventHandler<HTMLButtonElement>; style?: React.CSSProperties
-  disabled?: boolean; title?: string
+  disabled?: boolean; title?: string; ariaLabel?: string
 }) => (
   <button
     className={`btn btn-${variant}${sm ? ' btn-sm' : ''} ${className}`}
     onClick={onClick} style={style} disabled={disabled} title={title}
+    // Icon-only buttons have no text node, so without this a screen reader announces
+    // just "button". Falls back to title so a tooltip doubles as the accessible name.
+    aria-label={ariaLabel ?? title}
   >{children}</button>
 )
 
@@ -673,7 +676,7 @@ const AssignPicModal = ({ count, onClose, onAssign }: { count: number; onClose: 
       <div className="modal" style={{ width: 400 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">Assign PIC</div>
-          <Btn variant="ghost" sm onClick={onClose}><Ic n={I.x} size={16} /></Btn>
+          <Btn variant="ghost" sm onClick={onClose} ariaLabel="Close"><Ic n={I.x} size={16} /></Btn>
         </div>
         <div className="modal-body">
           <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 12 }}>Reassign {count} selected record{count === 1 ? '' : 's'} to:</p>
@@ -702,7 +705,7 @@ const RecordDetailModal = ({ title, fields, onClose, footerExtra }: { title: str
     <div className="modal" style={{ width: 480 }} onClick={e => e.stopPropagation()}>
       <div className="modal-header">
         <div className="modal-title">{title}</div>
-        <Btn variant="ghost" sm onClick={onClose}><Ic n={I.x} size={16} /></Btn>
+        <Btn variant="ghost" sm onClick={onClose} ariaLabel="Close"><Ic n={I.x} size={16} /></Btn>
       </div>
       <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         {fields.map(f => (
@@ -765,6 +768,7 @@ const Sidebar = ({ active, onNav, expanded, pinned, onTogglePin, role }: {
                 data-tooltip={item.label}
                 title={expanded ? undefined : item.label}
                 aria-current={active === item.id ? 'page' : undefined}
+                aria-label={item.label}
               >
                 <div className="sb-icon-wrap">
                   <Ic n={item.icon} size={16} style={{ color: active === item.id ? 'white' : 'var(--sb-icon)' }} />
@@ -783,6 +787,8 @@ const Sidebar = ({ active, onNav, expanded, pinned, onTogglePin, role }: {
           className="sb-item"
           data-tooltip={pinned ? 'Collapse Sidebar' : 'Pin Sidebar Open'}
           title={pinned ? 'Collapse Sidebar' : 'Pin Sidebar Open'}
+          aria-label={pinned ? 'Collapse sidebar' : 'Pin sidebar open'}
+          aria-pressed={pinned}
           onClick={onTogglePin}
         >
           <div className="sb-icon-wrap">
@@ -925,7 +931,7 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
           {syncText}
         </div>
 
-        <button className="tb-btn" onClick={onToggleDark} title={isDark ? 'Light mode' : 'Dark mode'}>
+        <button className="tb-btn" onClick={onToggleDark} title={isDark ? 'Light mode' : 'Dark mode'} aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}>
           <Ic n={isDark ? I.sun : I.moon} size={16} />
         </button>
 
@@ -968,7 +974,7 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
               </div>
             </>
           )}
-          <button className="tb-btn" onClick={() => setShowNotifs(!showNotifs)} title="Notifications">
+          <button className="tb-btn" onClick={() => setShowNotifs(!showNotifs)} title="Notifications" aria-label="Notifications">
             <Ic n={I.bell} size={17} />
             {unread > 0 && <span className="notif-dot" />}
           </button>
@@ -1854,7 +1860,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
       {/* Tabs -- each one shows a real subset of columns, see VIEW_FIELDS above */}
       <div className="tabs">
         {Object.keys(VIEW_FIELDS).map(t => (
-          <div key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</div>
+          <button key={t} type="button" role="tab" aria-selected={tab === t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</button>
         ))}
       </div>
 
@@ -2115,7 +2121,7 @@ const InquiryList = () => {
       {/* Tabs */}
       <div className="tabs">
         {tabs.map(t => (
-          <div key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</div>
+          <button key={t} type="button" role="tab" aria-selected={tab === t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</button>
         ))}
       </div>
 
@@ -2593,7 +2599,7 @@ const CustomerAccounts = () => {
         {showNewCustomer && <NewManualSaleDialog onClose={() => setShowNewCustomer(false)} onSaved={() => { setShowNewCustomer(false); setRevision(r => r + 1); }} />}
       </div>
       <div className="tabs">
-        {['All', 'Active', 'Floating'].map(t => <div key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</div>)}
+        {['All', 'Active', 'Floating'].map(t => <button key={t} type="button" role="tab" aria-selected={tab === t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</button>)}
       </div>
       <div className="toolbar">
         <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search customers…" value={search} onChange={e => setSearch(e.target.value)} /></div>
@@ -3264,7 +3270,7 @@ const Deliverability = () => {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="tabs">
         {['Email', 'Phone / SMS', 'Unmatched'].map(t => (
-          <div key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</div>
+          <button key={t} type="button" role="tab" aria-selected={tab === t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</button>
         ))}
       </div>
       <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border-s)', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
@@ -3752,7 +3758,7 @@ const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
       <div className="modal" style={{ width: 500 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">Reject {ticketRef}</div>
-          <Btn variant="ghost" sm onClick={onClose}><Ic n={I.x} size={16} /></Btn>
+          <Btn variant="ghost" sm onClick={onClose} ariaLabel="Close"><Ic n={I.x} size={16} /></Btn>
         </div>
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
@@ -3915,7 +3921,7 @@ const TicketDetailModal = ({ t, onClose, onApprove, onReject }: {
           <div className="modal-title" style={{ fontSize: 19, lineHeight: 1.3 }}>{t.company}</div>
           <div style={{ fontSize: 12.5, color: 'var(--t3)', marginTop: 2 }}>{t.contact}</div>
         </div>
-        <Btn variant="ghost" sm onClick={onClose}><Ic n={I.x} size={16} /></Btn>
+        <Btn variant="ghost" sm onClick={onClose} ariaLabel="Close"><Ic n={I.x} size={16} /></Btn>
       </div>
       <div style={{ overflowY: 'auto', padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -4204,7 +4210,7 @@ const InventoryManagement = ({ role }: { role?: string }) => {
     return (
       <div className="overlay" onClick={onClose}>
         <div className="modal" style={{ width: 560, maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
-          <div className="modal-header"><div className="modal-title">{isEdit ? 'Edit Inventory Record' : 'Add Inventory'}</div><Btn variant="ghost" sm onClick={onClose}><Ic n={I.x} size={16} /></Btn></div>
+          <div className="modal-header"><div className="modal-title">{isEdit ? 'Edit Inventory Record' : 'Add Inventory'}</div><Btn variant="ghost" sm onClick={onClose} ariaLabel="Close"><Ic n={I.x} size={16} /></Btn></div>
           <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             {formError && <div style={{ gridColumn:'1/-1', color:'#DC2626', fontSize:12, padding:'8px 12px', background:'#FEF2F2', borderRadius:7 }}>{formError}</div>}
             <div style={{ gridColumn:'1/-1' }}><label className="form-label">Container Size *</label><select className="inp" value={form.container_size} onChange={set('container_size')}><option value="">— Select —</option>{SZ.map(s=><option key={s}>{s}</option>)}</select></div>
@@ -4247,7 +4253,7 @@ const InventoryManagement = ({ role }: { role?: string }) => {
     return (
       <div className="overlay" onClick={onClose}>
         <div className="modal" style={{ width: 620, maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
-          <div className="modal-header"><div className="modal-title">Paste Bulk from Excel</div><Btn variant="ghost" sm onClick={onClose}><Ic n={I.x} size={16} /></Btn></div>
+          <div className="modal-header"><div className="modal-title">Paste Bulk from Excel</div><Btn variant="ghost" sm onClick={onClose} ariaLabel="Close"><Ic n={I.x} size={16} /></Btn></div>
           <div className="modal-body">
             {result ? (
               <div style={{ textAlign:'center', padding:24 }}>
@@ -4311,7 +4317,7 @@ const InventoryManagement = ({ role }: { role?: string }) => {
     return (
       <div className="overlay" onClick={onClose}>
         <div className="modal" style={{ width: 600, maxHeight:'90vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
-          <div className="modal-header"><div className="modal-title">Import Excel / CSV</div><Btn variant="ghost" sm onClick={onClose}><Ic n={I.x} size={16} /></Btn></div>
+          <div className="modal-header"><div className="modal-title">Import Excel / CSV</div><Btn variant="ghost" sm onClick={onClose} ariaLabel="Close"><Ic n={I.x} size={16} /></Btn></div>
           <div className="modal-body">
             {result ? (
               <div style={{ textAlign:'center', padding:24 }}>

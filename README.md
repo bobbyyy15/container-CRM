@@ -2,18 +2,26 @@
 
 Container CRM is a React, Express, and Supabase application for the connected sales pipeline:
 
-`Prospect -> Warm Lead -> Inquiry -> Quotation -> Sale -> Customer`
+`Prospect -> Warm Lead -> Inquiry -> Validation -> Quotation -> Sale -> Customer -> Contract -> Pickup`
 
-See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for current business rules, what's been
-built and verified, and what's planned next (including the Inventory/ticketing module that's
-been scoped but not yet built).
+Four roles: **admin**, **sales_manager**, **procurement** (inquiry validation), and
+**operations** (inventory, contracts, pickups). Supporting modules: inventory, outreach logging,
+daily targets, service territories, monthly reporting, notifications, imports, and a shared
+outreach suppression list.
+
+See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for current business rules and what's been
+built and verified. The Inventory module and Inquiry ticketing are both **built and covered by
+hosted e2e tests** (see §8 there).
 
 See [`docs/ACCOUNT_MODULE.md`](docs/ACCOUNT_MODULE.md) for the signup/login/roles/Google-OAuth
 flow, its known bugs, and what to pick up next there.
 
-See [`docs/CUSTOMERS_MODULE.md`](docs/CUSTOMERS_MODULE.md) for the Customer Accounts module
-(currently mock data, not yet built), where it connects, and the Sales Manager /
-Inventory-Inquiry RBAC model.
+See [`docs/CUSTOMERS_MODULE.md`](docs/CUSTOMERS_MODULE.md) for the Customer Accounts module —
+now backed by real data via the `customer_accounts_view` (companies with confirmed purchase
+history), not mock data — plus the PIC data-silo / RBAC model.
+
+See [`docs/OPERATIONS_MODULE.md`](docs/OPERATIONS_MODULE.md) for the Operations role and the
+shipped Inventory module.
 
 ## Local setup
 

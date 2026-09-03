@@ -1,9 +1,40 @@
-# Operations Role — Spec for Whoever Picks This Up
+# Operations Role — BUILT (spec kept for history)
 
-Written 2026-09-03, for the groupmate coding this. The `operations` role already exists in the
-system (valid in `profiles_role_check`, selectable in User Management) but has **zero defined
-permissions and no dedicated screen** — anyone given that role today can log in but has nothing
-to do. This doc is the starting point so it's not a blank slate.
+> **STATUS as of 2026-09-03: this is built, merged, and covered by hosted e2e tests.**
+> The sections below were the pre-build spec and are kept only as a record of the reasoning.
+> Everything in §2 that says "needs a real answer" has since been answered by the shipped
+> implementation — see "What actually shipped" immediately below before reading further.
+
+## What actually shipped
+
+The `operations` role now has real permissions and dedicated screens:
+
+| Capability | Where |
+|---|---|
+| `inventory` table (size/condition/category, depot, city/state/country, qty available + reserved, unit cost, target sell price, serial numbers, auto-managed status) | `supabase/migrations/20260903010000_033_inventory_module.sql` |
+| Full CRUD + bulk Excel import + stock adjust | `backend/src/{routes,controllers,services}/inventory.*` |
+| Ownership model: **view-all, edit-own, admin-delete** | RLS policies in migration 033 |
+| Inventory Management screen | `frontend/src/App.tsx` — `InventoryManagement` |
+| Live stock lookup on an inquiry ticket | `get_stock_for_spec` RPC + `LiveStockWidget` |
+| Pickup Tracking / Customer Contracts / Customer Accounts | `operations` is in the `roles` allowlist on those NAV entries; routes gated in `contract.routes.ts` / `customer.routes.ts` |
+
+Answers to the §2 open questions, as implemented:
+
+1. **Item shape** — size/condition/category, vendor, depot + location, quantity available and
+   reserved, unit cost, target sell price, optional per-unit serial numbers, auto-derived status
+   (`Out of Stock` / `Low Stock` / `In Stock` via trigger).
+2. **Ownership boundary** — per-user (`created_by`). Everyone reads all inventory; you may only
+   update rows you created; only admins delete.
+3. **Relationship to inquiries** — decoupled maintenance, plus a read-only cross-reference:
+   Procurement's ticket detail shows a live stock check for the ticket's size/condition. Inventory
+   vocabulary is therefore bound to the real `container_sizes` / `container_conditions` /
+   `container_categories` catalog, not free text — this was a real bug caught in review.
+4. **Pipeline visibility** — Operations sees Pickup Tracking, Customer Contracts, Customer
+   Accounts, Inventory, and Container Catalog. It does **not** see Prospects/Warm Leads/
+   Inquiries/Quotations/Sales.
+
+Ticket approval remains with `procurement`, as anticipated below — Operations did not get a
+parallel ticketing system.
 
 ---
 
@@ -26,6 +57,9 @@ of the original idea, not the ticket-approval half — that's spoken for. Confir
 with the team before building; don't assume it silently.
 
 ## 2. What "Inventory" means here — needs a real answer, not a guess
+
+> **Superseded** — the `inventory` table now exists (migration 033); see "What actually shipped".
+> Original text follows.
 
 There is currently **no inventory table, no inventory data, at all** in this system. The
 Container Catalog page (`container_sizes` / `container_conditions`) is just a dropdown option

@@ -25,6 +25,22 @@ export default defineConfig(({ mode }) => {
     build: {
       sourcemap: emitSourcemaps ? 'inline' : false,
       minify: !emitSourcemaps,
+      rollupOptions: {
+        output: {
+          // Split the heavy vendor libraries out of the main bundle. recharts in
+          // particular is only needed by the five chart screens, and pulling it into
+          // its own chunk lets it cache independently of app code. (xlsx is already
+          // kept out via dynamic import at its call sites.)
+          // Rolldown requires the function form here -- the object map form that
+          // Rollup accepts throws "manualChunks is not a function".
+          manualChunks: (id: string) => {
+            if (!id.includes('node_modules')) return
+            if (id.includes('recharts') || id.includes('d3-')) return 'charts'
+            if (id.includes('@supabase')) return 'supabase'
+            if (id.includes('react-dom') || id.includes('/react/')) return 'react-vendor'
+          },
+        },
+      },
     },
     plugins: [
       react(),

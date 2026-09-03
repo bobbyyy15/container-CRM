@@ -713,6 +713,17 @@ tr:hover .row-actions { opacity: 1; }
   cursor: pointer; border-bottom: 2px solid transparent;
   margin-bottom: -1px; white-space: nowrap;
   transition: all 0.12s;
+  /* Tabs are real <button role="tab"> elements so they're keyboard-reachable and
+     announced correctly; these reset the UA button styling back to the original look. */
+  background: none;
+  border-top: 0; border-left: 0; border-right: 0;
+  font-family: inherit;
+  line-height: inherit;
+}
+.tab:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+  border-radius: 4px 4px 0 0;
 }
 .tab:hover { color: var(--t2); }
 .tab.active { color: var(--brand); border-bottom-color: var(--brand); font-weight: 600; }

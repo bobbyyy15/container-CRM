@@ -48,7 +48,7 @@ export const ToastHost = () => {
           <div key={t.id} style={{ background: s.bg, color: s.color, borderRadius: 10, padding: '11px 14px', boxShadow: '0 8px 24px rgba(0,0,0,0.18)', display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 13, fontWeight: 500, animation: 'toast-in 0.2s ease' }}>
             <NIcon path={s.icon} size={15} />
             <span style={{ flex: 1, lineHeight: 1.4 }}>{t.message}</span>
-            <button onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))} style={{ background: 'none', border: 'none', color: 'inherit', opacity: 0.7, cursor: 'pointer', padding: 0, lineHeight: 1 }}>
+            <button aria-label="Dismiss notification" onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))} style={{ background: 'none', border: 'none', color: 'inherit', opacity: 0.7, cursor: 'pointer', padding: 0, lineHeight: 1 }}>
               <NIcon path={ICONS.x} size={13} />
             </button>
           </div>
@@ -100,7 +100,7 @@ export const ConfirmHost = () => {
       <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">{request.title}</div>
-          <button className="btn btn-ghost btn-sm" onClick={() => settle(false)}><NIcon path={ICONS.x} size={16} /></button>
+          <button className="btn btn-ghost btn-sm" aria-label="Cancel" onClick={() => settle(false)}><NIcon path={ICONS.x} size={16} /></button>
         </div>
         <div className="modal-body">
           <p style={{ fontSize: 13, color: 'var(--t2)', lineHeight: 1.5, margin: request.needsReason ? '0 0 12px' : 0 }}>{request.message}</p>

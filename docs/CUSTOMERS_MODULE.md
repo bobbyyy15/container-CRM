@@ -1,5 +1,14 @@
 # Customers Module — Current State, Intended Flow & RBAC
 
+> **STATUS 2026-09-03 — the "fake data" claim below is OUT OF DATE.** Customer Accounts is now
+> backed by real data: `customer_accounts_view` (migration
+> `20260828003000_023_customer_accounts_view.sql`) derives customers from companies with
+> confirmed purchase history, served by `GET /customers`
+> (`backend/src/controllers/customer.controller.ts`) and rendered by `CustomerAccounts` in
+> `frontend/src/App.tsx`. The RBAC role referred to below as "Inventory/Inquiry" shipped as two
+> separate roles — `procurement` (inquiry validation) and `operations` (inventory) — see
+> `docs/OPERATIONS_MODULE.md`. The rest of this doc is retained for the design reasoning.
+
 Verified against the code directly as of 2026-08-27. The short version: **Customer Accounts is
 currently 100% fake data** — it's a real page with a real nav entry, but every row is a
 hand-written mock array, not a database query. This doc explains what it's supposed to do, where
