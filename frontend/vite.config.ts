@@ -37,6 +37,7 @@ export default defineConfig(({ mode }) => {
             if (!id.includes('node_modules')) return
             if (id.includes('recharts') || id.includes('d3-')) return 'charts'
             if (id.includes('@supabase')) return 'supabase'
+            if (id.includes('socket.io-client') || id.includes('engine.io-client') || id.includes('socket.io-parser') || id.includes('@socket.io')) return 'realtime'
             if (id.includes('react-dom') || id.includes('/react/')) return 'react-vendor'
           },
         },
@@ -55,6 +56,15 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(import.meta.dirname, './src'),
       },
     },
+    optimizeDeps: {
+      // These are only reached through dynamic import() -- the PDF and Excel
+      // exporters -- so Vite doesn't see them during its initial dependency scan.
+      // It then discovers them mid-session on first use, restarts optimization,
+      // and the in-flight request dies with "Failed to fetch dynamically imported
+      // module". Listing them here pre-bundles them at startup instead.
+      // Dev-server only; production builds are unaffected.
+      include: ['jspdf', 'jspdf-autotable', 'xlsx'],
+    },
     server: {
       host: '0.0.0.0',
       port: devPort,
@@ -64,6 +74,11 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: 'http://localhost:3001',
           changeOrigin: true,
+        },
+        '/socket.io': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          ws: true,
         },
       },
     },

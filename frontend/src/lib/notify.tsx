@@ -41,16 +41,17 @@ export const ToastHost = () => {
   }
   if (toasts.length === 0) return null
   return (
-    <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 3000, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 360 }}>
+    <div className="toast-stack">
       {toasts.map(t => {
         const s = STYLE[t.type]
         return (
-          <div key={t.id} style={{ background: s.bg, color: s.color, borderRadius: 10, padding: '11px 14px', boxShadow: '0 8px 24px rgba(0,0,0,0.18)', display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 13, fontWeight: 500, animation: 'toast-in 0.2s ease' }}>
+          <div key={t.id} className="toast-item" style={{ background: s.bg, color: s.color }}>
             <NIcon path={s.icon} size={15} />
             <span style={{ flex: 1, lineHeight: 1.4 }}>{t.message}</span>
             <button aria-label="Dismiss notification" onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))} style={{ background: 'none', border: 'none', color: 'inherit', opacity: 0.7, cursor: 'pointer', padding: 0, lineHeight: 1 }}>
               <NIcon path={ICONS.x} size={13} />
             </button>
+            <span className="toast-timer" />
           </div>
         )
       })}

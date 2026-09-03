@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { supabase } from './config/supabase'
 import { api } from './lib/api'
+import { useRealtimeRevision, useRealtimeStatus } from './lib/realtime'
 import { toast, askConfirm, askReason, ToastHost, ConfirmHost } from './lib/notify'
 import Login from './Login'
 import ProspectImportDialog from './features/import/ProspectImportDialog'
@@ -58,22 +59,201 @@ const exportToGoogleSheet = async (data: any[], filename: string) => {
   }
 }
 
+// ─── PDF reporting ────────────────────────────────────────────────────────────
+// Every "PDF" action builds a real tabular document -- masthead, metadata line,
+// then one bordered table per section -- and prints only that. Printing the live
+// screen instead just photographs the dashboard onto paper, which is not a report.
+
+const COMPANY_NAME = 'WaveContainers'
+
+// Brand palette, as RGB triples because jsPDF takes numeric channels.
+const PDF_NAVY: [number, number, number] = [22, 38, 92]
+const PDF_TEAL: [number, number, number] = [42, 168, 168]
+const PDF_BLUE: [number, number, number] = [37, 99, 201]
+const PDF_STRIPE: [number, number, number] = [239, 244, 251]
+const PDF_GREY: [number, number, number] = [107, 114, 128]
+const PDF_BORDER: [number, number, number] = [217, 225, 236]
+
+export type PdfSection = { title?: string; rows: Record<string, any>[] }
+
+// Row objects use terse internal keys (co, buyPU, neededBy...). Left alone they
+// produce unreadable column headings, so map the worst offenders and split
+// camelCase for the rest.
+const PDF_LABELS: Record<string, string> = {
+  co: 'Company', ref: 'Reference', pic: 'PIC', qty: 'Qty',
+  buyPU: 'Buy / Unit', sellPU: 'Sell / Unit',
+  totalBuy: 'Total Buy', totalSell: 'Total Sell',
+  emailAddr: 'Email', neededBy: 'Needed By', prevStatus: 'Previous Status',
+  currStatus: 'Current Status', altSize: 'Alt. Size', altCondition: 'Alt. Condition',
+  altQuantity: 'Alt. Quantity', altAskingPrice: 'Alt. Asking Price', altNotes: 'Alt. Notes',
+  rejectionReason: 'Rejection Reason', contactMissing: 'Contact Missing',
+}
+
+const humanizeKey = (key: string) => PDF_LABELS[key] ?? key
+  .replace(/[-_]/g, ' ')
+  .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+  .replace(/\b\w/g, c => c.toUpperCase())
+
+// Internal identifiers are meaningless in a printed report (they stay in the CSV
+// and Excel exports, where data fidelity matters more than readability).
+const isInternalKey = (key: string) => key === 'id' || /Id$/.test(key)
+
+const downloadPdfDocument = async (opts: {
+  title: string; scope?: string; filename: string; sections: PdfSection[];
+}) => {
+  const sections = opts.sections.filter(s => s.rows.length > 0)
+  if (!sections.length) return toast('There is nothing to export.', 'error')
+
+  try {
+    const [{ jsPDF }, autoTableMod] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ])
+    // The plugin ships both a default and a named export; which one survives
+    // bundling varies, so accept either and fail loudly rather than calling
+    // undefined further down where the stack would be meaningless.
+    const autoTable = (autoTableMod as any).default ?? (autoTableMod as any).autoTable
+    if (typeof autoTable !== 'function') {
+      throw new Error('the autoTable plugin did not load')
+    }
+
+    const widest = Math.max(...sections.map(s => Object.keys(s.rows[0]).filter(k => !isInternalKey(k)).length))
+    // Wide tables are unreadable squeezed into portrait width.
+    const doc = new jsPDF({ orientation: widest > 6 ? 'landscape' : 'portrait', unit: 'pt', format: 'a4' })
+
+    const pageW = doc.internal.pageSize.getWidth()
+    const pageH = doc.internal.pageSize.getHeight()
+    const margin = 36
+    const headerH = 92
+
+    const totalRecords = sections.reduce((n, s) => n + s.rows.length, 0)
+    const generated = new Date().toLocaleString(undefined, {
+      year: 'numeric', month: 'short', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    })
+
+    const drawPageFurniture = () => {
+      // Masthead
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(...PDF_NAVY)
+      doc.text(opts.title, margin, margin + 14)
+
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...PDF_BLUE)
+      doc.text(`${COMPANY_NAME}${opts.scope ? ` | ${opts.scope}` : ''}`, margin, margin + 30)
+
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...PDF_GREY)
+      doc.text(`Generated: ${generated}  |  Records: ${totalRecords}`, margin, margin + 44)
+
+      // Wordmark, right-aligned (no logo asset is bundled)
+      doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+      const rest = 'Containers'
+      const restW = doc.getTextWidth(rest)
+      doc.setTextColor(...PDF_NAVY); doc.text(rest, pageW - margin - restW, margin + 14)
+      doc.setTextColor(...PDF_TEAL); doc.text('Wave', pageW - margin - restW - doc.getTextWidth('Wave'), margin + 14)
+
+      doc.setDrawColor(...PDF_TEAL); doc.setLineWidth(1.4)
+      doc.line(margin, margin + 54, pageW - margin, margin + 54)
+
+      // Footer
+      const page = doc.getNumberOfPages()
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GREY)
+      doc.text(`${COMPANY_NAME} · Container CRM`, margin, pageH - 20)
+      const pageLabel = `Page ${page}`
+      doc.text(pageLabel, pageW - margin - doc.getTextWidth(pageLabel), pageH - 20)
+    }
+
+    let cursorY = headerH
+
+    sections.forEach((section, index) => {
+      const headers = Object.keys(section.rows[0]).filter(k => !isInternalKey(k))
+
+      if (section.title) {
+        // Keep a heading with its table rather than stranded at a page foot.
+        if (cursorY > pageH - 120) { doc.addPage(); cursorY = headerH }
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...PDF_NAVY)
+        doc.text(section.title, margin, cursorY)
+        cursorY += 10
+      } else if (index > 0) {
+        cursorY += 6
+      }
+
+      autoTable(doc, {
+        startY: cursorY,
+        margin: { left: margin, right: margin, top: headerH, bottom: 34 },
+        head: [headers.map(humanizeKey)],
+        body: section.rows.map(row => headers.map(h => {
+          const v = row[h]
+          return v === null || v === undefined || v === '' ? '—' : String(v)
+        })),
+        theme: 'grid',
+        styles: {
+          font: 'helvetica', fontSize: 7.5, cellPadding: 5,
+          lineColor: PDF_BORDER, lineWidth: 0.5,
+          textColor: [17, 24, 39], overflow: 'linebreak', valign: 'middle',
+        },
+        headStyles: {
+          fillColor: PDF_NAVY, textColor: [255, 255, 255],
+          fontStyle: 'bold', fontSize: 7.5, cellPadding: 6,
+        },
+        alternateRowStyles: { fillColor: PDF_STRIPE },
+        // Redrawn per page so the masthead and footer repeat.
+        didDrawPage: drawPageFurniture,
+      })
+
+      cursorY = (doc as any).lastAutoTable.finalY + 18
+    })
+
+    doc.save(`${opts.filename}.pdf`)
+  } catch (err: any) {
+    // Swallowing the cause here made a real failure undiagnosable -- surface it
+    // in the toast and keep the full stack in the console.
+    console.error('[PDF export] failed:', err)
+    toast(`Could not build the PDF: ${err?.message ?? 'unknown error'}`, 'error')
+  }
+}
+
+const titleCase = (s: string) => s.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
+const exportToPDF = (data: any[], filename: string) => {
+  if (!data || !data.length) return toast('There is nothing to export.', 'error')
+  void downloadPdfDocument({
+    title: `${titleCase(filename)} Report`.toUpperCase(),
+    scope: 'Container CRM',
+    filename,
+    sections: [{ rows: data }],
+  })
+}
+
 const ExportMenu = ({ data, filename, sm = true }: { data: any[]; filename: string; sm?: boolean }) => {
   const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+  const btnRef = useRef<HTMLDivElement>(null)
+
   const options = [
+    { label: 'PDF',           icon: I.export, run: () => exportToPDF(data, filename) },
     { label: 'CSV file',      icon: I.export, run: () => exportToCSV(data, filename) },
     { label: 'Excel (.xlsx)', icon: I.export, run: () => exportToExcel(data, filename) },
     { label: 'Google Sheet',  icon: I.link,   run: () => exportToGoogleSheet(data, filename) },
   ]
+
+  // Positioned fixed against the button's viewport rect rather than absolutely inside
+  // it -- toolbars and table wrappers clip an absolutely positioned menu.
+  const toggle = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) })
+    }
+    setOpen(o => !o)
+  }
+
   return (
-    <div style={{ position: 'relative' }}>
-      <Btn variant="ghost" sm={sm} onClick={() => setOpen(o => !o)}>
+    <div ref={btnRef} style={{ position: 'relative' }}>
+      <Btn variant="ghost" sm={sm} onClick={toggle}>
         <Ic n={I.export} size={13} /> Export <Ic n={I.chevDown} size={11} />
       </Btn>
-      {open && (
+      {open && pos && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setOpen(false)} />
-          <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, width: 170, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, zIndex: 100, boxShadow: 'var(--shadow-md)' }}>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1999 }} onClick={() => setOpen(false)} />
+          <div style={{ position: 'fixed', top: pos.top, right: pos.right, width: 180, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, zIndex: 2000, boxShadow: 'var(--shadow-drop)' }}>
             {options.map(o => (
               <div
                 key={o.label}
@@ -144,16 +324,18 @@ const mapPipelineRow = (p: any) => ({
 
 export const useWarmLeads = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
+  const liveRevision = useRealtimeRevision(['leads', 'data'])
   useEffect(() => {
     api.get('/leads/warm-leads', { params: { limit: 500 } }).then(res => {
       if (res.data.success) setData((res.data.data || []).map(mapPipelineRow))
     }).catch(console.error)
-  }, [revision])
+  }, [revision, liveRevision])
   return data
 }
 
 const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') => {
   const [data, setData] = useState<any[]>([])
+  const liveRevision = useRealtimeRevision(['leads', 'deals'])
   useEffect(() => {
     api.get('/leads/inquiries', { params: { limit: 500, status } }).then(res => {
       if (res.data.success) setData((res.data.data || []).map((row: any) => {
@@ -189,12 +371,13 @@ const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') => {
         }
       }))
     }).catch(console.error)
-  }, [revision, status])
+  }, [revision, liveRevision, status])
   return data
 }
 
 const useQuotations = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
+  const liveRevision = useRealtimeRevision(['deals', 'leads'])
   useEffect(() => {
     api.get('/deals/quotations').then(res => {
       if (res.data.success) setData((res.data.data || []).map((row: any) => {
@@ -220,12 +403,13 @@ const useQuotations = (revision = 0) => {
         }
       }))
     }).catch(console.error)
-  }, [revision])
+  }, [revision, liveRevision])
   return data
 }
 
 const useSales = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
+  const liveRevision = useRealtimeRevision(['deals'])
   useEffect(() => {
     api.get('/deals/sales').then(res => {
       if (res.data.success) setData((res.data.data || []).map((row: any) => {
@@ -257,23 +441,25 @@ const useSales = (revision = 0) => {
         }
       }))
     }).catch(console.error)
-  }, [revision])
+  }, [revision, liveRevision])
   return data
 }
 
 const useAnalytics = () => {
   const [data, setData] = useState<any>(null)
+  const liveRevision = useRealtimeRevision([])
   useEffect(() => {
     api.get('/analytics/dashboard').then(res => {
       if (res.data.success) setData(res.data.data)
     }).catch(console.error)
-  }, [])
+  }, [liveRevision])
   return data
 }
 
 const useNotifications = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
   const [unread, setUnread] = useState(0)
+  const liveRevision = useRealtimeRevision(['notifications', 'leads'])
   const refresh = useCallback(() => {
     api.get('/notifications').then(res => {
       if (res.data.success) {
@@ -286,7 +472,7 @@ const useNotifications = (revision = 0) => {
     refresh()
     const interval = setInterval(refresh, 30000)
     return () => clearInterval(interval)
-  }, [refresh, revision])
+  }, [refresh, revision, liveRevision])
   return { notifications: data, unread, refresh }
 }
 
@@ -294,6 +480,7 @@ const useNotifications = (revision = 0) => {
 
 const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses', search = '', revision = 0) => {
   const [data, setData] = useState<any[]>([]);
+  const liveRevision = useRealtimeRevision(['contracts', 'deals']);
   useEffect(() => {
     api.get('/contracts', { params: { status, pickStatus, search } }).then(res => {
       setData((res.data.data || []).map((c: any) => ({
@@ -303,21 +490,25 @@ const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses
         contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
         category: c.items && c.items.length > 0 ? c.items[0].description.split(' ')[0] : '-',
         size: c.items && c.items.length > 0 ? c.items[0].description : '-',
-        qty: c.total_units,
+        qty: c.allocated_quantity ?? c.total_units,
         value: Number(c.revenue),
         pickup: c.pickup_date ? new Date(c.pickup_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Unscheduled',
+        pickupDateRaw: c.pickup_date ? String(c.pickup_date).slice(0, 10) : '',
         pickStatus: c.pickup_status,
+        storedPickStatus: c.stored_pickup_status || c.pickup_status,
         status: c.contract_status,
         pic: c.pic_name || '-',
-        sale: c.sale_number
+        sale: c.sale_number,
+        inventory: c.inventory_label || 'Legacy contract — no stock allocation',
       })));
     }).catch(console.error);
-  }, [status, pickStatus, search, revision]);
+  }, [status, pickStatus, search, revision, liveRevision]);
   return data;
 }
 
 const useCustomers = (status = 'All', search = '', revision = 0) => {
   const [data, setData] = useState<any[]>([]);
+  const liveRevision = useRealtimeRevision(['deals', 'contracts']);
   useEffect(() => {
     api.get('/customers', { params: { status, search } }).then(res => {
       setData((res.data.data || []).map((c: any) => ({
@@ -336,38 +527,41 @@ const useCustomers = (status = 'All', search = '', revision = 0) => {
         status: c.status
       })));
     }).catch(console.error);
-  }, [status, search, revision]);
+  }, [status, search, revision, liveRevision]);
   return data;
 }
 
 const useProspects = (revision = 0, status: 'active' | 'converted' | 'removed' | 'all' = 'active') => {
   const [prospects, setProspects] = useState<any[]>([]);
+  const liveRevision = useRealtimeRevision(['leads', 'data']);
   useEffect(() => {
     api.get('/leads/prospects', { params: { limit: 500, status } }).then(res => {
       const data = (res.data.data || []).map(mapPipelineRow);
       setProspects(data);
     }).catch(e => console.error("Failed to fetch API data", e));
-  }, [revision, status]);
+  }, [revision, liveRevision, status]);
   return prospects;
 }
 
 const useInventory = (filters: Record<string, string> = {}, revision = 0) => {
   const [data, setData] = useState<any[]>([])
+  const liveRevision = useRealtimeRevision(['inventory', 'contracts'])
   useEffect(() => {
     api.get('/inventory', { params: filters }).then(res => {
       if (res.data.success) setData(res.data.data || [])
     }).catch(console.error)
-  }, [JSON.stringify(filters), revision])
+  }, [JSON.stringify(filters), revision, liveRevision])
   return data
 }
 
 const useInventorySummary = (revision = 0) => {
   const [data, setData] = useState<any>(null)
+  const liveRevision = useRealtimeRevision(['inventory', 'contracts'])
   useEffect(() => {
     api.get('/inventory/summary').then(res => {
       if (res.data.success) setData(res.data.data)
     }).catch(console.error)
-  }, [revision])
+  }, [revision, liveRevision])
   return data
 }
 
@@ -812,33 +1006,8 @@ const NOTIFICATION_STYLE: Record<string, { icon: string; color: string }> = {
 const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolean; onToggleDark: () => void; session: any; onNav: (s: Screen) => void; role?: string }) => {
   const [showAccountMenu, setShowAccountMenu] = useState(false)
   const [showNotifs, setShowNotifs] = useState(false)
-  
-  const [syncTime, setSyncTime] = useState(Date.now())
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [syncText, setSyncText] = useState('Synced just now')
-
-  useEffect(() => {
-    if (isSyncing) {
-      setSyncText('Syncing...')
-      return
-    }
-    const updateText = () => {
-      const mins = Math.floor((Date.now() - syncTime) / 60000)
-      setSyncText(mins === 0 ? 'Synced just now' : `Synced ${mins}m ago`)
-    }
-    updateText()
-    const interval = setInterval(updateText, 30000)
-    return () => clearInterval(interval)
-  }, [syncTime, isSyncing])
-
-  const handleManualSync = () => {
-    if (isSyncing) return
-    setIsSyncing(true)
-    setTimeout(() => {
-      setIsSyncing(false)
-      setSyncTime(Date.now())
-    }, 1200)
-  }
+  const realtimeStatus = useRealtimeStatus()
+  const syncText = realtimeStatus === 'connected' ? 'Live' : realtimeStatus === 'connecting' ? 'Connecting…' : 'Offline'
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User'
   const initials = userName.substring(0, 2).toUpperCase()
   
@@ -922,12 +1091,8 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
       </div>
 
       <div className="topbar-right">
-        <div 
-          className="sync-pill" 
-          onClick={handleManualSync} 
-          style={{ cursor: isSyncing ? 'wait' : 'pointer', opacity: isSyncing ? 0.7 : 1 }}
-        >
-          <Ic n={I.sync} size={11} style={{ animation: isSyncing ? 'spin 1s linear infinite' : 'none' }} />
+        <div className="sync-pill" data-status={realtimeStatus} title="Realtime connection status">
+          <span className="sync-dot" />
           {syncText}
         </div>
 
@@ -1091,7 +1256,40 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
               </div>
             </>
           )}
-          <Btn variant="ghost" sm onClick={() => window.print()}><Ic n={I.export} size={13} /> Export PDF</Btn>
+          <Btn variant="ghost" sm onClick={() => void downloadPdfDocument({
+            title: 'EXECUTIVE OVERVIEW REPORT',
+            scope: `Container CRM | ${dateRange}`,
+            filename: 'executive-overview',
+            sections: [
+              { title: 'Performance Summary', rows: [
+                { Metric: 'Gross Profit',   Value: `$${(m.total_gross_profit || 0).toLocaleString()}` },
+                { Metric: 'Revenue',        Value: `$${(m.total_revenue || 0).toLocaleString()}` },
+                { Metric: 'Units Sold',     Value: m.total_units || 0 },
+                { Metric: 'Active Clients', Value: m.active_clients || 0 },
+                { Metric: 'Profit Margin',  Value: `${(m.profit_margin || 0).toFixed(1)}%` },
+                { Metric: 'Monthly Target', Value: monthlyProfitTarget > 0 ? `$${monthlyProfitTarget.toLocaleString()} (${profitTargetPct}%)` : 'Not configured' },
+              ]},
+              { title: 'Sales Pipeline', rows: [
+                { Stage: 'Prospects',  Count: funnel.prospects || 0 },
+                { Stage: 'Warm Leads', Count: funnel.warm_leads || 0 },
+                { Stage: 'Inquiries',  Count: funnel.inquiries || 0 },
+                { Stage: 'Quotations', Count: funnel.quotations || 0 },
+                { Stage: 'Sales Won',  Count: funnel.sales || 0 },
+              ]},
+              { title: 'Outreach Activity (This Month)', rows: [
+                { Channel: 'Emails', Completed: analytics?.outreach?.emails || 0 },
+                { Channel: 'Calls',  Completed: analytics?.outreach?.calls || 0 },
+                { Channel: 'Texts',  Completed: analytics?.outreach?.texts || 0 },
+              ]},
+              { title: 'Performance by PIC', rows: (PIC_DATA || []).map(p => ({
+                PIC: p.name, Sales: p.sales, Units: p.units,
+                Revenue: `$${(p.revenue || 0).toLocaleString()}`,
+                'Gross Profit': `$${(p.profit || 0).toLocaleString()}`,
+                Emails: p.emails, Calls: p.calls, Texts: p.texts,
+              })) },
+              { title: 'Inquiry Status', rows: inquiryStatusData.map(d => ({ Status: d.name, Count: d.value })) },
+            ],
+          })}><Ic n={I.export} size={13} /> Export PDF</Btn>
         </div>
       </div>
 
@@ -1432,7 +1630,28 @@ const OutreachDashboard = () => {
               </div>
             </>
           )}
-          <Btn variant="ghost" sm onClick={() => window.print()}><Ic n={I.export} size={13} /> Export PDF</Btn>
+          <Btn variant="ghost" sm onClick={() => void downloadPdfDocument({
+            title: 'OUTREACH PERFORMANCE REPORT',
+            scope: `Container CRM | ${dateRange}`,
+            filename: 'outreach-performance',
+            sections: [
+              { title: 'Profit Progress', rows: [
+                { Metric: 'Gross Profit Achieved', Value: `$${profitDone.toLocaleString()}` },
+                { Metric: 'Profit Target', Value: profitTarget > 0 ? `$${profitTarget.toLocaleString()}` : 'Not configured' },
+                { Metric: 'Completion', Value: `${safePct(profitDone, profitTarget)}%` },
+                { Metric: 'Projected (run rate)', Value: `$${projectedProfit.toLocaleString()}` },
+              ]},
+              { title: 'Outreach vs Target (This Month)', rows: [
+                { Channel: 'Emails', Completed: emailDone, Target: emailTarget || '—', Completion: `${safePct(emailDone, emailTarget)}%`, Replies: outreach.email_replies || 0 },
+                { Channel: 'Calls', Completed: callsDone, Target: callsPref || '—', Completion: `${safePct(callsDone, callsPref)}%`, Replies: outreach.calls_answered || 0 },
+                { Channel: 'Texts', Completed: textsDone, Target: textsTarget || '—', Completion: `${safePct(textsDone, textsTarget)}%`, Replies: outreach.text_replies || 0 },
+              ]},
+              { title: 'Contact Eligibility', rows: [
+                { Metric: 'Eligible Contacts', Value: eligibleContacts },
+                { Metric: 'Excluded (Removed)', Value: excludedContacts },
+              ]},
+            ],
+          })}><Ic n={I.export} size={13} /> Export PDF</Btn>
         </div>
       </div>
       <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -2276,14 +2495,21 @@ const QuotationList = () => {
     return searchMatch && statusMatch && picMatch
   })
 
-  const acceptQuotation = async (id: string) => {
+  const updateQuotationStatus = async (id: string, status: string) => {
     setActionError('')
     try {
-      await api.patch(`/deals/quotations/${id}/status`, { status: 'Accepted' })
+      await api.patch(`/deals/quotations/${id}/status`, { status })
       setRevision(value => value + 1)
     } catch (error: any) {
-      setActionError(error.response?.data?.error?.message ?? error.message ?? 'Could not accept the quotation.')
+      setActionError(error.response?.data?.error?.message ?? error.message ?? 'Could not update the quotation.')
     }
+  }
+
+  const quotationActions: Record<string, string[]> = {
+    Draft: ['Sent', 'Accepted', 'Rejected'],
+    Sent: ['Viewed', 'Accepted', 'Rejected'],
+    Viewed: ['Accepted', 'Rejected'],
+    Accepted: ['Rejected'],
   }
 
   const removeQuotation = async (id: string) => {
@@ -2385,7 +2611,12 @@ const QuotationList = () => {
                 <td className="col-actions">
                   <div className="row-actions">
                     <Btn variant="ghost" sm onClick={() => setViewRow(q)}>View</Btn>
-                    {['Draft', 'Sent', 'Viewed'].includes(q.status) && <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => acceptQuotation(q.id)}>Accept</Btn>}
+                    {(quotationActions[q.status] || []).length > 0 && (
+                      <select className="sel" value="" aria-label={`Update ${q.ref} status`} onChange={e => { if (e.target.value) updateQuotationStatus(q.id, e.target.value) }} style={{ padding: '4px 8px', fontSize: 11, minWidth: 112 }}>
+                        <option value="">Change status…</option>
+                        {quotationActions[q.status].map(status => <option key={status} value={status}>Mark {status}</option>)}
+                      </select>
+                    )}
                     {q.status === 'Accepted' && <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => setSaleQuotationId(q.id)}>→ Sale</Btn>}
                     {q.status !== 'Converted' && <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={() => removeQuotation(q.id)}>Remove</Btn>}
                   </div>
@@ -2670,6 +2901,11 @@ const ContactOutreach = () => {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [copied, setCopied] = useState('')
+  const [emailRow, setEmailRow] = useState<any>(null)
+  const [emailSubject, setEmailSubject] = useState('')
+  const [emailBody, setEmailBody] = useState('')
+  const [sendingEmail, setSendingEmail] = useState(false)
+  const [emailError, setEmailError] = useState('')
 
   const term = search.trim().toLowerCase()
   const filtered = prospectsData.filter(r =>
@@ -2701,8 +2937,44 @@ const ContactOutreach = () => {
 
   const [copyLabel, eligibleCount, excludedCount] = copied ? copied.split('|') : ['', '0', '0']
 
+  const sendEmail = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!emailRow) return
+    setSendingEmail(true)
+    setEmailError('')
+    try {
+      await api.post('/outreach/email', {
+        prospectId: emailRow.id,
+        to: emailRow.emailAddr,
+        subject: emailSubject,
+        body: emailBody.replace(/\n/g, '<br />'),
+      })
+      toast(`Email sent to ${emailRow.contact || emailRow.company}`, 'success')
+      setEmailRow(null)
+      setEmailSubject('')
+      setEmailBody('')
+    } catch (error: any) {
+      setEmailError(error.response?.data?.error?.message ?? error.message ?? 'Email could not be sent.')
+    } finally {
+      setSendingEmail(false)
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {emailRow && (
+        <div className="overlay" role="presentation" onMouseDown={() => !sendingEmail && setEmailRow(null)}>
+          <form className="modal outreach-compose" onSubmit={sendEmail} onMouseDown={event => event.stopPropagation()}>
+            <div className="modal-header"><div><div className="modal-title">Compose outreach email</div><div className="modal-desc">Sending through your connected Google account to {emailRow.emailAddr}.</div></div><button type="button" className="btn btn-ghost" onClick={() => setEmailRow(null)} aria-label="Close">×</button></div>
+            <div className="modal-body" style={{ display: 'grid', gap: 12 }}>
+              {emailError && <div style={{ padding: 10, borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12 }}>{emailError}</div>}
+              <label><span className="form-label">Subject</span><input className="inp" required maxLength={200} value={emailSubject} onChange={e => setEmailSubject(e.target.value)} /></label>
+              <label><span className="form-label">Message</span><textarea className="inp" required rows={8} value={emailBody} onChange={e => setEmailBody(e.target.value)} /></label>
+            </div>
+            <div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={() => setEmailRow(null)}>Cancel</button><button className="btn btn-primary" disabled={sendingEmail || !emailSubject.trim() || !emailBody.trim()}>{sendingEmail ? 'Sending…' : 'Send email'}</button></div>
+          </form>
+        </div>
+      )}
       <div className="page-header">
         <div>
           <div className="page-title">Contact Outreach Sheet</div>
@@ -2754,7 +3026,7 @@ const ContactOutreach = () => {
             <th className="col-check"><input type="checkbox" className="cb" checked={allSelected} onChange={toggleAll} /></th>
             <th>Company</th><th>Contact</th><th>Phone</th><th>Email</th>
             <th>City / State</th><th>PIC</th><th style={{ textAlign: 'center' }}>Call</th>
-            <th style={{ textAlign: 'center' }}>Text</th><th style={{ textAlign: 'center' }}>Email</th>
+            <th style={{ textAlign: 'center' }}>Text</th><th style={{ textAlign: 'center' }}>Email</th><th className="col-actions">Action</th>
           </tr></thead>
           <tbody>
             {withElig.map(r => (
@@ -2769,10 +3041,11 @@ const ContactOutreach = () => {
                 <td style={{ textAlign: 'center' }}><EligDot on={r.callable} /></td>
                 <td style={{ textAlign: 'center' }}><EligDot on={r.textable} /></td>
                 <td style={{ textAlign: 'center' }}><EligDot on={r.emailable} /></td>
+                <td className="col-actions"><Btn variant="ghost" sm disabled={!r.emailable} onClick={() => { setEmailRow(r); setEmailError(''); }}>Compose</Btn></td>
               </tr>
             ))}
             {withElig.length === 0 && (
-              <tr><td colSpan={10} style={{ textAlign: 'center', padding: 30, color: 'var(--t4)', fontSize: 13 }}>No contacts match.</td></tr>
+              <tr><td colSpan={11} style={{ textAlign: 'center', padding: 30, color: 'var(--t4)', fontSize: 13 }}>No contacts match.</td></tr>
             )}
           </tbody>
         </table>
@@ -2790,10 +3063,24 @@ const Contracts = () => {
   const [showNew, setShowNew] = useState(false);
   const [revision, setRevision] = useState(0);
   const [viewRow, setViewRow] = useState<any>(null);
-  const contracts = useContracts(status, pickStatus, search);
+  const contracts = useContracts(status, pickStatus, search, revision);
   // Re-fetch sales when clicking New Contract
   const sales = useSales(revision);
   const overdueContracts = contracts.filter(c => c.pickStatus === 'Overdue');
+  const contractTransitions = (contract: any) => {
+    if (contract.status === 'Pending Signature') return ['Active', 'Cancelled'];
+    if (contract.status === 'Active') return contract.storedPickStatus === 'Picked Up' ? ['Completed'] : ['Cancelled'];
+    return [];
+  };
+  const updateContractStatus = async (id: string, nextStatus: string) => {
+    try {
+      await api.patch(`/contracts/${id}`, { status: nextStatus });
+      toast(`Contract marked ${nextStatus}`, 'success');
+      setRevision(value => value + 1);
+    } catch (error: any) {
+      toast(error.response?.data?.error?.message ?? 'Contract status could not be updated', 'error');
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -2809,7 +3096,7 @@ const Contracts = () => {
       )}
       <div className="toolbar">
         <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search contracts…" value={search} onChange={e => setSearch(e.target.value)} /></div>
-        <select className="sel" value={status} onChange={e => setStatus(e.target.value)}><option>All Statuses</option><option>Pending Signature</option><option>Active</option><option>Completed</option></select>
+        <select className="sel" value={status} onChange={e => setStatus(e.target.value)}><option>All Statuses</option><option>Pending Signature</option><option>Active</option><option>Completed</option><option>Cancelled</option></select>
         <select className="sel" value={pickStatus} onChange={e => setPickStatus(e.target.value)}><option>All Pickup Statuses</option><option>Pending</option><option>Scheduled</option><option>Confirmed</option><option>Picked Up</option><option>Overdue</option></select>
         <div className="toolbar-right">
           <Btn variant="primary" sm onClick={() => setShowNew(true)}><Ic n={I.plus} size={13} /> New Contract</Btn>
@@ -2840,7 +3127,10 @@ const Contracts = () => {
                 <td><ChipPIC label={c.pic} /></td>
                 <td><span className="ref-id" style={{ color: 'var(--green)', fontSize: 11 }}>{c.sale}</span></td>
                 <td className="col-actions">
-                  <div className="row-actions"><Btn variant="ghost" sm onClick={() => setViewRow(c)}>View</Btn></div>
+                  <div className="row-actions">
+                    <Btn variant="ghost" sm onClick={() => setViewRow(c)}>View</Btn>
+                    {contractTransitions(c).length > 0 && <select className="sel" value="" aria-label={`Update ${c.ref} status`} onChange={e => { if (e.target.value) updateContractStatus(c.id, e.target.value) }} style={{ padding: '4px 8px', fontSize: 11, minWidth: 110 }}><option value="">Change status…</option>{contractTransitions(c).map(next => <option key={next}>{next}</option>)}</select>}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -2858,6 +3148,7 @@ const Contracts = () => {
             { label: 'Pickup status', value: <Badge status={viewRow.pickStatus as BadgeStatus} /> },
             { label: 'Container', value: `${viewRow.category} · ${viewRow.size}` },
             { label: 'Quantity', value: viewRow.qty },
+            { label: 'Reserved inventory', value: viewRow.inventory },
             { label: 'Value', value: `$${viewRow.value.toLocaleString()}` },
             { label: 'Pickup date', value: viewRow.pickup },
             { label: 'PIC', value: viewRow.pic },
@@ -3681,22 +3972,21 @@ const InquiryFunnel = () => {
 
 // ─── Inquiry Validation (Procurement) ──────────────────────────────────────────
 
-const BOARD_COLUMNS: { key: string; label: string; statuses: string[]; dot: string }[] = [
-  { key: 'pending', label: 'Pending Validation', statuses: ['Pending Validation'], dot: '#D97706' },
-  { key: 'review', label: 'Under Review', statuses: ['Under Review'], dot: '#315EF6' },
-  { key: 'quoted', label: 'Quotation Created', statuses: ['Quotation Created'], dot: '#7C3AED' },
-  { key: 'won', label: 'Converted to Sale', statuses: ['Converted to Sale'], dot: '#059669' },
-  { key: 'rejected', label: 'Rejected', statuses: ['Validation Rejected', 'Quotation Rejected'], dot: '#DC2626' },
-]
-
 const useInquiryBoard = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const liveRevision = useRealtimeRevision(['leads', 'deals'])
   useEffect(() => {
+    setLoading(true)
+    setLoadError('')
     api.get('/leads/inquiries/board').then(res => {
       if (res.data.success) setData((res.data.data || []).map((row: any) => ({
         id: row.id,
         ref: `INQ-${row.id.slice(0, 8).toUpperCase()}`,
         date: new Date(row.created_at).toLocaleDateString(),
+        createdAt: row.created_at,
+        neededBy: row.needed_by_date ? new Date(row.needed_by_date).toLocaleDateString() : '—',
         status: row.status,
         company: row.companies?.name || '',
         contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
@@ -3714,9 +4004,12 @@ const useInquiryBoard = (revision = 0) => {
         altAskingPrice: row.alt_asking_price != null ? Number(row.alt_asking_price) : null,
         altNotes: row.alt_notes || '',
       })));
-    }).catch(console.error)
-  }, [revision])
-  return data
+    }).catch((error: any) => {
+      console.error(error)
+      setLoadError(error.response?.data?.error?.message ?? 'Could not load the validation queue.')
+    }).finally(() => setLoading(false))
+  }, [revision, liveRevision])
+  return { data, loading, loadError }
 }
 
 type AlternativeOffer = {
@@ -3741,16 +4034,23 @@ const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
   const [altPrice, setAltPrice] = useState('')
   const [altNotes, setAltNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
   const submit = async () => {
     setSubmitting(true)
-    await onReject(reason.trim(), {
-      containerSizeId: altSize || undefined,
-      containerConditionId: altCondition || undefined,
-      quantity: altQuantity ? Number(altQuantity) : undefined,
-      askingPrice: altPrice ? Number(altPrice) : undefined,
-      notes: altNotes.trim() || undefined,
-    })
+    setSubmitError('')
+    try {
+      await onReject(reason.trim(), {
+        containerSizeId: altSize || undefined,
+        containerConditionId: altCondition || undefined,
+        quantity: altQuantity ? Number(altQuantity) : undefined,
+        askingPrice: altPrice ? Number(altPrice) : undefined,
+        notes: altNotes.trim() || undefined,
+      })
+    } catch (error: any) {
+      setSubmitError(error.response?.data?.error?.message ?? 'Could not reject this ticket. Please try again.')
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -3766,8 +4066,8 @@ const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
             <textarea className="inp" rows={3} value={reason} onChange={e => setReason(e.target.value)} placeholder="Why isn't this ticket viable as-is?" style={{ height: 'auto', padding: '8px 12px' }} />
           </div>
           <div style={{ borderTop: '1px solid var(--border-s)', paddingTop: 12 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--t1)', marginBottom: 8 }}>Alternative offer (optional)</div>
-            <div style={{ fontSize: 11.5, color: 'var(--t4)', marginBottom: 10 }}>Leave any field blank to keep the ticket's original value. The Sales Manager can apply this with one click.</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--t1)', marginBottom: 8 }}>Alternative changes (optional)</div>
+            <div style={{ fontSize: 11.5, color: 'var(--t4)', marginBottom: 10 }}>Change at least one size, condition, quantity, or price field to give Sales an alternative they can apply. Notes alone are context only.</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <div>
                 <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Size</label>
@@ -3797,6 +4097,7 @@ const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
               <textarea className="inp" rows={2} value={altNotes} onChange={e => setAltNotes(e.target.value)} placeholder="Any context that doesn't fit the fields above" style={{ height: 'auto', padding: '8px 12px' }} />
             </div>
           </div>
+          {submitError && <div className="validation-error" role="alert"><Ic n={I.warning} size={14} /> {submitError}</div>}
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
@@ -3809,34 +4110,35 @@ const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
   )
 }
 
-const TicketCard = ({ t, onView, onApprove, onReject }: {
-  t: any
-  onView: () => void
-  onApprove?: () => void
-  onReject?: () => void
-}) => (
-  <div className="card ticket-card" style={{ padding: 14, marginBottom: 10, cursor: 'pointer' }} onClick={onView}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
-      <span className="ref-id" style={{ color: 'var(--teal)', fontSize: 11 }}>{t.ref}</span>
-      <Badge status={t.status as BadgeStatus} />
+const ticketAge = (createdAt: string) => {
+  const hours = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 36e5))
+  if (hours < 1) return 'Just arrived'
+  if (hours < 24) return `${hours}h waiting`
+  return `${Math.floor(hours / 24)}d waiting`
+}
+
+const validationStatusLabel = (status: string) => status === 'Under Review' ? 'Approved / Ready to Quote' : status
+const validationStatusTone = (status: string) => ({
+  'Under Review': 'b-green',
+  'Validation Rejected': 'b-red',
+  'Quotation Rejected': 'b-orange',
+  'Quotation Created': 'b-purple',
+  'Converted to Sale': 'b-green',
+}[status] || 'b-gray')
+
+const ValidationQueueItem = ({ ticket, active, onSelect }: { ticket: any; active: boolean; onSelect: () => void }) => (
+  <button className={`validation-queue-item${active ? ' active' : ''}`} onClick={onSelect} type="button">
+    <div className="validation-queue-topline">
+      <span className="ref-id">{ticket.ref}</span>
+      <span className={`validation-age${ticketAge(ticket.createdAt).includes('d waiting') ? ' overdue' : ''}`}>{ticketAge(ticket.createdAt)}</span>
     </div>
-    <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--t1)', marginBottom: 2 }}>{t.company}</div>
-    <div style={{ fontSize: 12, color: 'var(--t3)', marginBottom: 8 }}>{t.contact}</div>
-    <div style={{ fontSize: 11.5, color: 'var(--t3)', marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as any }}>{t.description}</div>
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: onApprove || onReject ? 10 : 0 }}>
-      <span className="badge b-gray" style={{ fontSize: 10.5 }}>{t.size}</span>
-      <span className="badge b-gray" style={{ fontSize: 10.5 }}>{t.condition}</span>
-      <span className="badge b-gray" style={{ fontSize: 10.5 }}>Qty {t.quantity}</span>
-      {t.price != null && <span className="badge b-gray" style={{ fontSize: 10.5 }}>${t.price.toLocaleString()}</span>}
-      <ChipPIC label={t.pic} />
+    <div className="validation-company">{ticket.company || 'Unnamed company'}</div>
+    <div className="validation-contact">{ticket.contact || 'No contact'} · {ticket.pic}</div>
+    <div className="validation-spec-line">
+      <span>{ticket.size}</span><span>{ticket.condition}</span><span>{ticket.quantity} unit{ticket.quantity === 1 ? '' : 's'}</span>
     </div>
-    {(onApprove || onReject) && (
-      <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
-        {onReject && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', flex: 1 }} onClick={onReject}>Reject</button>}
-        {onApprove && <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={onApprove}>Approve</button>}
-      </div>
-    )}
-  </div>
+    <div className="validation-location"><Ic n={I.map} size={12} /> {ticket.location}</div>
+  </button>
 )
 
 const InfoBox = ({ label, children, accent }: { label: string; children: React.ReactNode; accent?: string }) => (
@@ -3866,9 +4168,11 @@ const LiveStockWidget = ({ size, condition }: { size: string; condition: string 
   if (loading) return <div style={{ fontSize: 11, color: 'var(--t4)', padding: 8 }}>Checking live inventory…</div>
   if (!stock) return null
 
-  const available = stock.total_available || 0
-  const isAvailable = available > 0
-  const isLow = available > 0 && available <= 2
+  const physical = Number(stock.total_available || 0)
+  const reserved = Number(stock.total_reserved || 0)
+  const sellable = Number(stock.total_sellable ?? Math.max(0, physical - reserved))
+  const isAvailable = sellable > 0
+  const isLow = sellable > 0 && sellable <= 2
 
   return (
     <div style={{
@@ -3885,14 +4189,19 @@ const LiveStockWidget = ({ size, condition }: { size: string; condition: string 
           background: isAvailable ? (isLow ? '#FEF3C7' : '#D1FAE5') : '#FEE2E2',
           color: isAvailable ? (isLow ? '#92400E' : '#065F46') : '#991B1B'
         }}>
-          {isAvailable ? (isLow ? `Low Stock (${available} left)` : `In Stock (${available} units)`) : 'Out of Stock (0 units)'}
+          {isAvailable ? (isLow ? `Low Stock (${sellable} sellable)` : `In Stock (${sellable} sellable)`) : 'Out of Stock (0 sellable)'}
         </span>
+      </div>
+      <div className="stock-summary-row">
+        <span><b>{physical}</b> physical</span>
+        <span><b>{reserved}</b> reserved</span>
+        <span><b>{sellable}</b> sellable</span>
       </div>
       {stock.depots && stock.depots.length > 0 ? (
         <div style={{ fontSize: 11.5, color: 'var(--t2)', display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
           {stock.depots.map((d: any, idx: number) => (
             <span key={idx} style={{ background: 'rgba(255,255,255,0.7)', padding: '3px 7px', borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)' }}>
-              <strong>{d.depot}</strong>: {d.available} available ({d.reserved} reserved)
+              <strong>{d.depot}</strong>: {d.sellable ?? Math.max(0, Number(d.available || 0) - Number(d.reserved || 0))} sellable ({d.reserved} reserved)
             </span>
           ))}
         </div>
@@ -3905,37 +4214,36 @@ const LiveStockWidget = ({ size, condition }: { size: string; condition: string 
   )
 }
 
-const TicketDetailModal = ({ t, onClose, onApprove, onReject }: {
+const TicketDecisionPanel = ({ t, onApprove, onReject, processing }: {
   t: any
-  onClose: () => void
   onApprove?: () => void
   onReject?: () => void
+  processing?: boolean
 }) => (
-  <div className="overlay" onClick={onClose}>
-    <div className="modal" style={{ width: 560, maxHeight: '86vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
-      <div className="modal-header" style={{ alignItems: 'flex-start' }}>
+  <section className="validation-detail-card">
+      <div className="validation-detail-header">
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t4)', letterSpacing: 0.3, marginBottom: 4 }}>
+          <div className="validation-detail-eyebrow">
             {t.ref} · REQUESTED BY {(t.pic || 'UNASSIGNED').toUpperCase()}
           </div>
-          <div className="modal-title" style={{ fontSize: 19, lineHeight: 1.3 }}>{t.company}</div>
+          <div className="validation-detail-title">{t.company}</div>
           <div style={{ fontSize: 12.5, color: 'var(--t3)', marginTop: 2 }}>{t.contact}</div>
         </div>
-        <Btn variant="ghost" sm onClick={onClose} ariaLabel="Close"><Ic n={I.x} size={16} /></Btn>
+        <Badge status={t.status as BadgeStatus} />
       </div>
-      <div style={{ overflowY: 'auto', padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <InfoBox label="Status"><Badge status={t.status as BadgeStatus} /></InfoBox>
+      <div className="validation-detail-body">
+        <div className="validation-info-grid">
           <InfoBox label="Location">{t.location}</InfoBox>
           <InfoBox label="Container Size">{t.size}</InfoBox>
           <InfoBox label="Condition">{t.condition}</InfoBox>
           <InfoBox label="Quantity">{t.quantity}</InfoBox>
-          <InfoBox label="Asking Price">{t.price != null ? `$${t.price.toLocaleString()}` : '—'}</InfoBox>
+          <InfoBox label="Needed By">{t.neededBy}</InfoBox>
+          <InfoBox label="Target Price">{t.price != null ? `$${t.price.toLocaleString()}` : '—'}</InfoBox>
         </div>
 
         <LiveStockWidget size={t.size} condition={t.condition} />
 
-        <div style={{ background: 'var(--s2)', border: '1px solid var(--border-s)', borderRadius: 10, padding: 14 }}>
+        <div className="validation-note-box">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>
             <Ic n={I.calendar} size={12} /> Ticket Timeline
           </div>
@@ -3945,7 +4253,7 @@ const TicketDetailModal = ({ t, onClose, onApprove, onReject }: {
           </div>
         </div>
 
-        <div style={{ background: 'var(--s2)', border: '1px solid var(--border-s)', borderRadius: 10, padding: 14 }}>
+        <div className="validation-note-box">
           <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>Description</div>
           <div style={{ fontSize: 13, color: 'var(--t2)', lineHeight: 1.5 }}>{t.description}</div>
         </div>
@@ -3956,51 +4264,72 @@ const TicketDetailModal = ({ t, onClose, onApprove, onReject }: {
           </InfoBox>
         )}
 
-        {(t.altSize || t.altCondition || t.altAskingPrice != null || t.altNotes) && (
+        {(t.altSize || t.altCondition || t.altQuantity != null || t.altAskingPrice != null || t.altNotes) && (
           <div style={{ background: 'var(--amber-bg, #FFFBEB)', border: '1px solid var(--amber)40', borderRadius: 10, padding: 14 }}>
             <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--amber)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>Alternative Offer</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: t.altNotes ? 8 : 0 }}>
               {t.altSize && <span className="badge b-amber">{t.altSize}</span>}
               {t.altCondition && <span className="badge b-amber">{t.altCondition}</span>}
+              {t.altQuantity != null && <span className="badge b-amber">Qty {t.altQuantity}</span>}
               {t.altAskingPrice != null && <span className="badge b-amber">${t.altAskingPrice.toLocaleString()}</span>}
             </div>
             {t.altNotes && <div style={{ fontSize: 12.5, color: 'var(--t2)', lineHeight: 1.5 }}>{t.altNotes}</div>}
           </div>
         )}
       </div>
-      <div className="modal-footer">
-        <Btn variant="ghost" onClick={onClose}>Close</Btn>
-        {onReject && <button className="btn btn-ghost" style={{ color: 'var(--red)' }} onClick={onReject}>Reject</button>}
-        {onApprove && <button className="btn btn-primary" onClick={onApprove}>Approve</button>}
+      <div className="validation-detail-footer">
+        <div className="validation-decision-hint"><Ic n={I.warning} size={14} /> Confirm the requested specification and sellable stock before deciding.</div>
+        <div className="validation-decision-actions">
+          {onReject && <button className="btn btn-ghost" style={{ color: 'var(--red)' }} onClick={onReject} disabled={processing}>Reject with reason</button>}
+          {onApprove && <button className="btn btn-primary" onClick={onApprove} disabled={processing}><Ic n={I.check} size={14} /> {processing ? 'Approving…' : 'Approve ticket'}</button>}
+        </div>
       </div>
-    </div>
-  </div>
+  </section>
 )
 
 const InquiryValidation = () => {
   const [revision, setRevision] = useState(0)
-  const tickets = useInquiryBoard(revision)
+  const { data: tickets, loading, loadError } = useInquiryBoard(revision)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
-  const [viewingId, setViewingId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [view, setView] = useState<'queue' | 'history'>('queue')
+  const [historyStatus, setHistoryStatus] = useState('All history')
+  const [processingId, setProcessingId] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [picFilter, setPicFilter] = useState('')
 
   const pics = [...new Set(tickets.map((t: any) => t.pic).filter(Boolean))].sort() as string[]
   const term = search.trim().toLowerCase()
-  const filtered = tickets.filter((t: any) =>
+  const searched = tickets.filter((t: any) =>
     (!picFilter || t.pic === picFilter) &&
-    (!term || [t.company, t.contact, t.ref].some(v => String(v).toLowerCase().includes(term)))
+    (!term || [t.company, t.contact, t.ref, t.size, t.condition, t.location].some(v => String(v).toLowerCase().includes(term)))
   )
+  const queue = searched.filter((t: any) => t.status === 'Pending Validation')
+    .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+  const history = searched.filter((t: any) => t.status !== 'Pending Validation')
+    .filter((t: any) => historyStatus === 'All history' || t.status === historyStatus)
+  const selected = tickets.find((t: any) => t.id === selectedId)
+  const queueIds = queue.map((ticket: any) => ticket.id).join(',')
+  const approvedCount = tickets.filter((t: any) => t.status === 'Under Review').length
+  const validationRejectedCount = tickets.filter((t: any) => t.status === 'Validation Rejected').length
+
+  useEffect(() => {
+    if (view !== 'queue') return
+    if (!queue.some((ticket: any) => ticket.id === selectedId)) setSelectedId(queue[0]?.id ?? null)
+  }, [view, selectedId, queueIds])
 
   const approve = async (id: string) => {
     setError('')
+    setProcessingId(id)
     try {
       await api.post(`/leads/inquiries/${id}/validate`, { approved: true })
-      setViewingId(null)
+      toast('Inquiry approved and released to Sales for quotation.', 'success')
       setRevision(v => v + 1)
     } catch (err: any) {
       setError(err.response?.data?.error?.message ?? 'Could not approve this ticket.')
+    } finally {
+      setProcessingId(null)
     }
   }
 
@@ -4017,95 +4346,100 @@ const InquiryValidation = () => {
         altNotes: alternative.notes,
       })
       setRejectingId(null)
-      setViewingId(null)
+      toast('Inquiry returned to Sales with your feedback.', 'success')
       setRevision(v => v + 1)
     } catch (err: any) {
       setError(err.response?.data?.error?.message ?? 'Could not reject this ticket.')
+      throw err
     }
   }
 
   const rejectingTicket = tickets.find((t: any) => t.id === rejectingId)
-  const viewingTicket = tickets.find((t: any) => t.id === viewingId)
-  const pendingCount = tickets.filter((t: any) => t.status === 'Pending Validation').length
-  const rejectedCount = tickets.filter((t: any) => ['Validation Rejected', 'Quotation Rejected'].includes(t.status)).length
-  const wonCount = tickets.filter((t: any) => t.status === 'Converted to Sale').length
 
   return (
     <div className="page-scroll">
-      <div className="page-content">
-        <div className="page-header" style={{ padding: 0, border: 'none', marginBottom: 16 }}>
+      <div className="page-content validation-page">
+        <div className="validation-hero">
           <div>
-            <div className="page-title">Inquiry Validation</div>
-            <div className="page-desc">Every inquiry a Sales Manager creates lands here as a ticket before it can be quoted. Approve it, or reject it with a reason and an optional alternative.</div>
+            <div className="validation-kicker"><span className="sync-dot" /> Procurement workbench</div>
+            <h1 className="validation-title">Inquiry validation</h1>
+            <p className="validation-subtitle">Review demand against live sellable stock, then release viable inquiries to Sales.</p>
+          </div>
+          <div className="validation-hero-count"><strong>{queue.length}</strong><span>need a decision</span></div>
+        </div>
+
+        <div className="validation-summary-strip">
+          <div><span className="summary-dot amber" /><strong>{queue.length}</strong><span>Awaiting Procurement</span></div>
+          <div><span className="summary-dot green" /><strong>{approvedCount}</strong><span>Approved / Ready to Quote</span></div>
+          <div><span className="summary-dot red" /><strong>{validationRejectedCount}</strong><span>Returned to Sales</span></div>
+        </div>
+
+        <div className="validation-controls">
+          <div className="validation-view-switch" role="tablist" aria-label="Validation views">
+            <button type="button" role="tab" aria-selected={view === 'queue'} className={view === 'queue' ? 'active' : ''} onClick={() => setView('queue')}>Needs validation <span>{queue.length}</span></button>
+            <button type="button" role="tab" aria-selected={view === 'history'} className={view === 'history' ? 'active' : ''} onClick={() => setView('history')}>History</button>
+          </div>
+          <div className="validation-filters">
+            <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)} aria-label="Filter by PIC"><option value="">All PICs</option>{pics.map(p => <option key={p} value={p}>{p}</option>)}</select>
+            <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search company, spec, location…" value={search} onChange={e => setSearch(e.target.value)} /></div>
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
-          {[
-            { label: 'Total Tickets', val: tickets.length, icon: I.inquiry, color: '#315EF6' },
-            { label: 'Pending Validation', val: pendingCount, icon: I.warning, color: '#D97706' },
-            { label: 'Converted to Sale', val: wonCount, icon: I.check, color: '#059669' },
-            { label: 'Rejected', val: rejectedCount, icon: I.x, color: '#DC2626' },
-          ].map(k => (
-            <div key={k.label} className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 38, height: 38, borderRadius: 9, background: `${k.color}15`, color: k.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Ic n={k.icon} size={17} />
+        {(error || loadError) && <div className="validation-error"><Ic n={I.warning} size={14} /> {error || loadError}</div>}
+
+        {view === 'queue' ? (
+          <div className="validation-workspace">
+            <aside className="validation-queue-panel">
+              <div className="validation-panel-heading">
+                <div><strong>Decision queue</strong><span>Oldest requests appear first</span></div>
+                <span>{queue.length}</span>
               </div>
-              <div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--t1)' }}>{k.val}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--t4)' }}>{k.label}</div>
+              <div className="validation-queue-list">
+                {loading && tickets.length === 0 ? <div className="validation-empty"><Ic n={I.sync} size={22} /><strong>Loading tickets…</strong></div> : queue.map((ticket: any) => (
+                  <ValidationQueueItem key={ticket.id} ticket={ticket} active={ticket.id === selectedId} onSelect={() => setSelectedId(ticket.id)} />
+                ))}
+                {!loading && queue.length === 0 && (
+                  <div className="validation-empty success"><span><Ic n={I.check} size={22} /></span><strong>Queue cleared</strong><p>There are no inquiries waiting for Procurement.</p></div>
+                )}
               </div>
+            </aside>
+            <div className="validation-detail-panel">
+              {selected && selected.status === 'Pending Validation' ? (
+                <TicketDecisionPanel t={selected} onApprove={() => approve(selected.id)} onReject={() => setRejectingId(selected.id)} processing={processingId === selected.id} />
+              ) : (
+                <div className="validation-empty"><Ic n={I.inquiry} size={26} /><strong>Select an inquiry</strong><p>Choose a ticket from the queue to inspect its requirements and live stock.</p></div>
+              )}
             </div>
-          ))}
-        </div>
-
-        <div className="toolbar" style={{ padding: 0, marginBottom: 14 }}>
-          <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{pics.map(p => <option key={p} value={p}>{p}</option>)}</select>
-          <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search tickets, company, contact…" value={search} onChange={e => setSearch(e.target.value)} /></div>
-          <div className="toolbar-right">
-            <span className="count-label">Showing {filtered.length} of {tickets.length} tickets</span>
           </div>
-        </div>
-
-        {error && <div style={{ padding: '9px 11px', borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12, marginBottom: 12 }}>{error}</div>}
-
-        <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 8, alignItems: 'flex-start' }}>
-          {BOARD_COLUMNS.map(col => {
-            const colTickets = filtered.filter((t: any) => col.statuses.includes(t.status))
-            return (
-              <div key={col.key} style={{ minWidth: 260, width: 260, flexShrink: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, padding: '0 2px' }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: col.dot, flexShrink: 0 }} />
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--t1)' }}>{col.label}</span>
-                  <span style={{ fontSize: 11, color: 'var(--t4)', marginLeft: 'auto' }}>{colTickets.length}</span>
-                </div>
-                <div style={{ maxHeight: 560, overflowY: 'auto', paddingRight: 2 }}>
-                  {colTickets.map((t: any) => (
-                    <TicketCard
-                      key={t.id}
-                      t={t}
-                      onView={() => setViewingId(t.id)}
-                      onApprove={col.key === 'pending' ? () => approve(t.id) : undefined}
-                      onReject={col.key === 'pending' ? () => setRejectingId(t.id) : undefined}
-                    />
+        ) : (
+          <section className="validation-history-card">
+            <div className="validation-history-toolbar">
+              <div><strong>Decision history</strong><span>Validation outcomes and downstream progress</span></div>
+              <select className="sel" value={historyStatus} onChange={e => setHistoryStatus(e.target.value)}>
+                {['All history', 'Under Review', 'Validation Rejected', 'Quotation Created', 'Quotation Rejected', 'Converted to Sale'].map(status => <option key={status} value={status}>{validationStatusLabel(status)}</option>)}
+              </select>
+            </div>
+            <div className="validation-history-table-wrap">
+              <table className="crm validation-history-table">
+                <thead><tr><th>Inquiry</th><th>Company</th><th>Request</th><th>PIC</th><th>Received</th><th>Outcome</th></tr></thead>
+                <tbody>
+                  {history.map((ticket: any) => (
+                    <tr key={ticket.id}>
+                      <td><span className="ref-id">{ticket.ref}</span></td>
+                      <td><strong>{ticket.company}</strong><small>{ticket.contact}</small></td>
+                      <td>{ticket.size} · {ticket.condition}<small>{ticket.quantity} unit{ticket.quantity === 1 ? '' : 's'} · {ticket.location}</small></td>
+                      <td><ChipPIC label={ticket.pic} /></td>
+                      <td>{ticket.date}</td>
+                      <td><span className={`badge ${validationStatusTone(ticket.status)}`}>{validationStatusLabel(ticket.status)}</span></td>
+                    </tr>
                   ))}
-                  {colTickets.length === 0 && (
-                    <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--t4)', fontSize: 11.5 }}>No tickets</div>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+                </tbody>
+              </table>
+              {!loading && history.length === 0 && <div className="validation-empty"><Ic n={I.search} size={22} /><strong>No matching history</strong><p>Try a different PIC, status, or search term.</p></div>}
+            </div>
+          </section>
+        )}
       </div>
-      {viewingTicket && (
-        <TicketDetailModal
-          t={viewingTicket}
-          onClose={() => setViewingId(null)}
-          onApprove={viewingTicket.status === 'Pending Validation' ? () => approve(viewingTicket.id) : undefined}
-          onReject={viewingTicket.status === 'Pending Validation' ? () => setRejectingId(viewingTicket.id) : undefined}
-        />
-      )}
       {rejectingTicket && (
         <RejectTicketModal
           ticketRef={rejectingTicket.ref}
@@ -4566,9 +4900,14 @@ const MonthlyReport = () => {
     }
   }
 
-  // PDF goes through the browser's own print-to-PDF. The .report-sheet print
-  // stylesheet hides the app chrome so the output is just the document.
-  const exportPDF = () => window.print()
+  // Same tabular document as every other PDF export, driven by the exact sections
+  // the Excel and Google Sheets exports use -- so all three stay identical.
+  const exportPDF = () => void downloadPdfDocument({
+    title: 'MONTHLY PERFORMANCE REPORT',
+    filename,
+    scope: `Container CRM | ${report.month_label} | ${report.scope === 'personal' ? 'Personal' : 'Organization-wide'}`,
+    sections: reportTabs(report).map(t => ({ title: t.name, rows: t.rows })),
+  })
 
   if (loading) return <div className="loading-row"><span className="spinner" />Building report…</div>
   if (!report) return <div className="empty"><div className="empty-title">No report available</div></div>
@@ -4579,7 +4918,7 @@ const MonthlyReport = () => {
   const change = s.profit_change_pct
 
   const exportOptions = [
-    { label: 'PDF (print)',   run: exportPDF },
+    { label: 'PDF',           run: exportPDF },
     { label: 'Excel (.xlsx)', run: exportExcel },
     { label: 'Google Sheet',  run: exportSheet },
   ]
@@ -5236,7 +5575,7 @@ export default function App() {
         width: sidebarPinned ? 240 : 68,
         minWidth: sidebarPinned ? 240 : 68,
         flexShrink: 0,
-        transition: 'width 0.2s ease, min-width 0.2s ease'
+        transition: 'width 0.3s cubic-bezier(0.16, 1, 0.3, 1), min-width 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
       }} />
 
       {/* Floating Sidebar */}
@@ -5258,7 +5597,7 @@ export default function App() {
       <div className="workspace" style={{ flex: 1, minWidth: 0, zIndex: 1 }}>
         <div className="ws-card">
           <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} session={session} onNav={handleNav} role={currentProfile?.role} />
-          {renderScreen()}
+          <div key={screen} className="screen-transition">{renderScreen()}</div>
         </div>
       </div>
       <ToastHost />
@@ -5273,15 +5612,38 @@ const Pickups = () => {
   const [pickStatus, setPickStatus] = useState('All Pickup Statuses');
   const [search, setSearch] = useState('');
   const [revision, setRevision] = useState(0);
+  const [pickupDates, setPickupDates] = useState<Record<string, string>>({});
   const contracts = useContracts('All Statuses', pickStatus, search, revision);
 
-  const handleUpdateStatus = async (id: string, newStatus: string) => {
+  const handleUpdateStatus = async (contract: any, newStatus: string) => {
     try {
-      await api.patch(`/contracts/${id}`, { pickup_status: newStatus });
+      const date = pickupDates[contract.id] ?? contract.pickupDateRaw;
+      await api.patch(`/contracts/${contract.id}`, {
+        pickup_status: newStatus,
+        ...(date ? { pickup_date: new Date(`${date}T12:00:00`).toISOString() } : {}),
+      });
       setRevision(r => r + 1);
+      toast(`Pickup marked ${newStatus}`, 'success');
     } catch (err) {
       console.error(err);
       toast('Failed to update status', 'error');
+    }
+  };
+
+  const pickupTransitions: Record<string, string[]> = {
+    Pending: ['Scheduled'],
+    Scheduled: ['Pending', 'Confirmed'],
+    Confirmed: ['Scheduled', 'Picked Up'],
+  };
+  const savePickupDate = async (contract: any) => {
+    const date = pickupDates[contract.id];
+    if (!date) return;
+    try {
+      await api.patch(`/contracts/${contract.id}`, { pickup_date: new Date(`${date}T12:00:00`).toISOString() });
+      toast('Pickup date saved', 'success');
+      setRevision(value => value + 1);
+    } catch (error: any) {
+      toast(error.response?.data?.error?.message ?? 'Pickup date could not be saved', 'error');
     }
   };
 
@@ -5328,7 +5690,7 @@ const Pickups = () => {
                   <div style={{ fontSize: 11, color: 'var(--t3)' }}>{c.category}</div>
                 </td>
                 <td className="r" style={{ fontWeight: 600 }}>{c.qty}</td>
-                <td className="mono" style={{ fontSize: 12, color: c.pickStatus === 'Overdue' ? 'var(--red)' : undefined }}>{c.pickup}</td>
+                <td><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="date" className="inp" aria-label={`Pickup date for ${c.ref}`} value={pickupDates[c.id] ?? c.pickupDateRaw} onChange={e => setPickupDates(values => ({ ...values, [c.id]: e.target.value }))} disabled={c.storedPickStatus === 'Picked Up'} style={{ minWidth: 132, padding: '5px 7px', fontSize: 11 }} />{pickupDates[c.id] && pickupDates[c.id] !== c.pickupDateRaw && <Btn variant="ghost" sm onClick={() => savePickupDate(c)}>Save</Btn>}</div></td>
                 <td>
                   <span className={`badge ${c.pickStatus === 'Picked Up' ? 'b-green' : c.pickStatus === 'Overdue' ? 'b-red' : c.pickStatus === 'Confirmed' ? 'b-brand' : 'b-amber'}`}>
                     {c.pickStatus}
@@ -5338,15 +5700,14 @@ const Pickups = () => {
                 <td className="col-actions">
                   <select 
                     className="sel" 
-                    value={c.pickStatus} 
-                    onChange={e => handleUpdateStatus(c.id, e.target.value)}
+                    value=""
+                    aria-label={`Update ${c.ref} pickup status`}
+                    onChange={e => { if (e.target.value) handleUpdateStatus(c, e.target.value) }}
+                    disabled={(pickupTransitions[c.storedPickStatus] || []).length === 0}
                     style={{ padding: '4px 8px', fontSize: 11, minWidth: 110 }}
                   >
-                    <option value="Pending">Pending</option>
-                    <option value="Scheduled">Scheduled</option>
-                    <option value="Confirmed">Confirmed</option>
-                    <option value="Picked Up">Picked Up</option>
-                    <option value="Overdue">Overdue</option>
+                    <option value="">Next step…</option>
+                    {(pickupTransitions[c.storedPickStatus] || []).map(next => <option key={next} value={next}>{next}</option>)}
                   </select>
                 </td>
               </tr>

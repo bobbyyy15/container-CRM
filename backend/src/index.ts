@@ -63,13 +63,14 @@ app.use('/api/v1/export',        exportRoutes);
 app.use('/api/v1/reports',       reportRoutes);
 
 
-// Start Server
-app.listen(env.PORT, () => {
-  console.log(`Server is running on port ${env.PORT}`);
-});
+// Only started when run directly. Live updates are handled by Supabase Realtime
+// (see frontend/src/lib/realtime.ts) rather than a websocket held open here, so
+// this process is stateless and can also run as a serverless function -- in that
+// case the platform's adapter imports `app` and no listener is created.
+if (require.main === module) {
+  app.listen(env.PORT, () => {
+    console.log(`Server is running on port ${env.PORT}`);
+  });
+}
 
-// Exported so this can also be wrapped as a serverless handler (Vercel/Netlify/Lambda)
-// without restructuring routes -- app.listen() above still runs for `npm start`/`npm run
-// dev` on an always-on host; a serverless entry point would import { app } from here and
-// pass it to that platform's adapter instead of calling listen. See docs/DEPLOYMENT.md.
 export { app };

@@ -31,7 +31,12 @@ const request = async (token: string, path: string, init: RequestInit = {}) => {
 };
 
 const cleanup = async () => {
+  // Allocations reference both the contract and the inventory row, so they go first.
+  if (ids.contract) {
+    await supabaseAdmin.from('contract_inventory_allocations').delete().eq('contract_id', ids.contract);
+  }
   await supabaseAdmin.from('contracts').delete().in('sale_id', [ids.sale].filter(Boolean) as string[]);
+  await supabaseAdmin.from('inventory').delete().in('id', [ids.inventory].filter(Boolean) as string[]);
   await supabaseAdmin.from('sales').delete().in('id', [ids.sale].filter(Boolean) as string[]);
   await supabaseAdmin.from('quotation_items').delete().in('quotation_id', [ids.quotation].filter(Boolean) as string[]);
   await supabaseAdmin.from('quotations').delete().in('id', [ids.quotation].filter(Boolean) as string[]);
@@ -105,13 +110,41 @@ const run = async () => {
   });
   ids.sale = sale.data.id;
 
-  // Contracts module
+  // Contracts module. A contract now reserves real stock, so it needs an inventory
+  // record to allocate against (migration 037).
+  const { data: stock, error: stockErr } = await supabaseAdmin.from('inventory').insert({
+    container_size: '40ft HC',
+    container_condition: 'Cargo Worthy',
+    container_category: 'Dry',
+    depot_name: `E2E Contract Depot ${stamp}`,
+    quantity_available: 5,
+    quantity_reserved: 0,
+    unit_cost: 3000,
+    created_by: ids.user,
+  }).select('id').single();
+  if (stockErr || !stock) throw stockErr ?? new Error('Could not seed inventory for the contract test');
+  ids.inventory = stock.id;
+
   const contract = await request(token, '/contracts', {
-    method: 'POST', body: JSON.stringify({ sale_id: ids.sale, pickup_date: '2026-10-01' }),
+    method: 'POST',
+    body: JSON.stringify({
+      sale_id: ids.sale,
+      inventory_id: ids.inventory,
+      allocation_quantity: 1,
+      pickup_date: new Date('2026-10-01T09:00:00Z').toISOString(),
+    }),
   });
   ids.contract = contract.data.id;
-  if (contract.data.pickup_status !== 'Pending' || !contract.data.contract_number) {
+  // A contract created WITH a pickup date starts 'Scheduled', not 'Pending'.
+  if (contract.data.pickup_status !== 'Scheduled' || !contract.data.contract_number) {
     throw new Error(`Contract was not created with expected defaults: ${JSON.stringify(contract.data)}`);
+  }
+
+  // Creating the contract must reserve the allocated units.
+  const { data: reserved } = await supabaseAdmin.from('inventory')
+    .select('quantity_available, quantity_reserved').eq('id', ids.inventory).single();
+  if (reserved?.quantity_reserved !== 1 || reserved?.quantity_available !== 5) {
+    throw new Error(`Contract creation did not reserve stock: ${JSON.stringify(reserved)}`);
   }
 
   const contractsList = await request(token, '/contracts');
@@ -119,12 +152,25 @@ const run = async () => {
     throw new Error('Newly created contract did not appear in the contracts list');
   }
 
+  // Pickup can only advance one step at a time, and Confirmed additionally requires the
+  // contract itself to be Active -- so activate first, then Scheduled -> Confirmed.
+  await request(token, `/contracts/${ids.contract}`, {
+    method: 'PATCH', body: JSON.stringify({ status: 'Active' }),
+  });
   const updated = await request(token, `/contracts/${ids.contract}`, {
     method: 'PATCH', body: JSON.stringify({ pickup_status: 'Confirmed' }),
   });
   if (updated.data.pickup_status !== 'Confirmed') {
     throw new Error(`Pickup status update did not persist: ${JSON.stringify(updated.data)}`);
   }
+
+  // Skipping a step must be rejected (Confirmed -> Pending is not a legal transition).
+  const illegalJump = await fetch(`${apiBase}/contracts/${ids.contract}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ pickup_status: 'Pending' }),
+  });
+  if (illegalJump.ok) throw new Error('An invalid pickup transition (Confirmed -> Pending) was accepted');
 
   // A stranger sales_manager with a different PIC must not be able to touch this contract.
   const { data: strangerUser, error: strangerErr } = await supabaseAdmin.auth.admin.createUser({

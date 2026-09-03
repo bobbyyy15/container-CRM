@@ -355,9 +355,17 @@ const run = async () => {
   });
   ids.sale = sale.data.id;
 
+  // The quotation list intentionally returns every status, including Converted and
+  // Rejected -- the Quotations screen has a "Converted" summary card and a Converted
+  // filter option, both of which would always read zero if the API hid them. So assert
+  // the status actually transitioned rather than that the row disappeared.
   const quotes = await request(token, '/deals/quotations');
-  if (quotes.data.some((row: any) => row.id === ids.quotation)) {
-    throw new Error('Converted quotation remained in the active quotation list');
+  const convertedQuote = quotes.data.find((row: any) => row.id === ids.quotation);
+  if (!convertedQuote) {
+    throw new Error('Converted quotation is missing from the quotation list');
+  }
+  if (convertedQuote.status !== 'Converted') {
+    throw new Error(`Quotation status after conversion should be Converted, got ${convertedQuote.status}`);
   }
   const sales = await request(token, '/deals/sales');
   const recorded = sales.data.find((row: any) => row.id === ids.sale);

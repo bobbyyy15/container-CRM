@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
+import { CreateContractSchema, UpdateContractSchema } from '../schemas/contract.schema';
 
 export class ContractController {
   
@@ -52,11 +53,11 @@ export class ContractController {
 
   static async createContract(req: Request, res: Response) {
     try {
-      const { sale_id, pickup_date } = req.body;
-      if (!sale_id) throw new Error('sale_id is required');
+      const payload = CreateContractSchema.parse(req.body);
+      const { sale_id, pickup_date, inventory_id, allocation_quantity } = payload;
 
       // Verify the sale exists and belongs to the user (silos)
-      let saleQuery = supabaseAdmin.from('sales').select('id, company_id, pic_id').eq('id', sale_id).single();
+      const saleQuery = supabaseAdmin.from('sales').select('id, company_id, pic_id, status').eq('id', sale_id).single();
       const { data: sale, error: saleErr } = await saleQuery;
       if (saleErr || !sale) throw new Error('Sale not found');
 
@@ -69,12 +70,15 @@ export class ContractController {
       if (!canManageAnySale && !ownsSale) {
         throw new Error('Unauthorized to create a contract for this sale');
       }
+      if (sale.status !== 'Won') throw new Error('Only won sales can become contracts');
 
-      const { data, error } = await supabaseAdmin.from('contracts').insert({
-        sale_id,
-        company_id: sale.company_id,
-        pickup_date: pickup_date || null
-      }).select('*').single();
+      const { data, error } = await supabaseAdmin.rpc('create_contract_with_inventory', {
+        p_sale_id: sale_id,
+        p_inventory_id: inventory_id,
+        p_quantity: allocation_quantity,
+        p_pickup_date: pickup_date ?? null,
+        p_actor_id: req.auth!.profile.id,
+      }).single();
 
       if (error) throw error;
       res.status(201).json({ success: true, data });
@@ -86,7 +90,7 @@ export class ContractController {
   static async updateContract(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const { pickup_status, pickup_date, status } = req.body;
+      const payload = UpdateContractSchema.parse(req.body);
 
       // Verify the contract exists and belongs to the user
       let contractQuery = supabaseAdmin.from('contracts').select('id, sale_id, sales(pic_id)').eq('id', id).single();
@@ -107,12 +111,14 @@ export class ContractController {
         throw new Error('Unauthorized to update this contract');
       }
 
-      const updates: any = {};
-      if (pickup_status) updates.pickup_status = pickup_status;
-      if (pickup_date !== undefined) updates.pickup_date = pickup_date || null;
-      if (status) updates.status = status;
-
-      const { data, error } = await supabaseAdmin.from('contracts').update(updates).eq('id', id).select('*').single();
+      const { data, error } = await supabaseAdmin.rpc('update_contract_lifecycle', {
+        p_contract_id: id,
+        p_actor_id: req.auth!.profile.id,
+        p_pickup_status: payload.pickup_status ?? null,
+        p_pickup_date: payload.pickup_date ?? null,
+        p_set_pickup_date: Object.prototype.hasOwnProperty.call(payload, 'pickup_date'),
+        p_status: payload.status ?? null,
+      }).single();
 
       if (error) throw error;
       res.json({ success: true, data });

@@ -638,17 +638,41 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
 }) => {
   const [saleId, setSaleId] = useState('');
   const [pickupDate, setPickupDate] = useState('');
+  const [inventory, setInventory] = useState<any[]>([]);
+  const [inventoryId, setInventoryId] = useState('');
+  const [quantity, setQuantity] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    api.get('/inventory', { params: { limit: 1000 } }).then(res => {
+      setInventory((res.data.data || []).filter((row: any) => Number(row.quantity_available) - Number(row.quantity_reserved) > 0));
+    }).catch(() => setError('Inventory could not be loaded.'));
+  }, []);
+
+  useEffect(() => {
+    const sale = sales.find(s => s.id === saleId);
+    if (sale) setQuantity(Math.max(1, Number(sale.qty || sale.totalUnits || 1)));
+  }, [saleId, sales]);
+
+  const selectedSale = sales.find(s => s.id === saleId);
+  const selectedInventory = inventory.find(row => row.id === inventoryId);
+  const saleUnits = Math.max(1, Number(selectedSale?.qty || selectedSale?.totalUnits || 1));
+  const stockUnits = selectedInventory
+    ? Number(selectedInventory.quantity_available) - Number(selectedInventory.quantity_reserved)
+    : saleUnits;
+  const maximumQuantity = Math.max(1, Math.min(saleUnits, stockUnits));
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!saleId) return setError('Please select a source sale');
+    if (!saleId || !inventoryId) return setError('Please select a source sale and inventory batch');
     setSubmitting(true);
     setError(null);
     try {
       const res = await api.post('/contracts', { 
         sale_id: saleId, 
+        inventory_id: inventoryId,
+        allocation_quantity: quantity,
         pickup_date: pickupDate ? new Date(pickupDate).toISOString() : undefined 
       });
       if (res.data.success) {
@@ -683,6 +707,23 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
           </div>
 
           <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Inventory to reserve</label>
+            <select className="inp" value={inventoryId} onChange={e => { setInventoryId(e.target.value); const row = inventory.find(item => item.id === e.target.value); if (row) setQuantity(value => Math.min(value, Number(row.quantity_available) - Number(row.quantity_reserved))); }} disabled={submitting}>
+              <option value="">-- Select available stock --</option>
+              {inventory.map(row => {
+                const available = Number(row.quantity_available) - Number(row.quantity_reserved);
+                return <option key={row.id} value={row.id}>{row.container_size} · {row.container_condition} · {row.depot_name} ({available} available)</option>;
+              })}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Units to reserve</label>
+            <input type="number" min={1} max={maximumQuantity} className="inp" value={quantity} onChange={e => setQuantity(Number(e.target.value))} disabled={submitting} />
+            <div style={{ marginTop: 5, fontSize: 11, color: 'var(--t4)' }}>Maximum for this sale and batch: {maximumQuantity}</div>
+          </div>
+
+          <div>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Target pickup date (optional)</label>
             <input
               type="date"
@@ -696,7 +737,7 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
-          <button className="btn btn-primary" disabled={submitting || !saleId}>
+          <button className="btn btn-primary" disabled={submitting || !saleId || !inventoryId || quantity < 1}>
             {submitting ? 'Generating…' : 'Generate Contract'}
 
           </button>
