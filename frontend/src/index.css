@@ -1358,12 +1358,38 @@ table.crm tbody tr:nth-child(10) { animation-delay: 0.225s; }
 }
 
 /* ─── Print / PDF export ────────────────────────────────────────────────
-   The Monthly Report's "PDF" option is the browser's own print-to-PDF, so the
-   app chrome has to disappear and the document has to lay out on paper. */
+   PDF export is the browser's own print-to-PDF, so the app chrome has to
+   disappear and the content has to lay out on paper. Two modes:
+     1. A data export (#print-root) -- a standalone table built by exportToPDF()
+     2. Printing a whole page, e.g. the Monthly Report */
 .print-only { display: none; }
+#print-root { display: none; }
 
 @media print {
   @page { margin: 14mm; size: A4; }
+
+  /* ── Mode 1: data table export ───────────────────────────────────────
+     Everything except the generated table is removed, so the output is a
+     clean document rather than a photograph of the screen. */
+  body.printing-data > *:not(#print-root) { display: none !important; }
+  body.printing-data #print-root { display: block !important; }
+
+  .print-doc-head { margin-bottom: 14px; border-bottom: 2px solid #000; padding-bottom: 8px; }
+  .print-doc-title { font-size: 19px; font-weight: 800; text-transform: capitalize; }
+  .print-doc-meta { font-size: 11px; color: #555; margin-top: 3px; }
+
+  .print-doc-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  .print-doc-table thead { display: table-header-group; }
+  .print-doc-table th {
+    text-align: left; text-transform: capitalize; font-weight: 700;
+    border-bottom: 1.5px solid #000; padding: 5px 6px; background: #F2F3F5;
+  }
+  .print-doc-table td {
+    padding: 4px 6px; border-bottom: 1px solid #DDD;
+    vertical-align: top; word-break: break-word;
+  }
+  .print-doc-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .print-doc-table tbody tr:nth-child(even) td { background: #FAFAFB; }
 
   /* Force light colors -- a dark-themed screen prints as a black page. */
   :root, :root[data-theme="dark"] {
@@ -1413,6 +1439,44 @@ table.crm tbody tr:nth-child(10) { animation-delay: 0.225s; }
   table.crm thead th { position: static !important; }
 
   .report-kpis { grid-template-columns: repeat(4, 1fr) !important; }
+
+  /* ── Whole-page printing (e.g. the dashboard's Export PDF) ───────────
+     Screen layouts are built for a ~1400px viewport. On A4 (~180mm of usable
+     width) their multi-column grids and fixed widths overflow the sheet and get
+     clipped, which is what made the printed dashboard look broken. Collapse
+     every page grid to at most two columns and let content flow. */
+  .page-content > div[style*="grid"],
+  .page-content div[style*="repeat("] {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  /* Anything that scrolls sideways on screen must wrap on paper instead. */
+  .page-content,
+  .page-content * {
+    max-width: 100% !important;
+    overflow: visible !important;
+  }
+  .table-wrap { overflow: visible !important; }
+
+  /* Charts are absolutely sized by the charting library and otherwise bleed off
+     the page edge. */
+  .recharts-responsive-container,
+  .recharts-wrapper,
+  .recharts-surface {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* Featured KPI tiles use white text on a colored background that mostly
+     disappears on a printer -- force readable contrast. */
+  .kpi-featured {
+    background: #F2F3F5 !important;
+    color: #000 !important;
+    border: 1px solid #D8DAE0 !important;
+    min-height: 0 !important;
+  }
+  .kpi-featured * { color: #000 !important; opacity: 1 !important; }
 
   a[href]::after { content: none !important; }
 }

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { supabase } from './config/supabase'
 import { api } from './lib/api'
 import { useRealtimeRevision, useRealtimeStatus } from './lib/realtime'
@@ -59,22 +59,75 @@ const exportToGoogleSheet = async (data: any[], filename: string) => {
   }
 }
 
+// Renders the rows as a clean standalone table and hands it to the browser's
+// print-to-PDF. Printing the live screen instead produces the app chrome squeezed
+// onto paper, which is what a "PDF export" must never look like.
+const exportToPDF = (data: any[], filename: string) => {
+  if (!data || !data.length) return toast('There is nothing to export.', 'error')
+
+  const headers = Object.keys(data[0])
+  const esc = (v: any) => String(v ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+  const host = document.createElement('div')
+  host.id = 'print-root'
+  host.innerHTML = `
+    <div class="print-doc-head">
+      <div class="print-doc-title">${esc(filename.replace(/[-_]/g, ' '))}</div>
+      <div class="print-doc-meta">Container CRM · ${data.length} record${data.length === 1 ? '' : 's'} · ${new Date().toLocaleString()}</div>
+    </div>
+    <table class="print-doc-table">
+      <thead><tr>${headers.map(h => `<th>${esc(h.replace(/[-_]/g, ' '))}</th>`).join('')}</tr></thead>
+      <tbody>
+        ${data.map(row => `<tr>${headers.map(h => `<td>${esc(row[h])}</td>`).join('')}</tr>`).join('')}
+      </tbody>
+    </table>`
+
+  document.body.appendChild(host)
+  document.body.classList.add('printing-data')
+
+  const cleanup = () => {
+    document.body.classList.remove('printing-data')
+    host.remove()
+    window.removeEventListener('afterprint', cleanup)
+  }
+  window.addEventListener('afterprint', cleanup)
+  window.print()
+  // Safari/Firefox don't always fire afterprint; sweep up regardless.
+  setTimeout(cleanup, 1000)
+}
+
 const ExportMenu = ({ data, filename, sm = true }: { data: any[]; filename: string; sm?: boolean }) => {
   const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+  const btnRef = useRef<HTMLDivElement>(null)
+
   const options = [
+    { label: 'PDF',           icon: I.export, run: () => exportToPDF(data, filename) },
     { label: 'CSV file',      icon: I.export, run: () => exportToCSV(data, filename) },
     { label: 'Excel (.xlsx)', icon: I.export, run: () => exportToExcel(data, filename) },
     { label: 'Google Sheet',  icon: I.link,   run: () => exportToGoogleSheet(data, filename) },
   ]
+
+  // Positioned fixed against the button's viewport rect rather than absolutely inside
+  // it -- toolbars and table wrappers clip an absolutely positioned menu.
+  const toggle = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) })
+    }
+    setOpen(o => !o)
+  }
+
   return (
-    <div style={{ position: 'relative' }}>
-      <Btn variant="ghost" sm={sm} onClick={() => setOpen(o => !o)}>
+    <div ref={btnRef} style={{ position: 'relative' }}>
+      <Btn variant="ghost" sm={sm} onClick={toggle}>
         <Ic n={I.export} size={13} /> Export <Ic n={I.chevDown} size={11} />
       </Btn>
-      {open && (
+      {open && pos && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setOpen(false)} />
-          <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, width: 170, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, zIndex: 100, boxShadow: 'var(--shadow-md)' }}>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1999 }} onClick={() => setOpen(false)} />
+          <div style={{ position: 'fixed', top: pos.top, right: pos.right, width: 180, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, zIndex: 2000, boxShadow: 'var(--shadow-drop)' }}>
             {options.map(o => (
               <div
                 key={o.label}
@@ -4680,7 +4733,7 @@ const MonthlyReport = () => {
   const change = s.profit_change_pct
 
   const exportOptions = [
-    { label: 'PDF (print)',   run: exportPDF },
+    { label: 'PDF',           run: exportPDF },
     { label: 'Excel (.xlsx)', run: exportExcel },
     { label: 'Google Sheet',  run: exportSheet },
   ]
