@@ -66,74 +66,150 @@ const exportToGoogleSheet = async (data: any[], filename: string) => {
 
 const COMPANY_NAME = 'WaveContainers'
 
+// Brand palette, as RGB triples because jsPDF takes numeric channels.
+const PDF_NAVY: [number, number, number] = [22, 38, 92]
+const PDF_TEAL: [number, number, number] = [42, 168, 168]
+const PDF_BLUE: [number, number, number] = [37, 99, 201]
+const PDF_STRIPE: [number, number, number] = [239, 244, 251]
+const PDF_GREY: [number, number, number] = [107, 114, 128]
+const PDF_BORDER: [number, number, number] = [217, 225, 236]
+
 export type PdfSection = { title?: string; rows: Record<string, any>[] }
 
-const escapeHtml = (v: any) => String(v ?? '')
-  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-
-const renderPdfTable = (rows: Record<string, any>[]) => {
-  if (!rows.length) return '<div class="print-doc-empty">No records.</div>'
-  const headers = Object.keys(rows[0])
-  return `
-    <table class="print-doc-table">
-      <thead><tr>${headers.map(h => `<th>${escapeHtml(h.replace(/[-_]/g, ' '))}</th>`).join('')}</tr></thead>
-      <tbody>
-        ${rows.map(row => `<tr>${headers.map(h => `<td>${escapeHtml(row[h])}</td>`).join('')}</tr>`).join('')}
-      </tbody>
-    </table>`
+// Row objects use terse internal keys (co, buyPU, neededBy...). Left alone they
+// produce unreadable column headings, so map the worst offenders and split
+// camelCase for the rest.
+const PDF_LABELS: Record<string, string> = {
+  co: 'Company', ref: 'Reference', pic: 'PIC', qty: 'Qty',
+  buyPU: 'Buy / Unit', sellPU: 'Sell / Unit',
+  totalBuy: 'Total Buy', totalSell: 'Total Sell',
+  emailAddr: 'Email', neededBy: 'Needed By', prevStatus: 'Previous Status',
+  currStatus: 'Current Status', altSize: 'Alt. Size', altCondition: 'Alt. Condition',
+  altQuantity: 'Alt. Quantity', altAskingPrice: 'Alt. Asking Price', altNotes: 'Alt. Notes',
+  rejectionReason: 'Rejection Reason', contactMissing: 'Contact Missing',
 }
 
-const printPdfDocument = (opts: { title: string; scope?: string; sections: PdfSection[] }) => {
+const humanizeKey = (key: string) => PDF_LABELS[key] ?? key
+  .replace(/[-_]/g, ' ')
+  .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+  .replace(/\b\w/g, c => c.toUpperCase())
+
+// Internal identifiers are meaningless in a printed report (they stay in the CSV
+// and Excel exports, where data fidelity matters more than readability).
+const isInternalKey = (key: string) => key === 'id' || /Id$/.test(key)
+
+const downloadPdfDocument = async (opts: {
+  title: string; scope?: string; filename: string; sections: PdfSection[];
+}) => {
   const sections = opts.sections.filter(s => s.rows.length > 0)
   if (!sections.length) return toast('There is nothing to export.', 'error')
 
-  const totalRecords = sections.reduce((n, s) => n + s.rows.length, 0)
-  const generated = new Date().toLocaleString(undefined, {
-    year: 'numeric', month: 'short', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  })
+  try {
+    const [{ jsPDF }, autoTableMod] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ])
+    const autoTable = (autoTableMod as any).default
 
-  const host = document.createElement('div')
-  host.id = 'print-root'
-  host.innerHTML = `
-    <div class="print-doc-head">
-      <div class="print-doc-headline">
-        <div>
-          <div class="print-doc-title">${escapeHtml(opts.title)}</div>
-          <div class="print-doc-scope">${escapeHtml(COMPANY_NAME)}${opts.scope ? ` | ${escapeHtml(opts.scope)}` : ''}</div>
-        </div>
-        <div class="print-doc-brand">
-          <span class="print-doc-brand-wave">Wave</span><span class="print-doc-brand-rest">Containers</span>
-        </div>
-      </div>
-      <div class="print-doc-meta">Generated: ${escapeHtml(generated)} | Records: ${totalRecords}</div>
-    </div>
-    ${sections.map(s => `
-      ${s.title ? `<div class="print-doc-section">${escapeHtml(s.title)}</div>` : ''}
-      ${renderPdfTable(s.rows)}
-    `).join('')}`
+    const widest = Math.max(...sections.map(s => Object.keys(s.rows[0]).filter(k => !isInternalKey(k)).length))
+    // Wide tables are unreadable squeezed into portrait width.
+    const doc = new jsPDF({ orientation: widest > 6 ? 'landscape' : 'portrait', unit: 'pt', format: 'a4' })
 
-  document.body.appendChild(host)
-  document.body.classList.add('printing-data')
+    const pageW = doc.internal.pageSize.getWidth()
+    const pageH = doc.internal.pageSize.getHeight()
+    const margin = 36
+    const headerH = 92
 
-  const cleanup = () => {
-    document.body.classList.remove('printing-data')
-    host.remove()
-    window.removeEventListener('afterprint', cleanup)
+    const totalRecords = sections.reduce((n, s) => n + s.rows.length, 0)
+    const generated = new Date().toLocaleString(undefined, {
+      year: 'numeric', month: 'short', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    })
+
+    const drawPageFurniture = () => {
+      // Masthead
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(...PDF_NAVY)
+      doc.text(opts.title, margin, margin + 14)
+
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...PDF_BLUE)
+      doc.text(`${COMPANY_NAME}${opts.scope ? ` | ${opts.scope}` : ''}`, margin, margin + 30)
+
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...PDF_GREY)
+      doc.text(`Generated: ${generated}  |  Records: ${totalRecords}`, margin, margin + 44)
+
+      // Wordmark, right-aligned (no logo asset is bundled)
+      doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+      const rest = 'Containers'
+      const restW = doc.getTextWidth(rest)
+      doc.setTextColor(...PDF_NAVY); doc.text(rest, pageW - margin - restW, margin + 14)
+      doc.setTextColor(...PDF_TEAL); doc.text('Wave', pageW - margin - restW - doc.getTextWidth('Wave'), margin + 14)
+
+      doc.setDrawColor(...PDF_TEAL); doc.setLineWidth(1.4)
+      doc.line(margin, margin + 54, pageW - margin, margin + 54)
+
+      // Footer
+      const page = doc.getNumberOfPages()
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GREY)
+      doc.text(`${COMPANY_NAME} · Container CRM`, margin, pageH - 20)
+      const pageLabel = `Page ${page}`
+      doc.text(pageLabel, pageW - margin - doc.getTextWidth(pageLabel), pageH - 20)
+    }
+
+    let cursorY = headerH
+
+    sections.forEach((section, index) => {
+      const headers = Object.keys(section.rows[0]).filter(k => !isInternalKey(k))
+
+      if (section.title) {
+        // Keep a heading with its table rather than stranded at a page foot.
+        if (cursorY > pageH - 120) { doc.addPage(); cursorY = headerH }
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...PDF_NAVY)
+        doc.text(section.title, margin, cursorY)
+        cursorY += 10
+      } else if (index > 0) {
+        cursorY += 6
+      }
+
+      autoTable(doc, {
+        startY: cursorY,
+        margin: { left: margin, right: margin, top: headerH, bottom: 34 },
+        head: [headers.map(humanizeKey)],
+        body: section.rows.map(row => headers.map(h => {
+          const v = row[h]
+          return v === null || v === undefined || v === '' ? '—' : String(v)
+        })),
+        theme: 'grid',
+        styles: {
+          font: 'helvetica', fontSize: 7.5, cellPadding: 5,
+          lineColor: PDF_BORDER, lineWidth: 0.5,
+          textColor: [17, 24, 39], overflow: 'linebreak', valign: 'middle',
+        },
+        headStyles: {
+          fillColor: PDF_NAVY, textColor: [255, 255, 255],
+          fontStyle: 'bold', fontSize: 7.5, cellPadding: 6,
+        },
+        alternateRowStyles: { fillColor: PDF_STRIPE },
+        // Redrawn per page so the masthead and footer repeat.
+        didDrawPage: drawPageFurniture,
+      })
+
+      cursorY = (doc as any).lastAutoTable.finalY + 18
+    })
+
+    doc.save(`${opts.filename}.pdf`)
+  } catch (err) {
+    toast('Could not build the PDF file.', 'error')
   }
-  window.addEventListener('afterprint', cleanup)
-  window.print()
-  // Safari/Firefox don't reliably fire afterprint; sweep up regardless.
-  setTimeout(cleanup, 1000)
 }
 
 const titleCase = (s: string) => s.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 
 const exportToPDF = (data: any[], filename: string) => {
   if (!data || !data.length) return toast('There is nothing to export.', 'error')
-  printPdfDocument({
+  void downloadPdfDocument({
     title: `${titleCase(filename)} Report`.toUpperCase(),
     scope: 'Container CRM',
+    filename,
     sections: [{ rows: data }],
   })
 }
@@ -1171,9 +1247,10 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
               </div>
             </>
           )}
-          <Btn variant="ghost" sm onClick={() => printPdfDocument({
+          <Btn variant="ghost" sm onClick={() => void downloadPdfDocument({
             title: 'EXECUTIVE OVERVIEW REPORT',
             scope: `Container CRM | ${dateRange}`,
+            filename: 'executive-overview',
             sections: [
               { title: 'Performance Summary', rows: [
                 { Metric: 'Gross Profit',   Value: `$${(m.total_gross_profit || 0).toLocaleString()}` },
@@ -1544,9 +1621,10 @@ const OutreachDashboard = () => {
               </div>
             </>
           )}
-          <Btn variant="ghost" sm onClick={() => printPdfDocument({
+          <Btn variant="ghost" sm onClick={() => void downloadPdfDocument({
             title: 'OUTREACH PERFORMANCE REPORT',
             scope: `Container CRM | ${dateRange}`,
+            filename: 'outreach-performance',
             sections: [
               { title: 'Profit Progress', rows: [
                 { Metric: 'Gross Profit Achieved', Value: `$${profitDone.toLocaleString()}` },
@@ -4815,8 +4893,9 @@ const MonthlyReport = () => {
 
   // Same tabular document as every other PDF export, driven by the exact sections
   // the Excel and Google Sheets exports use -- so all three stay identical.
-  const exportPDF = () => printPdfDocument({
+  const exportPDF = () => void downloadPdfDocument({
     title: 'MONTHLY PERFORMANCE REPORT',
+    filename,
     scope: `Container CRM | ${report.month_label} | ${report.scope === 'personal' ? 'Personal' : 'Organization-wide'}`,
     sections: reportTabs(report).map(t => ({ title: t.name, rows: t.rows })),
   })

@@ -1357,117 +1357,14 @@ table.crm tbody tr:nth-child(10) { animation-delay: 0.225s; }
   .btn::after { display: none; }
 }
 
-/* ─── Print / PDF export ────────────────────────────────────────────────
-   PDF export is the browser's own print-to-PDF, so the app chrome has to
-   disappear and the content has to lay out on paper. Two modes:
-     1. A data export (#print-root) -- a standalone table built by exportToPDF()
-     2. Printing a whole page, e.g. the Monthly Report */
+/* ─── Print ─────────────────────────────────────────────────────────────
+   PDF *export* no longer lives here -- it generates a real file via jsPDF (see
+   downloadPdfDocument in App.tsx). These rules only cover a user hitting Ctrl+P
+   on a page, so the app chrome disappears and content fits the sheet. */
 .print-only { display: none; }
-#print-root { display: none; }
 
 @media print {
   @page { margin: 14mm; size: A4; }
-
-  /* ── Mode 1: data table export ───────────────────────────────────────
-     Everything except the generated table is removed, so the output is a
-     clean document rather than a photograph of the screen. */
-  body.printing-data > *:not(#print-root) { display: none !important; }
-  body.printing-data #print-root { display: block !important; }
-
-  #print-root { font-family: var(--font); color: #111827; }
-
-  .print-doc-head { margin-bottom: 16px; }
-  .print-doc-headline { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
-  .print-doc-title {
-    font-size: 21px; font-weight: 800; letter-spacing: -0.01em;
-    color: #16265C; line-height: 1.15;
-  }
-  .print-doc-scope { font-size: 12px; font-weight: 600; color: #2563C9; margin-top: 4px; }
-  .print-doc-meta {
-    font-size: 10.5px; color: #6B7280; margin-top: 6px;
-    padding-bottom: 8px; border-bottom: 2px solid #2AA8A8;
-  }
-
-  /* Wordmark stands in for a logo file -- no asset is bundled. */
-  .print-doc-brand { font-size: 17px; font-weight: 800; white-space: nowrap; }
-  .print-doc-brand-wave { color: #2AA8A8; }
-  .print-doc-brand-rest { color: #16265C; }
-
-  .print-doc-section {
-    font-size: 12px; font-weight: 700; color: #16265C;
-    margin: 16px 0 6px; break-after: avoid; page-break-after: avoid;
-  }
-  .print-doc-empty { font-size: 10px; color: #6B7280; padding: 6px 0; }
-
-  .print-doc-table {
-    width: 100%; border-collapse: collapse; font-size: 9.5px;
-    margin-bottom: 6px; break-inside: auto;
-  }
-  .print-doc-table thead { display: table-header-group; }
-  .print-doc-table th {
-    text-align: left; text-transform: capitalize; font-weight: 700;
-    color: #FFFFFF; background: #16265C !important;
-    padding: 7px 8px; border: 1px solid #16265C;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
-  }
-  .print-doc-table td {
-    padding: 6px 8px; border: 1px solid #D9E1EC;
-    vertical-align: top; word-break: break-word;
-  }
-  .print-doc-table tr { break-inside: avoid; page-break-inside: avoid; }
-  .print-doc-table tbody tr:nth-child(even) td {
-    background: #EFF4FB !important;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
-  }
-
-  /* Force light colors -- a dark-themed screen prints as a black page. */
-  :root, :root[data-theme="dark"] {
-    --bg: #FFFFFF; --ws: #FFFFFF; --surface: #FFFFFF; --s2: #F7F7F9; --s3: #EFEFF2;
-    --border: #D8DAE0; --border-s: #E8E9EE;
-    --t1: #000000; --t2: #1F2430; --t3: #444B58; --t4: #6B7280;
-  }
-
-  body { background: #FFFFFF !important; }
-
-  /* Hide everything that isn't the report itself. */
-  .sidebar, .topbar, .no-print, .page-header, .greeting-bar { display: none !important; }
-
-  .print-only { display: block; }
-
-  .workspace, .ws-card, .page-scroll {
-    display: block !important;
-    overflow: visible !important;
-    height: auto !important;
-    margin: 0 !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    background: #FFFFFF !important;
-  }
-
-  .report-sheet { padding: 0 !important; }
-
-  .report-masthead {
-    border-bottom: 2px solid #000;
-    padding-bottom: 10px;
-    margin-bottom: 16px;
-  }
-
-  /* Keep a card and its table from splitting across a page break mid-row. */
-  .report-block, .card, .kpi-card {
-    break-inside: avoid;
-    page-break-inside: avoid;
-    box-shadow: none !important;
-    border: 1px solid #D8DAE0 !important;
-  }
-  table.crm { break-inside: auto; }
-  table.crm tr { break-inside: avoid; page-break-inside: avoid; }
-  table.crm thead { display: table-header-group; }
-
-  /* Table headers are sticky on screen; that breaks pagination on paper. */
-  table.crm thead th { position: static !important; }
-
-  .report-kpis { grid-template-columns: repeat(4, 1fr) !important; }
 
   /* ── Whole-page printing (e.g. the dashboard's Export PDF) ───────────
      Screen layouts are built for a ~1400px viewport. On A4 (~180mm of usable
