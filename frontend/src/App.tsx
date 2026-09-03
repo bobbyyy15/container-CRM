@@ -109,7 +109,13 @@ const downloadPdfDocument = async (opts: {
       import('jspdf'),
       import('jspdf-autotable'),
     ])
-    const autoTable = (autoTableMod as any).default
+    // The plugin ships both a default and a named export; which one survives
+    // bundling varies, so accept either and fail loudly rather than calling
+    // undefined further down where the stack would be meaningless.
+    const autoTable = (autoTableMod as any).default ?? (autoTableMod as any).autoTable
+    if (typeof autoTable !== 'function') {
+      throw new Error('the autoTable plugin did not load')
+    }
 
     const widest = Math.max(...sections.map(s => Object.keys(s.rows[0]).filter(k => !isInternalKey(k)).length))
     // Wide tables are unreadable squeezed into portrait width.
@@ -197,8 +203,11 @@ const downloadPdfDocument = async (opts: {
     })
 
     doc.save(`${opts.filename}.pdf`)
-  } catch (err) {
-    toast('Could not build the PDF file.', 'error')
+  } catch (err: any) {
+    // Swallowing the cause here made a real failure undiagnosable -- surface it
+    // in the toast and keep the full stack in the console.
+    console.error('[PDF export] failed:', err)
+    toast(`Could not build the PDF: ${err?.message ?? 'unknown error'}`, 'error')
   }
 }
 
