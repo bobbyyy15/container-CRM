@@ -42,14 +42,33 @@ CREATE POLICY "Targets editable by admin only"
 -- ───────────────────────────────────────────────────────────────────────────────
 -- 2. Service territories
 -- ───────────────────────────────────────────────────────────────────────────────
+-- NOTE: service_territories already exists from migration 001 as an unused
+-- placeholder (id, name, description, created_at) -- created, RLS-enabled, and
+-- then never populated or referenced by any code. It exists on every database
+-- including fresh ones, so CREATE TABLE IF NOT EXISTS would silently no-op and
+-- leave the new columns missing. Extend the existing table instead.
 CREATE TABLE IF NOT EXISTS public.service_territories (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    region     TEXT NOT NULL,
-    name       TEXT NOT NULL,
-    enabled    BOOLEAN NOT NULL DEFAULT TRUE,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    UNIQUE (region, name)
+    name       TEXT NOT NULL
 );
+
+ALTER TABLE public.service_territories
+    ADD COLUMN IF NOT EXISTS region     TEXT    NOT NULL DEFAULT 'Unassigned',
+    ADD COLUMN IF NOT EXISTS enabled    BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
+
+-- Required for the ON CONFLICT seed below.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'public.service_territories'::regclass
+          AND conname  = 'service_territories_region_name_key'
+    ) THEN
+        ALTER TABLE public.service_territories
+            ADD CONSTRAINT service_territories_region_name_key UNIQUE (region, name);
+    END IF;
+END $$;
 
 -- Seed with the list that was previously hardcoded in the frontend, so enabling
 -- this migration doesn't visually change the screen -- it just makes it editable.
