@@ -8,6 +8,7 @@
     "test:e2e:hosted": "tsx src/e2e/hosted-sales-funnel.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "start": "node dist/index.js",
     "check": "npm run build && npm test"
   },
   "keywords": [],

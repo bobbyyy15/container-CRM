@@ -67,3 +67,9 @@ app.use('/api/v1/reports',       reportRoutes);
 app.listen(env.PORT, () => {
   console.log(`Server is running on port ${env.PORT}`);
 });
+
+// Exported so this can also be wrapped as a serverless handler (Vercel/Netlify/Lambda)
+// without restructuring routes -- app.listen() above still runs for `npm start`/`npm run
+// dev` on an always-on host; a serverless entry point would import { app } from here and
+// pass it to that platform's adapter instead of calling listen. See docs/DEPLOYMENT.md.
+export { app };
