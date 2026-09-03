@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { supabase } from './config/supabase'
 import { api } from './lib/api'
+import { useRealtimeRevision, useRealtimeStatus } from './lib/realtime'
 import { toast, askConfirm, askReason, ToastHost, ConfirmHost } from './lib/notify'
 import Login from './Login'
 import ProspectImportDialog from './features/import/ProspectImportDialog'
@@ -144,16 +145,18 @@ const mapPipelineRow = (p: any) => ({
 
 export const useWarmLeads = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
+  const liveRevision = useRealtimeRevision(['leads', 'data'])
   useEffect(() => {
     api.get('/leads/warm-leads', { params: { limit: 500 } }).then(res => {
       if (res.data.success) setData((res.data.data || []).map(mapPipelineRow))
     }).catch(console.error)
-  }, [revision])
+  }, [revision, liveRevision])
   return data
 }
 
 const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') => {
   const [data, setData] = useState<any[]>([])
+  const liveRevision = useRealtimeRevision(['leads', 'deals'])
   useEffect(() => {
     api.get('/leads/inquiries', { params: { limit: 500, status } }).then(res => {
       if (res.data.success) setData((res.data.data || []).map((row: any) => {
@@ -189,12 +192,13 @@ const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') => {
         }
       }))
     }).catch(console.error)
-  }, [revision, status])
+  }, [revision, liveRevision, status])
   return data
 }
 
 const useQuotations = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
+  const liveRevision = useRealtimeRevision(['deals', 'leads'])
   useEffect(() => {
     api.get('/deals/quotations').then(res => {
       if (res.data.success) setData((res.data.data || []).map((row: any) => {
@@ -220,12 +224,13 @@ const useQuotations = (revision = 0) => {
         }
       }))
     }).catch(console.error)
-  }, [revision])
+  }, [revision, liveRevision])
   return data
 }
 
 const useSales = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
+  const liveRevision = useRealtimeRevision(['deals'])
   useEffect(() => {
     api.get('/deals/sales').then(res => {
       if (res.data.success) setData((res.data.data || []).map((row: any) => {
@@ -257,23 +262,25 @@ const useSales = (revision = 0) => {
         }
       }))
     }).catch(console.error)
-  }, [revision])
+  }, [revision, liveRevision])
   return data
 }
 
 const useAnalytics = () => {
   const [data, setData] = useState<any>(null)
+  const liveRevision = useRealtimeRevision([])
   useEffect(() => {
     api.get('/analytics/dashboard').then(res => {
       if (res.data.success) setData(res.data.data)
     }).catch(console.error)
-  }, [])
+  }, [liveRevision])
   return data
 }
 
 const useNotifications = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
   const [unread, setUnread] = useState(0)
+  const liveRevision = useRealtimeRevision(['notifications', 'leads'])
   const refresh = useCallback(() => {
     api.get('/notifications').then(res => {
       if (res.data.success) {
@@ -286,7 +293,7 @@ const useNotifications = (revision = 0) => {
     refresh()
     const interval = setInterval(refresh, 30000)
     return () => clearInterval(interval)
-  }, [refresh, revision])
+  }, [refresh, revision, liveRevision])
   return { notifications: data, unread, refresh }
 }
 
@@ -294,6 +301,7 @@ const useNotifications = (revision = 0) => {
 
 const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses', search = '', revision = 0) => {
   const [data, setData] = useState<any[]>([]);
+  const liveRevision = useRealtimeRevision(['contracts', 'deals']);
   useEffect(() => {
     api.get('/contracts', { params: { status, pickStatus, search } }).then(res => {
       setData((res.data.data || []).map((c: any) => ({
@@ -303,21 +311,25 @@ const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses
         contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
         category: c.items && c.items.length > 0 ? c.items[0].description.split(' ')[0] : '-',
         size: c.items && c.items.length > 0 ? c.items[0].description : '-',
-        qty: c.total_units,
+        qty: c.allocated_quantity ?? c.total_units,
         value: Number(c.revenue),
         pickup: c.pickup_date ? new Date(c.pickup_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Unscheduled',
+        pickupDateRaw: c.pickup_date ? String(c.pickup_date).slice(0, 10) : '',
         pickStatus: c.pickup_status,
+        storedPickStatus: c.stored_pickup_status || c.pickup_status,
         status: c.contract_status,
         pic: c.pic_name || '-',
-        sale: c.sale_number
+        sale: c.sale_number,
+        inventory: c.inventory_label || 'Legacy contract — no stock allocation',
       })));
     }).catch(console.error);
-  }, [status, pickStatus, search, revision]);
+  }, [status, pickStatus, search, revision, liveRevision]);
   return data;
 }
 
 const useCustomers = (status = 'All', search = '', revision = 0) => {
   const [data, setData] = useState<any[]>([]);
+  const liveRevision = useRealtimeRevision(['deals', 'contracts']);
   useEffect(() => {
     api.get('/customers', { params: { status, search } }).then(res => {
       setData((res.data.data || []).map((c: any) => ({
@@ -336,38 +348,41 @@ const useCustomers = (status = 'All', search = '', revision = 0) => {
         status: c.status
       })));
     }).catch(console.error);
-  }, [status, search, revision]);
+  }, [status, search, revision, liveRevision]);
   return data;
 }
 
 const useProspects = (revision = 0, status: 'active' | 'converted' | 'removed' | 'all' = 'active') => {
   const [prospects, setProspects] = useState<any[]>([]);
+  const liveRevision = useRealtimeRevision(['leads', 'data']);
   useEffect(() => {
     api.get('/leads/prospects', { params: { limit: 500, status } }).then(res => {
       const data = (res.data.data || []).map(mapPipelineRow);
       setProspects(data);
     }).catch(e => console.error("Failed to fetch API data", e));
-  }, [revision, status]);
+  }, [revision, liveRevision, status]);
   return prospects;
 }
 
 const useInventory = (filters: Record<string, string> = {}, revision = 0) => {
   const [data, setData] = useState<any[]>([])
+  const liveRevision = useRealtimeRevision(['inventory', 'contracts'])
   useEffect(() => {
     api.get('/inventory', { params: filters }).then(res => {
       if (res.data.success) setData(res.data.data || [])
     }).catch(console.error)
-  }, [JSON.stringify(filters), revision])
+  }, [JSON.stringify(filters), revision, liveRevision])
   return data
 }
 
 const useInventorySummary = (revision = 0) => {
   const [data, setData] = useState<any>(null)
+  const liveRevision = useRealtimeRevision(['inventory', 'contracts'])
   useEffect(() => {
     api.get('/inventory/summary').then(res => {
       if (res.data.success) setData(res.data.data)
     }).catch(console.error)
-  }, [revision])
+  }, [revision, liveRevision])
   return data
 }
 
@@ -812,33 +827,8 @@ const NOTIFICATION_STYLE: Record<string, { icon: string; color: string }> = {
 const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolean; onToggleDark: () => void; session: any; onNav: (s: Screen) => void; role?: string }) => {
   const [showAccountMenu, setShowAccountMenu] = useState(false)
   const [showNotifs, setShowNotifs] = useState(false)
-  
-  const [syncTime, setSyncTime] = useState(Date.now())
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [syncText, setSyncText] = useState('Synced just now')
-
-  useEffect(() => {
-    if (isSyncing) {
-      setSyncText('Syncing...')
-      return
-    }
-    const updateText = () => {
-      const mins = Math.floor((Date.now() - syncTime) / 60000)
-      setSyncText(mins === 0 ? 'Synced just now' : `Synced ${mins}m ago`)
-    }
-    updateText()
-    const interval = setInterval(updateText, 30000)
-    return () => clearInterval(interval)
-  }, [syncTime, isSyncing])
-
-  const handleManualSync = () => {
-    if (isSyncing) return
-    setIsSyncing(true)
-    setTimeout(() => {
-      setIsSyncing(false)
-      setSyncTime(Date.now())
-    }, 1200)
-  }
+  const realtimeStatus = useRealtimeStatus()
+  const syncText = realtimeStatus === 'connected' ? 'Live' : realtimeStatus === 'connecting' ? 'Connecting…' : 'Offline'
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User'
   const initials = userName.substring(0, 2).toUpperCase()
   
@@ -922,12 +912,8 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
       </div>
 
       <div className="topbar-right">
-        <div 
-          className="sync-pill" 
-          onClick={handleManualSync} 
-          style={{ cursor: isSyncing ? 'wait' : 'pointer', opacity: isSyncing ? 0.7 : 1 }}
-        >
-          <Ic n={I.sync} size={11} style={{ animation: isSyncing ? 'spin 1s linear infinite' : 'none' }} />
+        <div className="sync-pill" data-status={realtimeStatus} title="Realtime connection status">
+          <span className="sync-dot" />
           {syncText}
         </div>
 
@@ -2276,14 +2262,21 @@ const QuotationList = () => {
     return searchMatch && statusMatch && picMatch
   })
 
-  const acceptQuotation = async (id: string) => {
+  const updateQuotationStatus = async (id: string, status: string) => {
     setActionError('')
     try {
-      await api.patch(`/deals/quotations/${id}/status`, { status: 'Accepted' })
+      await api.patch(`/deals/quotations/${id}/status`, { status })
       setRevision(value => value + 1)
     } catch (error: any) {
-      setActionError(error.response?.data?.error?.message ?? error.message ?? 'Could not accept the quotation.')
+      setActionError(error.response?.data?.error?.message ?? error.message ?? 'Could not update the quotation.')
     }
+  }
+
+  const quotationActions: Record<string, string[]> = {
+    Draft: ['Sent', 'Accepted', 'Rejected'],
+    Sent: ['Viewed', 'Accepted', 'Rejected'],
+    Viewed: ['Accepted', 'Rejected'],
+    Accepted: ['Rejected'],
   }
 
   const removeQuotation = async (id: string) => {
@@ -2385,7 +2378,12 @@ const QuotationList = () => {
                 <td className="col-actions">
                   <div className="row-actions">
                     <Btn variant="ghost" sm onClick={() => setViewRow(q)}>View</Btn>
-                    {['Draft', 'Sent', 'Viewed'].includes(q.status) && <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => acceptQuotation(q.id)}>Accept</Btn>}
+                    {(quotationActions[q.status] || []).length > 0 && (
+                      <select className="sel" value="" aria-label={`Update ${q.ref} status`} onChange={e => { if (e.target.value) updateQuotationStatus(q.id, e.target.value) }} style={{ padding: '4px 8px', fontSize: 11, minWidth: 112 }}>
+                        <option value="">Change status…</option>
+                        {quotationActions[q.status].map(status => <option key={status} value={status}>Mark {status}</option>)}
+                      </select>
+                    )}
                     {q.status === 'Accepted' && <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => setSaleQuotationId(q.id)}>→ Sale</Btn>}
                     {q.status !== 'Converted' && <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={() => removeQuotation(q.id)}>Remove</Btn>}
                   </div>
@@ -2670,6 +2668,11 @@ const ContactOutreach = () => {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [copied, setCopied] = useState('')
+  const [emailRow, setEmailRow] = useState<any>(null)
+  const [emailSubject, setEmailSubject] = useState('')
+  const [emailBody, setEmailBody] = useState('')
+  const [sendingEmail, setSendingEmail] = useState(false)
+  const [emailError, setEmailError] = useState('')
 
   const term = search.trim().toLowerCase()
   const filtered = prospectsData.filter(r =>
@@ -2701,8 +2704,44 @@ const ContactOutreach = () => {
 
   const [copyLabel, eligibleCount, excludedCount] = copied ? copied.split('|') : ['', '0', '0']
 
+  const sendEmail = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!emailRow) return
+    setSendingEmail(true)
+    setEmailError('')
+    try {
+      await api.post('/outreach/email', {
+        prospectId: emailRow.id,
+        to: emailRow.emailAddr,
+        subject: emailSubject,
+        body: emailBody.replace(/\n/g, '<br />'),
+      })
+      toast(`Email sent to ${emailRow.contact || emailRow.company}`, 'success')
+      setEmailRow(null)
+      setEmailSubject('')
+      setEmailBody('')
+    } catch (error: any) {
+      setEmailError(error.response?.data?.error?.message ?? error.message ?? 'Email could not be sent.')
+    } finally {
+      setSendingEmail(false)
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {emailRow && (
+        <div className="overlay" role="presentation" onMouseDown={() => !sendingEmail && setEmailRow(null)}>
+          <form className="modal outreach-compose" onSubmit={sendEmail} onMouseDown={event => event.stopPropagation()}>
+            <div className="modal-header"><div><div className="modal-title">Compose outreach email</div><div className="modal-desc">Sending through your connected Google account to {emailRow.emailAddr}.</div></div><button type="button" className="btn btn-ghost" onClick={() => setEmailRow(null)} aria-label="Close">×</button></div>
+            <div className="modal-body" style={{ display: 'grid', gap: 12 }}>
+              {emailError && <div style={{ padding: 10, borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12 }}>{emailError}</div>}
+              <label><span className="form-label">Subject</span><input className="inp" required maxLength={200} value={emailSubject} onChange={e => setEmailSubject(e.target.value)} /></label>
+              <label><span className="form-label">Message</span><textarea className="inp" required rows={8} value={emailBody} onChange={e => setEmailBody(e.target.value)} /></label>
+            </div>
+            <div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={() => setEmailRow(null)}>Cancel</button><button className="btn btn-primary" disabled={sendingEmail || !emailSubject.trim() || !emailBody.trim()}>{sendingEmail ? 'Sending…' : 'Send email'}</button></div>
+          </form>
+        </div>
+      )}
       <div className="page-header">
         <div>
           <div className="page-title">Contact Outreach Sheet</div>
@@ -2754,7 +2793,7 @@ const ContactOutreach = () => {
             <th className="col-check"><input type="checkbox" className="cb" checked={allSelected} onChange={toggleAll} /></th>
             <th>Company</th><th>Contact</th><th>Phone</th><th>Email</th>
             <th>City / State</th><th>PIC</th><th style={{ textAlign: 'center' }}>Call</th>
-            <th style={{ textAlign: 'center' }}>Text</th><th style={{ textAlign: 'center' }}>Email</th>
+            <th style={{ textAlign: 'center' }}>Text</th><th style={{ textAlign: 'center' }}>Email</th><th className="col-actions">Action</th>
           </tr></thead>
           <tbody>
             {withElig.map(r => (
@@ -2769,10 +2808,11 @@ const ContactOutreach = () => {
                 <td style={{ textAlign: 'center' }}><EligDot on={r.callable} /></td>
                 <td style={{ textAlign: 'center' }}><EligDot on={r.textable} /></td>
                 <td style={{ textAlign: 'center' }}><EligDot on={r.emailable} /></td>
+                <td className="col-actions"><Btn variant="ghost" sm disabled={!r.emailable} onClick={() => { setEmailRow(r); setEmailError(''); }}>Compose</Btn></td>
               </tr>
             ))}
             {withElig.length === 0 && (
-              <tr><td colSpan={10} style={{ textAlign: 'center', padding: 30, color: 'var(--t4)', fontSize: 13 }}>No contacts match.</td></tr>
+              <tr><td colSpan={11} style={{ textAlign: 'center', padding: 30, color: 'var(--t4)', fontSize: 13 }}>No contacts match.</td></tr>
             )}
           </tbody>
         </table>
@@ -2790,10 +2830,24 @@ const Contracts = () => {
   const [showNew, setShowNew] = useState(false);
   const [revision, setRevision] = useState(0);
   const [viewRow, setViewRow] = useState<any>(null);
-  const contracts = useContracts(status, pickStatus, search);
+  const contracts = useContracts(status, pickStatus, search, revision);
   // Re-fetch sales when clicking New Contract
   const sales = useSales(revision);
   const overdueContracts = contracts.filter(c => c.pickStatus === 'Overdue');
+  const contractTransitions = (contract: any) => {
+    if (contract.status === 'Pending Signature') return ['Active', 'Cancelled'];
+    if (contract.status === 'Active') return contract.storedPickStatus === 'Picked Up' ? ['Completed'] : ['Cancelled'];
+    return [];
+  };
+  const updateContractStatus = async (id: string, nextStatus: string) => {
+    try {
+      await api.patch(`/contracts/${id}`, { status: nextStatus });
+      toast(`Contract marked ${nextStatus}`, 'success');
+      setRevision(value => value + 1);
+    } catch (error: any) {
+      toast(error.response?.data?.error?.message ?? 'Contract status could not be updated', 'error');
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -2809,7 +2863,7 @@ const Contracts = () => {
       )}
       <div className="toolbar">
         <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search contracts…" value={search} onChange={e => setSearch(e.target.value)} /></div>
-        <select className="sel" value={status} onChange={e => setStatus(e.target.value)}><option>All Statuses</option><option>Pending Signature</option><option>Active</option><option>Completed</option></select>
+        <select className="sel" value={status} onChange={e => setStatus(e.target.value)}><option>All Statuses</option><option>Pending Signature</option><option>Active</option><option>Completed</option><option>Cancelled</option></select>
         <select className="sel" value={pickStatus} onChange={e => setPickStatus(e.target.value)}><option>All Pickup Statuses</option><option>Pending</option><option>Scheduled</option><option>Confirmed</option><option>Picked Up</option><option>Overdue</option></select>
         <div className="toolbar-right">
           <Btn variant="primary" sm onClick={() => setShowNew(true)}><Ic n={I.plus} size={13} /> New Contract</Btn>
@@ -2840,7 +2894,10 @@ const Contracts = () => {
                 <td><ChipPIC label={c.pic} /></td>
                 <td><span className="ref-id" style={{ color: 'var(--green)', fontSize: 11 }}>{c.sale}</span></td>
                 <td className="col-actions">
-                  <div className="row-actions"><Btn variant="ghost" sm onClick={() => setViewRow(c)}>View</Btn></div>
+                  <div className="row-actions">
+                    <Btn variant="ghost" sm onClick={() => setViewRow(c)}>View</Btn>
+                    {contractTransitions(c).length > 0 && <select className="sel" value="" aria-label={`Update ${c.ref} status`} onChange={e => { if (e.target.value) updateContractStatus(c.id, e.target.value) }} style={{ padding: '4px 8px', fontSize: 11, minWidth: 110 }}><option value="">Change status…</option>{contractTransitions(c).map(next => <option key={next}>{next}</option>)}</select>}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -2858,6 +2915,7 @@ const Contracts = () => {
             { label: 'Pickup status', value: <Badge status={viewRow.pickStatus as BadgeStatus} /> },
             { label: 'Container', value: `${viewRow.category} · ${viewRow.size}` },
             { label: 'Quantity', value: viewRow.qty },
+            { label: 'Reserved inventory', value: viewRow.inventory },
             { label: 'Value', value: `$${viewRow.value.toLocaleString()}` },
             { label: 'Pickup date', value: viewRow.pickup },
             { label: 'PIC', value: viewRow.pic },
@@ -3691,6 +3749,7 @@ const BOARD_COLUMNS: { key: string; label: string; statuses: string[]; dot: stri
 
 const useInquiryBoard = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
+  const liveRevision = useRealtimeRevision(['leads', 'deals'])
   useEffect(() => {
     api.get('/leads/inquiries/board').then(res => {
       if (res.data.success) setData((res.data.data || []).map((row: any) => ({
@@ -3715,7 +3774,7 @@ const useInquiryBoard = (revision = 0) => {
         altNotes: row.alt_notes || '',
       })));
     }).catch(console.error)
-  }, [revision])
+  }, [revision, liveRevision])
   return data
 }
 
@@ -5258,7 +5317,7 @@ export default function App() {
       <div className="workspace" style={{ flex: 1, minWidth: 0, zIndex: 1 }}>
         <div className="ws-card">
           <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} session={session} onNav={handleNav} role={currentProfile?.role} />
-          {renderScreen()}
+          <div key={screen} className="screen-transition">{renderScreen()}</div>
         </div>
       </div>
       <ToastHost />
@@ -5273,15 +5332,38 @@ const Pickups = () => {
   const [pickStatus, setPickStatus] = useState('All Pickup Statuses');
   const [search, setSearch] = useState('');
   const [revision, setRevision] = useState(0);
+  const [pickupDates, setPickupDates] = useState<Record<string, string>>({});
   const contracts = useContracts('All Statuses', pickStatus, search, revision);
 
-  const handleUpdateStatus = async (id: string, newStatus: string) => {
+  const handleUpdateStatus = async (contract: any, newStatus: string) => {
     try {
-      await api.patch(`/contracts/${id}`, { pickup_status: newStatus });
+      const date = pickupDates[contract.id] ?? contract.pickupDateRaw;
+      await api.patch(`/contracts/${contract.id}`, {
+        pickup_status: newStatus,
+        ...(date ? { pickup_date: new Date(`${date}T12:00:00`).toISOString() } : {}),
+      });
       setRevision(r => r + 1);
+      toast(`Pickup marked ${newStatus}`, 'success');
     } catch (err) {
       console.error(err);
       toast('Failed to update status', 'error');
+    }
+  };
+
+  const pickupTransitions: Record<string, string[]> = {
+    Pending: ['Scheduled'],
+    Scheduled: ['Pending', 'Confirmed'],
+    Confirmed: ['Scheduled', 'Picked Up'],
+  };
+  const savePickupDate = async (contract: any) => {
+    const date = pickupDates[contract.id];
+    if (!date) return;
+    try {
+      await api.patch(`/contracts/${contract.id}`, { pickup_date: new Date(`${date}T12:00:00`).toISOString() });
+      toast('Pickup date saved', 'success');
+      setRevision(value => value + 1);
+    } catch (error: any) {
+      toast(error.response?.data?.error?.message ?? 'Pickup date could not be saved', 'error');
     }
   };
 
@@ -5328,7 +5410,7 @@ const Pickups = () => {
                   <div style={{ fontSize: 11, color: 'var(--t3)' }}>{c.category}</div>
                 </td>
                 <td className="r" style={{ fontWeight: 600 }}>{c.qty}</td>
-                <td className="mono" style={{ fontSize: 12, color: c.pickStatus === 'Overdue' ? 'var(--red)' : undefined }}>{c.pickup}</td>
+                <td><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="date" className="inp" aria-label={`Pickup date for ${c.ref}`} value={pickupDates[c.id] ?? c.pickupDateRaw} onChange={e => setPickupDates(values => ({ ...values, [c.id]: e.target.value }))} disabled={c.storedPickStatus === 'Picked Up'} style={{ minWidth: 132, padding: '5px 7px', fontSize: 11 }} />{pickupDates[c.id] && pickupDates[c.id] !== c.pickupDateRaw && <Btn variant="ghost" sm onClick={() => savePickupDate(c)}>Save</Btn>}</div></td>
                 <td>
                   <span className={`badge ${c.pickStatus === 'Picked Up' ? 'b-green' : c.pickStatus === 'Overdue' ? 'b-red' : c.pickStatus === 'Confirmed' ? 'b-brand' : 'b-amber'}`}>
                     {c.pickStatus}
@@ -5338,15 +5420,14 @@ const Pickups = () => {
                 <td className="col-actions">
                   <select 
                     className="sel" 
-                    value={c.pickStatus} 
-                    onChange={e => handleUpdateStatus(c.id, e.target.value)}
+                    value=""
+                    aria-label={`Update ${c.ref} pickup status`}
+                    onChange={e => { if (e.target.value) handleUpdateStatus(c, e.target.value) }}
+                    disabled={(pickupTransitions[c.storedPickStatus] || []).length === 0}
                     style={{ padding: '4px 8px', fontSize: 11, minWidth: 110 }}
                   >
-                    <option value="Pending">Pending</option>
-                    <option value="Scheduled">Scheduled</option>
-                    <option value="Confirmed">Confirmed</option>
-                    <option value="Picked Up">Picked Up</option>
-                    <option value="Overdue">Overdue</option>
+                    <option value="">Next step…</option>
+                    {(pickupTransitions[c.storedPickStatus] || []).map(next => <option key={next} value={next}>{next}</option>)}
                   </select>
                 </td>
               </tr>

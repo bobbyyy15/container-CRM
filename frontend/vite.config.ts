@@ -37,6 +37,7 @@ export default defineConfig(({ mode }) => {
             if (!id.includes('node_modules')) return
             if (id.includes('recharts') || id.includes('d3-')) return 'charts'
             if (id.includes('@supabase')) return 'supabase'
+            if (id.includes('socket.io-client') || id.includes('engine.io-client') || id.includes('socket.io-parser') || id.includes('@socket.io')) return 'realtime'
             if (id.includes('react-dom') || id.includes('/react/')) return 'react-vendor'
           },
         },
@@ -64,6 +65,11 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: 'http://localhost:3001',
           changeOrigin: true,
+        },
+        '/socket.io': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          ws: true,
         },
       },
     },

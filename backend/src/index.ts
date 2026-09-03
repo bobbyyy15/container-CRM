@@ -1,4 +1,5 @@
 import express from 'express';
+import { createServer } from 'node:http';
 import cors from 'cors';
 import helmet from 'helmet';
 import leadRoutes from './routes/lead.routes';
@@ -23,6 +24,7 @@ import reportRoutes from './routes/report.routes';
 import { requireAuth } from './middleware/auth.middleware';
 import { requestContext } from './middleware/request-context.middleware';
 import { env } from './config/env';
+import { attachRealtime, publishMutation } from './realtime';
 
 const app = express();
 
@@ -44,6 +46,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/v1/auth', authRoutes);
 
 app.use('/api/v1', requireAuth);
+app.use('/api/v1', publishMutation);
 app.use('/api/v1/leads', leadRoutes);
 app.use('/api/v1/companies', companyRoutes);
 app.use('/api/v1/customers', customerRoutes);
@@ -63,13 +66,15 @@ app.use('/api/v1/export',        exportRoutes);
 app.use('/api/v1/reports',       reportRoutes);
 
 
-// Start Server
-app.listen(env.PORT, () => {
+// Socket.IO and Express share one HTTP server so API and realtime traffic use the
+// same host, TLS termination, and deployment port.
+const server = createServer(app);
+attachRealtime(server);
+server.listen(env.PORT, () => {
   console.log(`Server is running on port ${env.PORT}`);
 });
 
-// Exported so this can also be wrapped as a serverless handler (Vercel/Netlify/Lambda)
-// without restructuring routes -- app.listen() above still runs for `npm start`/`npm run
-// dev` on an always-on host; a serverless entry point would import { app } from here and
-// pass it to that platform's adapter instead of calling listen. See docs/DEPLOYMENT.md.
-export { app };
+// Exported for integration tests and host adapters. Realtime production deployments need
+// this long-running HTTP server (or another Socket.IO-capable host); request-only serverless
+// functions cannot retain Socket.IO connections. See docs/DEPLOYMENT.md.
+export { app, server };

@@ -30,7 +30,6 @@ export class DealController {
       const { data, error } = await supabaseAdmin
         .from('quotations')
         .select('*, companies(*), contacts(*), pics(name), quotation_items(*)')
-        .not('status', 'in', '(Converted,Rejected)')
         .eq('pic_id', picId)
         .order('created_at', { ascending: false });
 
@@ -44,13 +43,15 @@ export class DealController {
   static async getSales(req: Request, res: Response) {
     try {
       const picId = req.auth?.profile.pic_id;
-      if (!picId) return res.json({ success: true, data: [] });
+      const seesAllSales = ['admin', 'operations'].includes(req.auth?.profile.role ?? '');
+      if (!seesAllSales && !picId) return res.json({ success: true, data: [] });
 
-      const { data, error } = await supabaseAdmin
+      let query = supabaseAdmin
         .from('sales')
         .select('*, companies(*), pics(name), quotations(*, contacts(*), quotation_items(*))')
-        .eq('pic_id', picId)
         .order('created_at', { ascending: false });
+      if (!seesAllSales) query = query.eq('pic_id', picId!);
+      const { data, error } = await query;
 
       if (error) throw error;
 

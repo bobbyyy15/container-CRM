@@ -7,7 +7,7 @@ not just "push to Vercel and it works."
 
 ## 1. Pick a backend hosting model
 
-**Option A — convert the backend to Vercel serverless too (one project, one URL)**
+**Option A — convert the HTTP API to Vercel serverless (realtime requires a separate service)**
 - Pro: no CORS to configure — the frontend already calls a relative `/api/v1`
   (`frontend/vite.config.ts` sets `VITE_API_BASE_URL` to `/api/v1` by default), so if both
   live under the same Vercel domain it just works.
@@ -15,15 +15,15 @@ not just "push to Vercel and it works."
   The bulk Excel/CSV import endpoints (`backend/src/routes/import.routes.ts`,
   `inventory.routes.ts` `/bulk`) process a whole file server-side and could exceed that on a
   large file. Cold starts also add latency to the first request after idle.
-- Requires: an `api/` entry point that imports `{ app }` from `backend/src/index.ts` (already
-  exported for exactly this) and wraps it for Vercel's Node runtime, plus a `vercel.json`
-  routing `/api/*` to it and everything else to the built frontend. Not done in this repo yet —
-  someone needs to write that entry point and test it against the timeout-sensitive endpoints
-  above before relying on it.
+- Con: request-only serverless functions cannot retain this app's Socket.IO connections. This
+  option therefore needs a separate long-running Socket.IO service (and routing for
+  `/socket.io`) or a redesign around a managed realtime provider.
+- Requires: an `api/` entry point that imports `{ app }` and wraps it for Vercel's Node runtime,
+  plus separate realtime hosting. Neither split-host adapter is implemented in this repo.
 
 **Option B — frontend on Vercel, backend on an always-on host (Railway/Render/Fly/etc.)**
-- Pro: no timeout ceiling, behaves exactly like local dev (`npm run build && npm start` now
-  works — see §2). Straightforward.
+- Pro: no timeout ceiling and supports the shared Express + Socket.IO HTTP server exactly like
+  local dev (`npm run build && npm start` — see §2). This is the recommended model.
 - Con: two URLs. Requires `CORS_ORIGINS` on the backend to include the deployed frontend's
   origin, and the frontend's `VITE_API_BASE_URL` to point at the deployed backend's full URL
   instead of the relative default.
@@ -70,6 +70,10 @@ outreach and Google Sheets export throw a clear error at call time if unset — 
 | `SUPABASE_URL` | Same Supabase project |
 | `SUPABASE_PUBLISHABLE_KEY` | Public/anon key — safe to expose |
 | `VITE_API_BASE_URL` | `/api/v1` if same-origin (Option A above); the full backend URL if separate (Option B) |
+
+The Socket.IO client derives its origin from `VITE_API_BASE_URL`. The reverse proxy/load
+balancer must forward both HTTP and WebSocket traffic at `/socket.io`. More than one backend
+instance also requires a shared Socket.IO adapter before events can cross instances.
 
 ## 4. Everyone reconnects Google once
 

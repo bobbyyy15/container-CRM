@@ -110,7 +110,10 @@ html, body { height: 100%; margin: 0; padding: 0; }
 
 body {
   font-family: var(--font);
-  background: var(--bg);
+  background:
+    radial-gradient(circle at 82% -10%, rgba(49,94,246,0.11), transparent 34%),
+    radial-gradient(circle at 8% 105%, rgba(13,148,136,0.08), transparent 32%),
+    var(--bg);
   color: var(--t1);
   font-size: 13px;
   line-height: 1.5;
@@ -327,7 +330,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg);
+  background: transparent;
 }
 
 .ws-card {
@@ -338,7 +341,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: var(--shadow);
+  box-shadow: 0 14px 44px rgba(25,35,58,0.10), var(--shadow);
   border: 1px solid var(--border);
 }
 
@@ -351,7 +354,10 @@ body {
   gap: 12px;
   padding: 0 20px;
   flex-shrink: 0;
-  background: var(--ws);
+  background: color-mix(in srgb, var(--ws) 88%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  position: relative;
+  z-index: 2;
 }
 
 .search-wrap {
@@ -442,6 +448,10 @@ body {
   background: var(--green);
   animation: pulse 2s infinite;
 }
+.sync-pill[data-status="connecting"] { background: var(--orange-bg); color: var(--orange); }
+.sync-pill[data-status="connecting"] .sync-dot { background: var(--orange); animation-duration: 0.8s; }
+.sync-pill[data-status="disconnected"] { background: var(--red-bg); color: var(--red); }
+.sync-pill[data-status="disconnected"] .sync-dot { background: var(--red); animation: none; }
 @keyframes pulse {
   0%,100% { opacity: 1; }
   50% { opacity: 0.4; }
@@ -970,6 +980,19 @@ tr:hover .row-actions { opacity: 1; }
   to   { opacity: 1; transform: scale(1); }
 }
 @keyframes row-in { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.997); filter: blur(2px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+.screen-transition {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: screen-in 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
 
 .overlay { animation: overlay-in 0.15s ease; }
 .modal { animation: modal-in 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
@@ -983,7 +1006,7 @@ tr:hover .row-actions { opacity: 1; }
 .card, .kpi-card, .chart-card {
   transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
 }
-.card:hover, .chart-card:hover { box-shadow: var(--shadow-md); }
+.card:hover, .chart-card:hover { box-shadow: var(--shadow-md); border-color: color-mix(in srgb, var(--brand) 24%, var(--border)); transform: translateY(-1px); }
 .kpi-card:hover { transform: translateY(-2px); }
 
 table.crm tbody tr { transition: background 0.12s ease, transform 0.12s ease; }
@@ -994,6 +1017,14 @@ table.crm tbody tr td { transition: background 0.12s ease; }
 .btn:not(:disabled):hover { transform: translateY(-1px); }
 .btn:not(:disabled):active { transform: translateY(0) scale(0.96); }
 .btn-primary:not(:disabled):hover { box-shadow: 0 4px 12px rgba(49,94,246,0.28); }
+
+.btn:focus-visible, .inp:focus-visible, .sel:focus-visible, .tb-btn:focus-visible, .sb-item:focus-visible {
+  outline: 3px solid rgba(49,94,246,0.20);
+  outline-offset: 2px;
+}
+
+.outreach-compose { width: min(620px, 95vw); }
+.outreach-compose textarea { resize: vertical; line-height: 1.6; }
 
 .tb-btn, .sb-item, .filter-chip, .avatar-btn, .date-range { transition: all 0.14s ease; }
 .tb-btn:active, .avatar-btn:active { transform: scale(0.94); }
