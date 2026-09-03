@@ -5295,7 +5295,7 @@ export default function App() {
         width: sidebarPinned ? 240 : 68,
         minWidth: sidebarPinned ? 240 : 68,
         flexShrink: 0,
-        transition: 'width 0.2s ease, min-width 0.2s ease'
+        transition: 'width 0.3s cubic-bezier(0.16, 1, 0.3, 1), min-width 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
       }} />
 
       {/* Floating Sidebar */}
