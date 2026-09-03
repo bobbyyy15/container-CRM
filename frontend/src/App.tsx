@@ -3739,23 +3739,21 @@ const InquiryFunnel = () => {
 
 // ─── Inquiry Validation (Procurement) ──────────────────────────────────────────
 
-const BOARD_COLUMNS: { key: string; label: string; statuses: string[]; dot: string }[] = [
-  { key: 'pending', label: 'Pending Validation', statuses: ['Pending Validation'], dot: '#D97706' },
-  { key: 'review', label: 'Under Review', statuses: ['Under Review'], dot: '#315EF6' },
-  { key: 'quoted', label: 'Quotation Created', statuses: ['Quotation Created'], dot: '#7C3AED' },
-  { key: 'won', label: 'Converted to Sale', statuses: ['Converted to Sale'], dot: '#059669' },
-  { key: 'rejected', label: 'Rejected', statuses: ['Validation Rejected', 'Quotation Rejected'], dot: '#DC2626' },
-]
-
 const useInquiryBoard = (revision = 0) => {
   const [data, setData] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const liveRevision = useRealtimeRevision(['leads', 'deals'])
   useEffect(() => {
+    setLoading(true)
+    setLoadError('')
     api.get('/leads/inquiries/board').then(res => {
       if (res.data.success) setData((res.data.data || []).map((row: any) => ({
         id: row.id,
         ref: `INQ-${row.id.slice(0, 8).toUpperCase()}`,
         date: new Date(row.created_at).toLocaleDateString(),
+        createdAt: row.created_at,
+        neededBy: row.needed_by_date ? new Date(row.needed_by_date).toLocaleDateString() : '—',
         status: row.status,
         company: row.companies?.name || '',
         contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
@@ -3773,9 +3771,12 @@ const useInquiryBoard = (revision = 0) => {
         altAskingPrice: row.alt_asking_price != null ? Number(row.alt_asking_price) : null,
         altNotes: row.alt_notes || '',
       })));
-    }).catch(console.error)
+    }).catch((error: any) => {
+      console.error(error)
+      setLoadError(error.response?.data?.error?.message ?? 'Could not load the validation queue.')
+    }).finally(() => setLoading(false))
   }, [revision, liveRevision])
-  return data
+  return { data, loading, loadError }
 }
 
 type AlternativeOffer = {
@@ -3800,16 +3801,23 @@ const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
   const [altPrice, setAltPrice] = useState('')
   const [altNotes, setAltNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
   const submit = async () => {
     setSubmitting(true)
-    await onReject(reason.trim(), {
-      containerSizeId: altSize || undefined,
-      containerConditionId: altCondition || undefined,
-      quantity: altQuantity ? Number(altQuantity) : undefined,
-      askingPrice: altPrice ? Number(altPrice) : undefined,
-      notes: altNotes.trim() || undefined,
-    })
+    setSubmitError('')
+    try {
+      await onReject(reason.trim(), {
+        containerSizeId: altSize || undefined,
+        containerConditionId: altCondition || undefined,
+        quantity: altQuantity ? Number(altQuantity) : undefined,
+        askingPrice: altPrice ? Number(altPrice) : undefined,
+        notes: altNotes.trim() || undefined,
+      })
+    } catch (error: any) {
+      setSubmitError(error.response?.data?.error?.message ?? 'Could not reject this ticket. Please try again.')
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -3825,8 +3833,8 @@ const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
             <textarea className="inp" rows={3} value={reason} onChange={e => setReason(e.target.value)} placeholder="Why isn't this ticket viable as-is?" style={{ height: 'auto', padding: '8px 12px' }} />
           </div>
           <div style={{ borderTop: '1px solid var(--border-s)', paddingTop: 12 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--t1)', marginBottom: 8 }}>Alternative offer (optional)</div>
-            <div style={{ fontSize: 11.5, color: 'var(--t4)', marginBottom: 10 }}>Leave any field blank to keep the ticket's original value. The Sales Manager can apply this with one click.</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--t1)', marginBottom: 8 }}>Alternative changes (optional)</div>
+            <div style={{ fontSize: 11.5, color: 'var(--t4)', marginBottom: 10 }}>Change at least one size, condition, quantity, or price field to give Sales an alternative they can apply. Notes alone are context only.</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <div>
                 <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Size</label>
@@ -3856,6 +3864,7 @@ const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
               <textarea className="inp" rows={2} value={altNotes} onChange={e => setAltNotes(e.target.value)} placeholder="Any context that doesn't fit the fields above" style={{ height: 'auto', padding: '8px 12px' }} />
             </div>
           </div>
+          {submitError && <div className="validation-error" role="alert"><Ic n={I.warning} size={14} /> {submitError}</div>}
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
@@ -3868,34 +3877,35 @@ const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
   )
 }
 
-const TicketCard = ({ t, onView, onApprove, onReject }: {
-  t: any
-  onView: () => void
-  onApprove?: () => void
-  onReject?: () => void
-}) => (
-  <div className="card ticket-card" style={{ padding: 14, marginBottom: 10, cursor: 'pointer' }} onClick={onView}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
-      <span className="ref-id" style={{ color: 'var(--teal)', fontSize: 11 }}>{t.ref}</span>
-      <Badge status={t.status as BadgeStatus} />
+const ticketAge = (createdAt: string) => {
+  const hours = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 36e5))
+  if (hours < 1) return 'Just arrived'
+  if (hours < 24) return `${hours}h waiting`
+  return `${Math.floor(hours / 24)}d waiting`
+}
+
+const validationStatusLabel = (status: string) => status === 'Under Review' ? 'Approved / Ready to Quote' : status
+const validationStatusTone = (status: string) => ({
+  'Under Review': 'b-green',
+  'Validation Rejected': 'b-red',
+  'Quotation Rejected': 'b-orange',
+  'Quotation Created': 'b-purple',
+  'Converted to Sale': 'b-green',
+}[status] || 'b-gray')
+
+const ValidationQueueItem = ({ ticket, active, onSelect }: { ticket: any; active: boolean; onSelect: () => void }) => (
+  <button className={`validation-queue-item${active ? ' active' : ''}`} onClick={onSelect} type="button">
+    <div className="validation-queue-topline">
+      <span className="ref-id">{ticket.ref}</span>
+      <span className={`validation-age${ticketAge(ticket.createdAt).includes('d waiting') ? ' overdue' : ''}`}>{ticketAge(ticket.createdAt)}</span>
     </div>
-    <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--t1)', marginBottom: 2 }}>{t.company}</div>
-    <div style={{ fontSize: 12, color: 'var(--t3)', marginBottom: 8 }}>{t.contact}</div>
-    <div style={{ fontSize: 11.5, color: 'var(--t3)', marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as any }}>{t.description}</div>
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: onApprove || onReject ? 10 : 0 }}>
-      <span className="badge b-gray" style={{ fontSize: 10.5 }}>{t.size}</span>
-      <span className="badge b-gray" style={{ fontSize: 10.5 }}>{t.condition}</span>
-      <span className="badge b-gray" style={{ fontSize: 10.5 }}>Qty {t.quantity}</span>
-      {t.price != null && <span className="badge b-gray" style={{ fontSize: 10.5 }}>${t.price.toLocaleString()}</span>}
-      <ChipPIC label={t.pic} />
+    <div className="validation-company">{ticket.company || 'Unnamed company'}</div>
+    <div className="validation-contact">{ticket.contact || 'No contact'} · {ticket.pic}</div>
+    <div className="validation-spec-line">
+      <span>{ticket.size}</span><span>{ticket.condition}</span><span>{ticket.quantity} unit{ticket.quantity === 1 ? '' : 's'}</span>
     </div>
-    {(onApprove || onReject) && (
-      <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
-        {onReject && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', flex: 1 }} onClick={onReject}>Reject</button>}
-        {onApprove && <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={onApprove}>Approve</button>}
-      </div>
-    )}
-  </div>
+    <div className="validation-location"><Ic n={I.map} size={12} /> {ticket.location}</div>
+  </button>
 )
 
 const InfoBox = ({ label, children, accent }: { label: string; children: React.ReactNode; accent?: string }) => (
@@ -3925,9 +3935,11 @@ const LiveStockWidget = ({ size, condition }: { size: string; condition: string 
   if (loading) return <div style={{ fontSize: 11, color: 'var(--t4)', padding: 8 }}>Checking live inventory…</div>
   if (!stock) return null
 
-  const available = stock.total_available || 0
-  const isAvailable = available > 0
-  const isLow = available > 0 && available <= 2
+  const physical = Number(stock.total_available || 0)
+  const reserved = Number(stock.total_reserved || 0)
+  const sellable = Number(stock.total_sellable ?? Math.max(0, physical - reserved))
+  const isAvailable = sellable > 0
+  const isLow = sellable > 0 && sellable <= 2
 
   return (
     <div style={{
@@ -3944,14 +3956,19 @@ const LiveStockWidget = ({ size, condition }: { size: string; condition: string 
           background: isAvailable ? (isLow ? '#FEF3C7' : '#D1FAE5') : '#FEE2E2',
           color: isAvailable ? (isLow ? '#92400E' : '#065F46') : '#991B1B'
         }}>
-          {isAvailable ? (isLow ? `Low Stock (${available} left)` : `In Stock (${available} units)`) : 'Out of Stock (0 units)'}
+          {isAvailable ? (isLow ? `Low Stock (${sellable} sellable)` : `In Stock (${sellable} sellable)`) : 'Out of Stock (0 sellable)'}
         </span>
+      </div>
+      <div className="stock-summary-row">
+        <span><b>{physical}</b> physical</span>
+        <span><b>{reserved}</b> reserved</span>
+        <span><b>{sellable}</b> sellable</span>
       </div>
       {stock.depots && stock.depots.length > 0 ? (
         <div style={{ fontSize: 11.5, color: 'var(--t2)', display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
           {stock.depots.map((d: any, idx: number) => (
             <span key={idx} style={{ background: 'rgba(255,255,255,0.7)', padding: '3px 7px', borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)' }}>
-              <strong>{d.depot}</strong>: {d.available} available ({d.reserved} reserved)
+              <strong>{d.depot}</strong>: {d.sellable ?? Math.max(0, Number(d.available || 0) - Number(d.reserved || 0))} sellable ({d.reserved} reserved)
             </span>
           ))}
         </div>
@@ -3964,37 +3981,36 @@ const LiveStockWidget = ({ size, condition }: { size: string; condition: string 
   )
 }
 
-const TicketDetailModal = ({ t, onClose, onApprove, onReject }: {
+const TicketDecisionPanel = ({ t, onApprove, onReject, processing }: {
   t: any
-  onClose: () => void
   onApprove?: () => void
   onReject?: () => void
+  processing?: boolean
 }) => (
-  <div className="overlay" onClick={onClose}>
-    <div className="modal" style={{ width: 560, maxHeight: '86vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
-      <div className="modal-header" style={{ alignItems: 'flex-start' }}>
+  <section className="validation-detail-card">
+      <div className="validation-detail-header">
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t4)', letterSpacing: 0.3, marginBottom: 4 }}>
+          <div className="validation-detail-eyebrow">
             {t.ref} · REQUESTED BY {(t.pic || 'UNASSIGNED').toUpperCase()}
           </div>
-          <div className="modal-title" style={{ fontSize: 19, lineHeight: 1.3 }}>{t.company}</div>
+          <div className="validation-detail-title">{t.company}</div>
           <div style={{ fontSize: 12.5, color: 'var(--t3)', marginTop: 2 }}>{t.contact}</div>
         </div>
-        <Btn variant="ghost" sm onClick={onClose} ariaLabel="Close"><Ic n={I.x} size={16} /></Btn>
+        <Badge status={t.status as BadgeStatus} />
       </div>
-      <div style={{ overflowY: 'auto', padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <InfoBox label="Status"><Badge status={t.status as BadgeStatus} /></InfoBox>
+      <div className="validation-detail-body">
+        <div className="validation-info-grid">
           <InfoBox label="Location">{t.location}</InfoBox>
           <InfoBox label="Container Size">{t.size}</InfoBox>
           <InfoBox label="Condition">{t.condition}</InfoBox>
           <InfoBox label="Quantity">{t.quantity}</InfoBox>
-          <InfoBox label="Asking Price">{t.price != null ? `$${t.price.toLocaleString()}` : '—'}</InfoBox>
+          <InfoBox label="Needed By">{t.neededBy}</InfoBox>
+          <InfoBox label="Target Price">{t.price != null ? `$${t.price.toLocaleString()}` : '—'}</InfoBox>
         </div>
 
         <LiveStockWidget size={t.size} condition={t.condition} />
 
-        <div style={{ background: 'var(--s2)', border: '1px solid var(--border-s)', borderRadius: 10, padding: 14 }}>
+        <div className="validation-note-box">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>
             <Ic n={I.calendar} size={12} /> Ticket Timeline
           </div>
@@ -4004,7 +4020,7 @@ const TicketDetailModal = ({ t, onClose, onApprove, onReject }: {
           </div>
         </div>
 
-        <div style={{ background: 'var(--s2)', border: '1px solid var(--border-s)', borderRadius: 10, padding: 14 }}>
+        <div className="validation-note-box">
           <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>Description</div>
           <div style={{ fontSize: 13, color: 'var(--t2)', lineHeight: 1.5 }}>{t.description}</div>
         </div>
@@ -4015,51 +4031,72 @@ const TicketDetailModal = ({ t, onClose, onApprove, onReject }: {
           </InfoBox>
         )}
 
-        {(t.altSize || t.altCondition || t.altAskingPrice != null || t.altNotes) && (
+        {(t.altSize || t.altCondition || t.altQuantity != null || t.altAskingPrice != null || t.altNotes) && (
           <div style={{ background: 'var(--amber-bg, #FFFBEB)', border: '1px solid var(--amber)40', borderRadius: 10, padding: 14 }}>
             <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--amber)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>Alternative Offer</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: t.altNotes ? 8 : 0 }}>
               {t.altSize && <span className="badge b-amber">{t.altSize}</span>}
               {t.altCondition && <span className="badge b-amber">{t.altCondition}</span>}
+              {t.altQuantity != null && <span className="badge b-amber">Qty {t.altQuantity}</span>}
               {t.altAskingPrice != null && <span className="badge b-amber">${t.altAskingPrice.toLocaleString()}</span>}
             </div>
             {t.altNotes && <div style={{ fontSize: 12.5, color: 'var(--t2)', lineHeight: 1.5 }}>{t.altNotes}</div>}
           </div>
         )}
       </div>
-      <div className="modal-footer">
-        <Btn variant="ghost" onClick={onClose}>Close</Btn>
-        {onReject && <button className="btn btn-ghost" style={{ color: 'var(--red)' }} onClick={onReject}>Reject</button>}
-        {onApprove && <button className="btn btn-primary" onClick={onApprove}>Approve</button>}
+      <div className="validation-detail-footer">
+        <div className="validation-decision-hint"><Ic n={I.warning} size={14} /> Confirm the requested specification and sellable stock before deciding.</div>
+        <div className="validation-decision-actions">
+          {onReject && <button className="btn btn-ghost" style={{ color: 'var(--red)' }} onClick={onReject} disabled={processing}>Reject with reason</button>}
+          {onApprove && <button className="btn btn-primary" onClick={onApprove} disabled={processing}><Ic n={I.check} size={14} /> {processing ? 'Approving…' : 'Approve ticket'}</button>}
+        </div>
       </div>
-    </div>
-  </div>
+  </section>
 )
 
 const InquiryValidation = () => {
   const [revision, setRevision] = useState(0)
-  const tickets = useInquiryBoard(revision)
+  const { data: tickets, loading, loadError } = useInquiryBoard(revision)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
-  const [viewingId, setViewingId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [view, setView] = useState<'queue' | 'history'>('queue')
+  const [historyStatus, setHistoryStatus] = useState('All history')
+  const [processingId, setProcessingId] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [picFilter, setPicFilter] = useState('')
 
   const pics = [...new Set(tickets.map((t: any) => t.pic).filter(Boolean))].sort() as string[]
   const term = search.trim().toLowerCase()
-  const filtered = tickets.filter((t: any) =>
+  const searched = tickets.filter((t: any) =>
     (!picFilter || t.pic === picFilter) &&
-    (!term || [t.company, t.contact, t.ref].some(v => String(v).toLowerCase().includes(term)))
+    (!term || [t.company, t.contact, t.ref, t.size, t.condition, t.location].some(v => String(v).toLowerCase().includes(term)))
   )
+  const queue = searched.filter((t: any) => t.status === 'Pending Validation')
+    .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+  const history = searched.filter((t: any) => t.status !== 'Pending Validation')
+    .filter((t: any) => historyStatus === 'All history' || t.status === historyStatus)
+  const selected = tickets.find((t: any) => t.id === selectedId)
+  const queueIds = queue.map((ticket: any) => ticket.id).join(',')
+  const approvedCount = tickets.filter((t: any) => t.status === 'Under Review').length
+  const validationRejectedCount = tickets.filter((t: any) => t.status === 'Validation Rejected').length
+
+  useEffect(() => {
+    if (view !== 'queue') return
+    if (!queue.some((ticket: any) => ticket.id === selectedId)) setSelectedId(queue[0]?.id ?? null)
+  }, [view, selectedId, queueIds])
 
   const approve = async (id: string) => {
     setError('')
+    setProcessingId(id)
     try {
       await api.post(`/leads/inquiries/${id}/validate`, { approved: true })
-      setViewingId(null)
+      toast('Inquiry approved and released to Sales for quotation.', 'success')
       setRevision(v => v + 1)
     } catch (err: any) {
       setError(err.response?.data?.error?.message ?? 'Could not approve this ticket.')
+    } finally {
+      setProcessingId(null)
     }
   }
 
@@ -4076,95 +4113,100 @@ const InquiryValidation = () => {
         altNotes: alternative.notes,
       })
       setRejectingId(null)
-      setViewingId(null)
+      toast('Inquiry returned to Sales with your feedback.', 'success')
       setRevision(v => v + 1)
     } catch (err: any) {
       setError(err.response?.data?.error?.message ?? 'Could not reject this ticket.')
+      throw err
     }
   }
 
   const rejectingTicket = tickets.find((t: any) => t.id === rejectingId)
-  const viewingTicket = tickets.find((t: any) => t.id === viewingId)
-  const pendingCount = tickets.filter((t: any) => t.status === 'Pending Validation').length
-  const rejectedCount = tickets.filter((t: any) => ['Validation Rejected', 'Quotation Rejected'].includes(t.status)).length
-  const wonCount = tickets.filter((t: any) => t.status === 'Converted to Sale').length
 
   return (
     <div className="page-scroll">
-      <div className="page-content">
-        <div className="page-header" style={{ padding: 0, border: 'none', marginBottom: 16 }}>
+      <div className="page-content validation-page">
+        <div className="validation-hero">
           <div>
-            <div className="page-title">Inquiry Validation</div>
-            <div className="page-desc">Every inquiry a Sales Manager creates lands here as a ticket before it can be quoted. Approve it, or reject it with a reason and an optional alternative.</div>
+            <div className="validation-kicker"><span className="sync-dot" /> Procurement workbench</div>
+            <h1 className="validation-title">Inquiry validation</h1>
+            <p className="validation-subtitle">Review demand against live sellable stock, then release viable inquiries to Sales.</p>
+          </div>
+          <div className="validation-hero-count"><strong>{queue.length}</strong><span>need a decision</span></div>
+        </div>
+
+        <div className="validation-summary-strip">
+          <div><span className="summary-dot amber" /><strong>{queue.length}</strong><span>Awaiting Procurement</span></div>
+          <div><span className="summary-dot green" /><strong>{approvedCount}</strong><span>Approved / Ready to Quote</span></div>
+          <div><span className="summary-dot red" /><strong>{validationRejectedCount}</strong><span>Returned to Sales</span></div>
+        </div>
+
+        <div className="validation-controls">
+          <div className="validation-view-switch" role="tablist" aria-label="Validation views">
+            <button type="button" role="tab" aria-selected={view === 'queue'} className={view === 'queue' ? 'active' : ''} onClick={() => setView('queue')}>Needs validation <span>{queue.length}</span></button>
+            <button type="button" role="tab" aria-selected={view === 'history'} className={view === 'history' ? 'active' : ''} onClick={() => setView('history')}>History</button>
+          </div>
+          <div className="validation-filters">
+            <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)} aria-label="Filter by PIC"><option value="">All PICs</option>{pics.map(p => <option key={p} value={p}>{p}</option>)}</select>
+            <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search company, spec, location…" value={search} onChange={e => setSearch(e.target.value)} /></div>
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
-          {[
-            { label: 'Total Tickets', val: tickets.length, icon: I.inquiry, color: '#315EF6' },
-            { label: 'Pending Validation', val: pendingCount, icon: I.warning, color: '#D97706' },
-            { label: 'Converted to Sale', val: wonCount, icon: I.check, color: '#059669' },
-            { label: 'Rejected', val: rejectedCount, icon: I.x, color: '#DC2626' },
-          ].map(k => (
-            <div key={k.label} className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 38, height: 38, borderRadius: 9, background: `${k.color}15`, color: k.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Ic n={k.icon} size={17} />
+        {(error || loadError) && <div className="validation-error"><Ic n={I.warning} size={14} /> {error || loadError}</div>}
+
+        {view === 'queue' ? (
+          <div className="validation-workspace">
+            <aside className="validation-queue-panel">
+              <div className="validation-panel-heading">
+                <div><strong>Decision queue</strong><span>Oldest requests appear first</span></div>
+                <span>{queue.length}</span>
               </div>
-              <div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--t1)' }}>{k.val}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--t4)' }}>{k.label}</div>
+              <div className="validation-queue-list">
+                {loading && tickets.length === 0 ? <div className="validation-empty"><Ic n={I.sync} size={22} /><strong>Loading tickets…</strong></div> : queue.map((ticket: any) => (
+                  <ValidationQueueItem key={ticket.id} ticket={ticket} active={ticket.id === selectedId} onSelect={() => setSelectedId(ticket.id)} />
+                ))}
+                {!loading && queue.length === 0 && (
+                  <div className="validation-empty success"><span><Ic n={I.check} size={22} /></span><strong>Queue cleared</strong><p>There are no inquiries waiting for Procurement.</p></div>
+                )}
               </div>
+            </aside>
+            <div className="validation-detail-panel">
+              {selected && selected.status === 'Pending Validation' ? (
+                <TicketDecisionPanel t={selected} onApprove={() => approve(selected.id)} onReject={() => setRejectingId(selected.id)} processing={processingId === selected.id} />
+              ) : (
+                <div className="validation-empty"><Ic n={I.inquiry} size={26} /><strong>Select an inquiry</strong><p>Choose a ticket from the queue to inspect its requirements and live stock.</p></div>
+              )}
             </div>
-          ))}
-        </div>
-
-        <div className="toolbar" style={{ padding: 0, marginBottom: 14 }}>
-          <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{pics.map(p => <option key={p} value={p}>{p}</option>)}</select>
-          <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search tickets, company, contact…" value={search} onChange={e => setSearch(e.target.value)} /></div>
-          <div className="toolbar-right">
-            <span className="count-label">Showing {filtered.length} of {tickets.length} tickets</span>
           </div>
-        </div>
-
-        {error && <div style={{ padding: '9px 11px', borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12, marginBottom: 12 }}>{error}</div>}
-
-        <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 8, alignItems: 'flex-start' }}>
-          {BOARD_COLUMNS.map(col => {
-            const colTickets = filtered.filter((t: any) => col.statuses.includes(t.status))
-            return (
-              <div key={col.key} style={{ minWidth: 260, width: 260, flexShrink: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, padding: '0 2px' }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: col.dot, flexShrink: 0 }} />
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--t1)' }}>{col.label}</span>
-                  <span style={{ fontSize: 11, color: 'var(--t4)', marginLeft: 'auto' }}>{colTickets.length}</span>
-                </div>
-                <div style={{ maxHeight: 560, overflowY: 'auto', paddingRight: 2 }}>
-                  {colTickets.map((t: any) => (
-                    <TicketCard
-                      key={t.id}
-                      t={t}
-                      onView={() => setViewingId(t.id)}
-                      onApprove={col.key === 'pending' ? () => approve(t.id) : undefined}
-                      onReject={col.key === 'pending' ? () => setRejectingId(t.id) : undefined}
-                    />
+        ) : (
+          <section className="validation-history-card">
+            <div className="validation-history-toolbar">
+              <div><strong>Decision history</strong><span>Validation outcomes and downstream progress</span></div>
+              <select className="sel" value={historyStatus} onChange={e => setHistoryStatus(e.target.value)}>
+                {['All history', 'Under Review', 'Validation Rejected', 'Quotation Created', 'Quotation Rejected', 'Converted to Sale'].map(status => <option key={status} value={status}>{validationStatusLabel(status)}</option>)}
+              </select>
+            </div>
+            <div className="validation-history-table-wrap">
+              <table className="crm validation-history-table">
+                <thead><tr><th>Inquiry</th><th>Company</th><th>Request</th><th>PIC</th><th>Received</th><th>Outcome</th></tr></thead>
+                <tbody>
+                  {history.map((ticket: any) => (
+                    <tr key={ticket.id}>
+                      <td><span className="ref-id">{ticket.ref}</span></td>
+                      <td><strong>{ticket.company}</strong><small>{ticket.contact}</small></td>
+                      <td>{ticket.size} · {ticket.condition}<small>{ticket.quantity} unit{ticket.quantity === 1 ? '' : 's'} · {ticket.location}</small></td>
+                      <td><ChipPIC label={ticket.pic} /></td>
+                      <td>{ticket.date}</td>
+                      <td><span className={`badge ${validationStatusTone(ticket.status)}`}>{validationStatusLabel(ticket.status)}</span></td>
+                    </tr>
                   ))}
-                  {colTickets.length === 0 && (
-                    <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--t4)', fontSize: 11.5 }}>No tickets</div>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+                </tbody>
+              </table>
+              {!loading && history.length === 0 && <div className="validation-empty"><Ic n={I.search} size={22} /><strong>No matching history</strong><p>Try a different PIC, status, or search term.</p></div>}
+            </div>
+          </section>
+        )}
       </div>
-      {viewingTicket && (
-        <TicketDetailModal
-          t={viewingTicket}
-          onClose={() => setViewingId(null)}
-          onApprove={viewingTicket.status === 'Pending Validation' ? () => approve(viewingTicket.id) : undefined}
-          onReject={viewingTicket.status === 'Pending Validation' ? () => setRejectingId(viewingTicket.id) : undefined}
-        />
-      )}
       {rejectingTicket && (
         <RejectTicketModal
           ticketRef={rejectingTicket.ref}
