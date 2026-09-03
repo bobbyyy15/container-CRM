@@ -1374,22 +1374,51 @@ table.crm tbody tr:nth-child(10) { animation-delay: 0.225s; }
   body.printing-data > *:not(#print-root) { display: none !important; }
   body.printing-data #print-root { display: block !important; }
 
-  .print-doc-head { margin-bottom: 14px; border-bottom: 2px solid #000; padding-bottom: 8px; }
-  .print-doc-title { font-size: 19px; font-weight: 800; text-transform: capitalize; }
-  .print-doc-meta { font-size: 11px; color: #555; margin-top: 3px; }
+  #print-root { font-family: var(--font); color: #111827; }
 
-  .print-doc-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  .print-doc-head { margin-bottom: 16px; }
+  .print-doc-headline { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+  .print-doc-title {
+    font-size: 21px; font-weight: 800; letter-spacing: -0.01em;
+    color: #16265C; line-height: 1.15;
+  }
+  .print-doc-scope { font-size: 12px; font-weight: 600; color: #2563C9; margin-top: 4px; }
+  .print-doc-meta {
+    font-size: 10.5px; color: #6B7280; margin-top: 6px;
+    padding-bottom: 8px; border-bottom: 2px solid #2AA8A8;
+  }
+
+  /* Wordmark stands in for a logo file -- no asset is bundled. */
+  .print-doc-brand { font-size: 17px; font-weight: 800; white-space: nowrap; }
+  .print-doc-brand-wave { color: #2AA8A8; }
+  .print-doc-brand-rest { color: #16265C; }
+
+  .print-doc-section {
+    font-size: 12px; font-weight: 700; color: #16265C;
+    margin: 16px 0 6px; break-after: avoid; page-break-after: avoid;
+  }
+  .print-doc-empty { font-size: 10px; color: #6B7280; padding: 6px 0; }
+
+  .print-doc-table {
+    width: 100%; border-collapse: collapse; font-size: 9.5px;
+    margin-bottom: 6px; break-inside: auto;
+  }
   .print-doc-table thead { display: table-header-group; }
   .print-doc-table th {
     text-align: left; text-transform: capitalize; font-weight: 700;
-    border-bottom: 1.5px solid #000; padding: 5px 6px; background: #F2F3F5;
+    color: #FFFFFF; background: #16265C !important;
+    padding: 7px 8px; border: 1px solid #16265C;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
   .print-doc-table td {
-    padding: 4px 6px; border-bottom: 1px solid #DDD;
+    padding: 6px 8px; border: 1px solid #D9E1EC;
     vertical-align: top; word-break: break-word;
   }
   .print-doc-table tr { break-inside: avoid; page-break-inside: avoid; }
-  .print-doc-table tbody tr:nth-child(even) td { background: #FAFAFB; }
+  .print-doc-table tbody tr:nth-child(even) td {
+    background: #EFF4FB !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
 
   /* Force light colors -- a dark-themed screen prints as a black page. */
   :root, :root[data-theme="dark"] {

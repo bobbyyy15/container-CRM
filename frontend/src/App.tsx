@@ -59,29 +59,59 @@ const exportToGoogleSheet = async (data: any[], filename: string) => {
   }
 }
 
-// Renders the rows as a clean standalone table and hands it to the browser's
-// print-to-PDF. Printing the live screen instead produces the app chrome squeezed
-// onto paper, which is what a "PDF export" must never look like.
-const exportToPDF = (data: any[], filename: string) => {
-  if (!data || !data.length) return toast('There is nothing to export.', 'error')
+// ─── PDF reporting ────────────────────────────────────────────────────────────
+// Every "PDF" action builds a real tabular document -- masthead, metadata line,
+// then one bordered table per section -- and prints only that. Printing the live
+// screen instead just photographs the dashboard onto paper, which is not a report.
 
-  const headers = Object.keys(data[0])
-  const esc = (v: any) => String(v ?? '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const COMPANY_NAME = 'WaveContainers'
+
+export type PdfSection = { title?: string; rows: Record<string, any>[] }
+
+const escapeHtml = (v: any) => String(v ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+const renderPdfTable = (rows: Record<string, any>[]) => {
+  if (!rows.length) return '<div class="print-doc-empty">No records.</div>'
+  const headers = Object.keys(rows[0])
+  return `
+    <table class="print-doc-table">
+      <thead><tr>${headers.map(h => `<th>${escapeHtml(h.replace(/[-_]/g, ' '))}</th>`).join('')}</tr></thead>
+      <tbody>
+        ${rows.map(row => `<tr>${headers.map(h => `<td>${escapeHtml(row[h])}</td>`).join('')}</tr>`).join('')}
+      </tbody>
+    </table>`
+}
+
+const printPdfDocument = (opts: { title: string; scope?: string; sections: PdfSection[] }) => {
+  const sections = opts.sections.filter(s => s.rows.length > 0)
+  if (!sections.length) return toast('There is nothing to export.', 'error')
+
+  const totalRecords = sections.reduce((n, s) => n + s.rows.length, 0)
+  const generated = new Date().toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })
 
   const host = document.createElement('div')
   host.id = 'print-root'
   host.innerHTML = `
     <div class="print-doc-head">
-      <div class="print-doc-title">${esc(filename.replace(/[-_]/g, ' '))}</div>
-      <div class="print-doc-meta">Container CRM · ${data.length} record${data.length === 1 ? '' : 's'} · ${new Date().toLocaleString()}</div>
+      <div class="print-doc-headline">
+        <div>
+          <div class="print-doc-title">${escapeHtml(opts.title)}</div>
+          <div class="print-doc-scope">${escapeHtml(COMPANY_NAME)}${opts.scope ? ` | ${escapeHtml(opts.scope)}` : ''}</div>
+        </div>
+        <div class="print-doc-brand">
+          <span class="print-doc-brand-wave">Wave</span><span class="print-doc-brand-rest">Containers</span>
+        </div>
+      </div>
+      <div class="print-doc-meta">Generated: ${escapeHtml(generated)} | Records: ${totalRecords}</div>
     </div>
-    <table class="print-doc-table">
-      <thead><tr>${headers.map(h => `<th>${esc(h.replace(/[-_]/g, ' '))}</th>`).join('')}</tr></thead>
-      <tbody>
-        ${data.map(row => `<tr>${headers.map(h => `<td>${esc(row[h])}</td>`).join('')}</tr>`).join('')}
-      </tbody>
-    </table>`
+    ${sections.map(s => `
+      ${s.title ? `<div class="print-doc-section">${escapeHtml(s.title)}</div>` : ''}
+      ${renderPdfTable(s.rows)}
+    `).join('')}`
 
   document.body.appendChild(host)
   document.body.classList.add('printing-data')
@@ -93,8 +123,19 @@ const exportToPDF = (data: any[], filename: string) => {
   }
   window.addEventListener('afterprint', cleanup)
   window.print()
-  // Safari/Firefox don't always fire afterprint; sweep up regardless.
+  // Safari/Firefox don't reliably fire afterprint; sweep up regardless.
   setTimeout(cleanup, 1000)
+}
+
+const titleCase = (s: string) => s.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
+const exportToPDF = (data: any[], filename: string) => {
+  if (!data || !data.length) return toast('There is nothing to export.', 'error')
+  printPdfDocument({
+    title: `${titleCase(filename)} Report`.toUpperCase(),
+    scope: 'Container CRM',
+    sections: [{ rows: data }],
+  })
 }
 
 const ExportMenu = ({ data, filename, sm = true }: { data: any[]; filename: string; sm?: boolean }) => {
@@ -1130,7 +1171,39 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
               </div>
             </>
           )}
-          <Btn variant="ghost" sm onClick={() => window.print()}><Ic n={I.export} size={13} /> Export PDF</Btn>
+          <Btn variant="ghost" sm onClick={() => printPdfDocument({
+            title: 'EXECUTIVE OVERVIEW REPORT',
+            scope: `Container CRM | ${dateRange}`,
+            sections: [
+              { title: 'Performance Summary', rows: [
+                { Metric: 'Gross Profit',   Value: `$${(m.total_gross_profit || 0).toLocaleString()}` },
+                { Metric: 'Revenue',        Value: `$${(m.total_revenue || 0).toLocaleString()}` },
+                { Metric: 'Units Sold',     Value: m.total_units || 0 },
+                { Metric: 'Active Clients', Value: m.active_clients || 0 },
+                { Metric: 'Profit Margin',  Value: `${(m.profit_margin || 0).toFixed(1)}%` },
+                { Metric: 'Monthly Target', Value: monthlyProfitTarget > 0 ? `$${monthlyProfitTarget.toLocaleString()} (${profitTargetPct}%)` : 'Not configured' },
+              ]},
+              { title: 'Sales Pipeline', rows: [
+                { Stage: 'Prospects',  Count: funnel.prospects || 0 },
+                { Stage: 'Warm Leads', Count: funnel.warm_leads || 0 },
+                { Stage: 'Inquiries',  Count: funnel.inquiries || 0 },
+                { Stage: 'Quotations', Count: funnel.quotations || 0 },
+                { Stage: 'Sales Won',  Count: funnel.sales || 0 },
+              ]},
+              { title: 'Outreach Activity (This Month)', rows: [
+                { Channel: 'Emails', Completed: analytics?.outreach?.emails || 0 },
+                { Channel: 'Calls',  Completed: analytics?.outreach?.calls || 0 },
+                { Channel: 'Texts',  Completed: analytics?.outreach?.texts || 0 },
+              ]},
+              { title: 'Performance by PIC', rows: (PIC_DATA || []).map(p => ({
+                PIC: p.name, Sales: p.sales, Units: p.units,
+                Revenue: `$${(p.revenue || 0).toLocaleString()}`,
+                'Gross Profit': `$${(p.profit || 0).toLocaleString()}`,
+                Emails: p.emails, Calls: p.calls, Texts: p.texts,
+              })) },
+              { title: 'Inquiry Status', rows: inquiryStatusData.map(d => ({ Status: d.name, Count: d.value })) },
+            ],
+          })}><Ic n={I.export} size={13} /> Export PDF</Btn>
         </div>
       </div>
 
@@ -1471,7 +1544,27 @@ const OutreachDashboard = () => {
               </div>
             </>
           )}
-          <Btn variant="ghost" sm onClick={() => window.print()}><Ic n={I.export} size={13} /> Export PDF</Btn>
+          <Btn variant="ghost" sm onClick={() => printPdfDocument({
+            title: 'OUTREACH PERFORMANCE REPORT',
+            scope: `Container CRM | ${dateRange}`,
+            sections: [
+              { title: 'Profit Progress', rows: [
+                { Metric: 'Gross Profit Achieved', Value: `$${profitDone.toLocaleString()}` },
+                { Metric: 'Profit Target', Value: profitTarget > 0 ? `$${profitTarget.toLocaleString()}` : 'Not configured' },
+                { Metric: 'Completion', Value: `${safePct(profitDone, profitTarget)}%` },
+                { Metric: 'Projected (run rate)', Value: `$${projectedProfit.toLocaleString()}` },
+              ]},
+              { title: 'Outreach vs Target (This Month)', rows: [
+                { Channel: 'Emails', Completed: emailDone, Target: emailTarget || '—', Completion: `${safePct(emailDone, emailTarget)}%`, Replies: outreach.email_replies || 0 },
+                { Channel: 'Calls', Completed: callsDone, Target: callsPref || '—', Completion: `${safePct(callsDone, callsPref)}%`, Replies: outreach.calls_answered || 0 },
+                { Channel: 'Texts', Completed: textsDone, Target: textsTarget || '—', Completion: `${safePct(textsDone, textsTarget)}%`, Replies: outreach.text_replies || 0 },
+              ]},
+              { title: 'Contact Eligibility', rows: [
+                { Metric: 'Eligible Contacts', Value: eligibleContacts },
+                { Metric: 'Excluded (Removed)', Value: excludedContacts },
+              ]},
+            ],
+          })}><Ic n={I.export} size={13} /> Export PDF</Btn>
         </div>
       </div>
       <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -4720,9 +4813,13 @@ const MonthlyReport = () => {
     }
   }
 
-  // PDF goes through the browser's own print-to-PDF. The .report-sheet print
-  // stylesheet hides the app chrome so the output is just the document.
-  const exportPDF = () => window.print()
+  // Same tabular document as every other PDF export, driven by the exact sections
+  // the Excel and Google Sheets exports use -- so all three stay identical.
+  const exportPDF = () => printPdfDocument({
+    title: 'MONTHLY PERFORMANCE REPORT',
+    scope: `Container CRM | ${report.month_label} | ${report.scope === 'personal' ? 'Personal' : 'Organization-wide'}`,
+    sections: reportTabs(report).map(t => ({ title: t.name, rows: t.rows })),
+  })
 
   if (loading) return <div className="loading-row"><span className="spinner" />Building report…</div>
   if (!report) return <div className="empty"><div className="empty-title">No report available</div></div>
