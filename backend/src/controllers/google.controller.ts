@@ -7,12 +7,15 @@ const queryValue = (value: unknown) => typeof value === 'string' ? value : null;
 export class GoogleAuthController {
   static async syncProvider(req: Request, res: Response) {
     try {
-      const { refresh_token, email } = req.body;
-      if (!refresh_token || !email) {
-        return res.status(400).json({ success: false, error: { message: 'Missing token or email' } });
+      const { refresh_token } = req.body;
+      if (typeof refresh_token !== 'string' || !refresh_token) {
+        return res.status(400).json({ success: false, error: { message: 'Missing refresh token' } });
       }
-      
-      await GoogleOAuthService.syncProviderToken(req.auth!.user.id, email, refresh_token);
+
+      // The email is deliberately NOT taken from the body -- the service reads the
+      // account identity from Google after validating the token. Callers may still
+      // send one; it is ignored.
+      await GoogleOAuthService.syncProviderToken(req.auth!.user.id, refresh_token);
       res.json({ success: true, data: { connected: true } });
     } catch (error: any) {
       res.status(500).json({
