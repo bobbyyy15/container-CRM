@@ -55,8 +55,15 @@ const cleanup = async () => {
 
   if (picIds.length) {
     await supabaseAdmin.from('daily_activity').delete().in('pic_id', picIds);
-    // pics.profile_id is ON DELETE SET NULL, so deleting the auth user leaves the PIC
-    // row behind -- remove it explicitly or every run leaks two rows into pics.
+  }
+  // pics.profile_id is ON DELETE SET NULL, so deleting the auth user leaves its PIC row
+  // orphaned. Every test user gets one automatically via the auto-PIC trigger, so sweep
+  // by profile_id (not just the PICs this test touched) before deleting the users --
+  // otherwise each run leaks a row into pics.
+  if (userIds.length) {
+    await supabaseAdmin.from('pics').delete().in('profile_id', userIds);
+  }
+  if (picIds.length) {
     await supabaseAdmin.from('pics').delete().in('id', picIds);
   }
   for (const id of userIds) await supabaseAdmin.auth.admin.deleteUser(id).catch(() => {});

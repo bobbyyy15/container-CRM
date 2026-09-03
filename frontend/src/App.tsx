@@ -28,6 +28,71 @@ import {
   LineChart, Line,
 } from 'recharts'
 
+// xlsx is ~490KB, so it's loaded on demand rather than bundled into the initial
+// payload -- same pattern the Excel importers already use.
+const exportToExcel = async (data: any[], filename: string) => {
+  if (!data || !data.length) return toast('There is nothing to export.', 'error')
+  try {
+    const XLSX = await import('xlsx')
+    const ws = XLSX.utils.json_to_sheet(data)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Export')
+    XLSX.writeFile(wb, `${filename}.xlsx`)
+  } catch {
+    toast('Could not build the Excel file.', 'error')
+  }
+}
+
+const exportToGoogleSheet = async (data: any[], filename: string) => {
+  if (!data || !data.length) return toast('There is nothing to export.', 'error')
+  toast('Creating your Google Sheet…', 'info')
+  try {
+    const res = await api.post('/export/google-sheet', { title: filename, rows: data })
+    const url = res.data.data?.url
+    if (url) {
+      window.open(url, '_blank', 'noopener')
+      toast(`Sheet created with ${res.data.data.rowCount} rows.`, 'success')
+    }
+  } catch (e: any) {
+    toast(e.response?.data?.error?.message ?? 'Google Sheets export failed.', 'error')
+  }
+}
+
+const ExportMenu = ({ data, filename, sm = true }: { data: any[]; filename: string; sm?: boolean }) => {
+  const [open, setOpen] = useState(false)
+  const options = [
+    { label: 'CSV file',      icon: I.export, run: () => exportToCSV(data, filename) },
+    { label: 'Excel (.xlsx)', icon: I.export, run: () => exportToExcel(data, filename) },
+    { label: 'Google Sheet',  icon: I.link,   run: () => exportToGoogleSheet(data, filename) },
+  ]
+  return (
+    <div style={{ position: 'relative' }}>
+      <Btn variant="ghost" sm={sm} onClick={() => setOpen(o => !o)}>
+        <Ic n={I.export} size={13} /> Export <Ic n={I.chevDown} size={11} />
+      </Btn>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setOpen(false)} />
+          <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, width: 170, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, zIndex: 100, boxShadow: 'var(--shadow-md)' }}>
+            {options.map(o => (
+              <div
+                key={o.label}
+                onClick={() => { setOpen(false); o.run() }}
+                style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 9, borderRadius: 6, cursor: 'pointer', fontSize: 12.5, color: 'var(--t2)' }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--s2)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <Ic n={o.icon} size={13} style={{ color: 'var(--t4)' }} />
+                {o.label}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 const exportToCSV = (data: any[], filename: string) => {
   if (!data || !data.length) return;
   const headers = Object.keys(data[0]);
@@ -1632,7 +1697,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           {mode === 'prospect' && <Btn variant="secondary" sm onClick={() => setShowNewProspect(true)}><Ic n={I.plus} size={13} /> New Prospect</Btn>}
           {mode === 'warm' && <Btn variant="primary" sm onClick={() => setShowNewWarmLead(true)}><Ic n={I.plus} size={13} /> New Warm Lead</Btn>}
           {mode === 'prospect' && <Btn variant="secondary" sm onClick={() => setImportMode('paste')}><Ic n={I.copy} size={13} /> Paste Bulk</Btn>}
-          <Btn variant="ghost" sm onClick={() => exportToCSV(filtered, 'pipeline_data')}><Ic n={I.export} size={13} /> Export</Btn>
+          <ExportMenu data={filtered} filename="pipeline_data" />
         </div>
       </div>
 
@@ -1978,7 +2043,7 @@ const InquiryList = () => {
         <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{pics.map(p => <option key={p} value={p}>{p}</option>)}</select>
         <div className="toolbar-right">
           <span className="count-label">{filtered.length} inquiries</span>
-          <Btn variant="ghost" sm onClick={() => exportToCSV(filtered, 'inquiries')}><Ic n={I.export} size={13} /> Export</Btn>
+          <ExportMenu data={filtered} filename="inquiries" />
         </div>
       </div>
       {actionError && <div style={{ margin: '0 20px 10px', padding: 9, borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12 }}>{actionError}</div>}
@@ -2197,7 +2262,7 @@ const QuotationList = () => {
         </select>
         <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{quotePics.map(p => <option key={p} value={p}>{p}</option>)}</select>
         <div className="toolbar-right">
-          <Btn variant="ghost" sm onClick={() => exportToCSV(filteredQuotes, 'quotations')}><Ic n={I.export} size={13} /> Export</Btn>
+          <ExportMenu data={filteredQuotes} filename="quotations" />
           <Btn variant="primary" sm onClick={() => setShowQuotation(true)}><Ic n={I.plus} size={13} /> Create Quotation</Btn>
         </div>
       </div>
@@ -2342,7 +2407,7 @@ const SalesTracker = () => {
         <select className="sel" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">All Categories</option>{salesCategories.map(c => <option key={c} value={c}>{c}</option>)}</select>
         <select className="sel" value={dateRange} onChange={e => setDateRange(e.target.value)}><option>This Month</option><option>Last Month</option><option>All Time</option></select>
         <div className="toolbar-right">
-          <Btn variant="ghost" sm onClick={() => exportToCSV(filteredSales, 'sales')}><Ic n={I.export} size={13} /> Export</Btn>
+          <ExportMenu data={filteredSales} filename="sales" />
           <Btn variant="secondary" sm onClick={() => setShowManualSale(true)}><Ic n={I.plus} size={13} /> Record Sale Manually</Btn>
           <Btn variant="primary" sm onClick={() => setShowSale(true)}><Ic n={I.plus} size={13} /> From Quotation</Btn>
         </div>
@@ -2451,7 +2516,7 @@ const CustomerAccounts = () => {
         <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search customers…" value={search} onChange={e => setSearch(e.target.value)} /></div>
         <div className="toolbar-right">
           <span className="count-label">{customers.length} customers</span>
-          <Btn variant="ghost" sm onClick={() => exportToCSV(customers, 'customers')}><Ic n={I.export} size={13} /> Export</Btn>
+          <ExportMenu data={customers} filename="customers" />
         </div>
       </div>
       <div className="table-wrap">
@@ -3011,7 +3076,7 @@ const RemovedSheet = () => {
         <select className="sel"><option>All Reasons</option><option>Opted Out</option><option>Bounced</option></select>
         <div className="toolbar-right">
           <Btn variant="secondary" sm onClick={() => setShowPaste(true)}><Ic n={I.copy} size={13} /> Paste Opted-Out</Btn>
-          <Btn variant="ghost" sm onClick={() => exportToCSV(data, 'removed')}><Ic n={I.export} size={13} /> Export</Btn>
+          <ExportMenu data={data} filename="removed" />
           <Btn variant="danger" sm onClick={() => setShowPaste(true)}><Ic n={I.plus} size={13} /> Add Entry</Btn>
         </div>
       </div>
@@ -3277,7 +3342,7 @@ const PICPerformance = () => {
       <p className="greeting-title">PIC Performance</p>
       <div style={{ display: 'flex', gap: 8 }}>
         <div className="date-range"><Ic n={I.calendar} size={13} /><span>This Month</span><Ic n={I.chevDown} size={12} /></div>
-        <Btn variant="ghost" sm onClick={() => exportToCSV(PIC_DATA, 'pic_performance')}><Ic n={I.export} size={13} /> Export</Btn>
+        <ExportMenu data={PIC_DATA} filename="pic_performance" />
       </div>
     </div>
     <div className="page-content" style={{ paddingTop: 0 }}>
@@ -3410,7 +3475,7 @@ const BestClients = () => {
           <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search clients…" value={search} onChange={e => setSearch(e.target.value)} /></div>
           <div className="toolbar-right">
             <span className="count-label">{ranked.length} clients</span>
-            <Btn variant="ghost" sm onClick={() => exportToCSV(ranked, 'best-clients')}><Ic n={I.export} size={13} /> Export</Btn>
+            <ExportMenu data={ranked} filename="best-clients" />
           </div>
         </div>
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -4235,7 +4300,7 @@ const InventoryManagement = ({ role }: { role?: string }) => {
         <select className="sel" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All Statuses</option><option>In Stock</option><option>Low Stock</option><option>Out of Stock</option><option>Reserved</option></select>
         <div className="toolbar-right">
           <span className="count-label">{inventory.length} records</span>
-          <Btn variant="ghost" sm onClick={() => exportToCSV(inventory, 'inventory')}><Ic n={I.export} size={13} /> Export</Btn>
+          <ExportMenu data={inventory} filename="inventory" />
         </div>
       </div>
 

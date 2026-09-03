@@ -54,6 +54,11 @@ export class GoogleOAuthService {
       scope: [
         'https://www.googleapis.com/auth/gmail.send',
         'https://www.googleapis.com/auth/userinfo.email',
+        // Least-privilege Drive scope: lets the app create and write the spreadsheets
+        // it exports, with no access to anything else already in the user's Drive.
+        // Accounts connected before this was added keep working for Gmail but must
+        // reconnect once before Google Sheets export will authorize.
+        'https://www.googleapis.com/auth/drive.file',
       ],
       state,
     });
