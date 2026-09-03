@@ -1,34 +1,36 @@
 # Deployment — Read This Before Shipping to Vercel
 
-Written 2026-09-03. The frontend is a static Vite build (Vercel is a natural fit as-is).
-The backend is a **long-running Express server** (`app.listen()` in `backend/src/index.ts`) —
-Vercel does not run that model directly, so there's a real decision to make before deploying,
-not just "push to Vercel and it works."
+Updated 2026-09-04. Both halves can go on Vercel.
 
-## 1. Pick a backend hosting model
+**This changed on 2026-09-04.** The app previously ran its own Socket.IO server attached to
+the Express HTTP server, which required an always-on host and ruled Vercel out for the API.
+Live updates now run on **Supabase Realtime** (`frontend/src/lib/realtime.ts` +
+`supabase/migrations/..._039_realtime_publication.sql`), so the backend holds no long-lived
+connections and is fully stateless. There is no longer a websocket to host.
 
-**Option A — convert the HTTP API to Vercel serverless (realtime requires a separate service)**
-- Pro: no CORS to configure — the frontend already calls a relative `/api/v1`
-  (`frontend/vite.config.ts` sets `VITE_API_BASE_URL` to `/api/v1` by default), so if both
-  live under the same Vercel domain it just works.
-- Con: Vercel functions have a request timeout — **10s on the free Hobby tier, 60s on Pro**.
-  The bulk Excel/CSV import endpoints (`backend/src/routes/import.routes.ts`,
-  `inventory.routes.ts` `/bulk`) process a whole file server-side and could exceed that on a
-  large file. Cold starts also add latency to the first request after idle.
-- Con: request-only serverless functions cannot retain this app's Socket.IO connections. This
-  option therefore needs a separate long-running Socket.IO service (and routing for
-  `/socket.io`) or a redesign around a managed realtime provider.
-- Requires: an `api/` entry point that imports `{ app }` and wraps it for Vercel's Node runtime,
-  plus separate realtime hosting. Neither split-host adapter is implemented in this repo.
+## 1. Hosting
 
-**Option B — frontend on Vercel, backend on an always-on host (Railway/Render/Fly/etc.)**
-- Pro: no timeout ceiling and supports the shared Express + Socket.IO HTTP server exactly like
-  local dev (`npm run build && npm start` — see §2). This is the recommended model.
-- Con: two URLs. Requires `CORS_ORIGINS` on the backend to include the deployed frontend's
-  origin, and the frontend's `VITE_API_BASE_URL` to point at the deployed backend's full URL
-  instead of the relative default.
+Two Vercel projects from the same repo (both fit the free Hobby tier):
 
-Whoever deploys should pick one explicitly — don't let it default by accident.
+| Project | Root directory | Notes |
+|---|---|---|
+| Frontend | `frontend` | Static Vite build; `frontend/vercel.json` pins the settings |
+| Backend | `backend` | Serverless functions; needs an `api/` entry point exporting the Express `app` |
+
+Set the frontend's `VITE_API_BASE_URL` to the backend project's URL + `/api/v1`, and the
+backend's `CORS_ORIGINS` to the frontend project's URL. (A single combined project is possible
+via rewrites but is fiddlier with this repo's `frontend/` + `backend/` layout.)
+
+**The one real constraint that remains:** Vercel functions have a request timeout — **10s on
+the free Hobby tier, 60s on Pro**. The bulk Excel/CSV import endpoints
+(`backend/src/routes/import.routes.ts`, `inventory.routes.ts` `/bulk`) process a whole file
+in one request and could exceed that on a large upload. If that becomes a problem, either
+chunk the import client-side or move just the backend to an always-on host (Render/Fly free
+tiers work, but they sleep after ~15 min idle and cold-start in ~50s).
+
+**Still viable alternative:** frontend on Vercel, backend on an always-on host. Nothing about
+the code prevents this — `npm run build && npm start` works (see §2). It's just no longer
+*required*.
 
 ## 2. Backend is now ready for an always-on host
 
@@ -71,9 +73,10 @@ outreach and Google Sheets export throw a clear error at call time if unset — 
 | `SUPABASE_PUBLISHABLE_KEY` | Public/anon key — safe to expose |
 | `VITE_API_BASE_URL` | `/api/v1` if same-origin (Option A above); the full backend URL if separate (Option B) |
 
-The Socket.IO client derives its origin from `VITE_API_BASE_URL`. The reverse proxy/load
-balancer must forward both HTTP and WebSocket traffic at `/socket.io`. More than one backend
-instance also requires a shared Socket.IO adapter before events can cross instances.
+Realtime needs no extra configuration: the client connects straight to Supabase over its own
+websocket using `SUPABASE_URL` and the user's session token, so there is no `/socket.io` route
+to proxy and no sticky-session or multi-instance adapter concern. Scaling the backend to
+several instances is now safe.
 
 ## 4. Everyone reconnects Google once
 

@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer } from 'node:http';
 import cors from 'cors';
 import helmet from 'helmet';
 import leadRoutes from './routes/lead.routes';
@@ -24,7 +23,6 @@ import reportRoutes from './routes/report.routes';
 import { requireAuth } from './middleware/auth.middleware';
 import { requestContext } from './middleware/request-context.middleware';
 import { env } from './config/env';
-import { attachRealtime, publishMutation } from './realtime';
 
 const app = express();
 
@@ -46,7 +44,6 @@ app.get('/api/health', (req, res) => {
 app.use('/api/v1/auth', authRoutes);
 
 app.use('/api/v1', requireAuth);
-app.use('/api/v1', publishMutation);
 app.use('/api/v1/leads', leadRoutes);
 app.use('/api/v1/companies', companyRoutes);
 app.use('/api/v1/customers', customerRoutes);
@@ -66,15 +63,14 @@ app.use('/api/v1/export',        exportRoutes);
 app.use('/api/v1/reports',       reportRoutes);
 
 
-// Socket.IO and Express share one HTTP server so API and realtime traffic use the
-// same host, TLS termination, and deployment port.
-const server = createServer(app);
-attachRealtime(server);
-server.listen(env.PORT, () => {
-  console.log(`Server is running on port ${env.PORT}`);
-});
+// Only started when run directly. Live updates are handled by Supabase Realtime
+// (see frontend/src/lib/realtime.ts) rather than a websocket held open here, so
+// this process is stateless and can also run as a serverless function -- in that
+// case the platform's adapter imports `app` and no listener is created.
+if (require.main === module) {
+  app.listen(env.PORT, () => {
+    console.log(`Server is running on port ${env.PORT}`);
+  });
+}
 
-// Exported for integration tests and host adapters. Realtime production deployments need
-// this long-running HTTP server (or another Socket.IO-capable host); request-only serverless
-// functions cannot retain Socket.IO connections. See docs/DEPLOYMENT.md.
-export { app, server };
+export { app };
