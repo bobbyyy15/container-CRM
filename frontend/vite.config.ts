@@ -56,6 +56,15 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(import.meta.dirname, './src'),
       },
     },
+    optimizeDeps: {
+      // These are only reached through dynamic import() -- the PDF and Excel
+      // exporters -- so Vite doesn't see them during its initial dependency scan.
+      // It then discovers them mid-session on first use, restarts optimization,
+      // and the in-flight request dies with "Failed to fetch dynamically imported
+      // module". Listing them here pre-bundles them at startup instead.
+      // Dev-server only; production builds are unaffected.
+      include: ['jspdf', 'jspdf-autotable', 'xlsx'],
+    },
     server: {
       host: '0.0.0.0',
       port: devPort,
