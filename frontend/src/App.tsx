@@ -848,11 +848,71 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
   const markRead = (id: string) => api.patch(`/notifications/${id}/read`).then(refresh).catch(console.error)
   const markAllRead = () => api.patch('/notifications/read-all').then(refresh).catch(console.error)
 
+  // Global search: hits the same search-capable endpoints the individual list screens
+  // already use, and jumps to the right screen on click. It doesn't deep-link to the
+  // exact record (that screen's own search box isn't pre-filled), only to the section --
+  // still a real result, just not a full jump-to-record.
+  const [gsQuery, setGsQuery] = useState('')
+  const [gsResults, setGsResults] = useState<{ label: string; sub: string; screen: Screen }[]>([])
+  const [gsOpen, setGsOpen] = useState(false)
+  const [gsLoading, setGsLoading] = useState(false)
+  useEffect(() => {
+    const term = gsQuery.trim()
+    if (term.length < 2) { setGsResults([]); return }
+    setGsLoading(true)
+    const handle = setTimeout(() => {
+      Promise.all([
+        api.get('/leads/prospects', { params: { search: term, limit: 5 } }).catch(() => ({ data: { data: [] } })),
+        api.get('/leads/warm-leads', { params: { search: term, limit: 5 } }).catch(() => ({ data: { data: [] } })),
+        api.get('/leads/inquiries', { params: { search: term, limit: 5 } }).catch(() => ({ data: { data: [] } })),
+        api.get('/customers', { params: { search: term, limit: 5 } }).catch(() => ({ data: { data: [] } })),
+      ]).then(([prospects, warmLeads, inquiries, customers]) => {
+        const rows: { label: string; sub: string; screen: Screen }[] = [
+          ...(prospects.data.data || []).map((r: any) => ({ label: r.companies?.name || r.contacts?.first_name || 'Prospect', sub: 'Prospect Client', screen: 'prospects' as Screen })),
+          ...(warmLeads.data.data || []).map((r: any) => ({ label: r.companies?.name || r.contacts?.first_name || 'Warm Lead', sub: 'Warm Lead', screen: 'warm-leads' as Screen })),
+          ...(inquiries.data.data || []).map((r: any) => ({ label: r.companies?.name || 'Inquiry', sub: `Inquiry — ${r.status || ''}`, screen: 'inquiries' as Screen })),
+          ...(customers.data.data || []).map((r: any) => ({ label: r.company_name || 'Customer', sub: 'Customer Account', screen: 'customers' as Screen })),
+        ]
+        setGsResults(rows)
+        setGsLoading(false)
+      }).catch(() => setGsLoading(false))
+    }, 300)
+    return () => clearTimeout(handle)
+  }, [gsQuery])
+
   return (
     <header className="topbar">
-      <div className="search-wrap">
+      <div className="search-wrap" style={{ position: 'relative' }}>
         <Ic n={I.search} size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--t4)' }} />
-        <input placeholder="Search prospects, leads, inquiries, sales…" />
+        <input
+          placeholder="Search prospects, leads, inquiries, customers…"
+          value={gsQuery}
+          onChange={e => { setGsQuery(e.target.value); setGsOpen(true) }}
+          onFocus={() => setGsOpen(true)}
+          onBlur={() => setTimeout(() => setGsOpen(false), 150)}
+        />
+        {gsOpen && gsQuery.trim().length >= 2 && (
+          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: 'var(--shadow-md)', zIndex: 200, maxHeight: 320, overflowY: 'auto' }}>
+            {gsLoading ? (
+              <div style={{ padding: 14, fontSize: 12.5, color: 'var(--t4)' }}>Searching…</div>
+            ) : gsResults.length === 0 ? (
+              <div style={{ padding: 14, fontSize: 12.5, color: 'var(--t4)' }}>No matches for "{gsQuery}".</div>
+            ) : (
+              gsResults.map((r, i) => (
+                <div
+                  key={i}
+                  onClick={() => { onNav(r.screen); setGsOpen(false); setGsQuery('') }}
+                  style={{ padding: '9px 12px', cursor: 'pointer', borderBottom: i < gsResults.length - 1 ? '1px solid var(--border-s)' : 'none' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--s2)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t1)' }}>{r.label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--t4)' }}>{r.sub}</div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       <div className="topbar-right">
@@ -962,6 +1022,8 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
 const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: any }) => {
   const analytics = useAnalytics();
   const m = analytics?.metrics || {};
+  const monthlyProfitTarget = Number(analytics?.targets?.monthly_gross_profit_target) || 0;
+  const profitTargetPct = monthlyProfitTarget > 0 ? Math.round(((m.total_gross_profit || 0) / monthlyProfitTarget) * 100) : 0;
   const funnel = analytics?.funnel || {};
   const c = analytics?.charts || {};
   
@@ -1035,16 +1097,15 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           <div className="kpi-featured" style={{ background: 'linear-gradient(145deg, #2D4FE0 0%, #4C6FFF 100%)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 500 }}>{prefix} Gross Profit</span>
-              <button style={{ background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 8, width: 28, height: 28, cursor: 'pointer', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Ic n={I.arrowRight} size={13} />
-              </button>
             </div>
             <div>
               <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginBottom: 6 }}>${m.total_gross_profit?.toLocaleString() || 0}</div>
               <Trend val="0" white />
-              <div style={{ fontSize: 11, opacity: 0.65, marginTop: 6 }}>Target: $0 · 0%</div>
+              <div style={{ fontSize: 11, opacity: 0.65, marginTop: 6 }}>
+                {monthlyProfitTarget > 0 ? `Target: $${monthlyProfitTarget.toLocaleString()} · ${profitTargetPct}%` : 'No monthly target configured'}
+              </div>
               <div style={{ marginTop: 10, height: 5, background: 'rgba(255,255,255,0.2)', borderRadius: 99, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: '0%', background: 'rgba(255,255,255,0.8)', borderRadius: 99 }} />
+                <div style={{ height: '100%', width: `${Math.min(100, profitTargetPct)}%`, background: 'rgba(255,255,255,0.8)', borderRadius: 99 }} />
               </div>
             </div>
           </div>
@@ -1144,21 +1205,21 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
           {/* Outreach progress */}
           <div className="chart-card">
-            <div className="chart-title">Outreach Progress — Today</div>
-            <div className="chart-sub">Daily targets vs completed</div>
+            <div className="chart-title">Outreach Progress — This Month</div>
+            <div className="chart-sub">Recorded on Daily Tasks, vs monthly target</div>
             {[
-              { label: 'Emails', done: 0, target: 500, color: '#315EF6' },
-              { label: 'Calls', done: 0, target: 15, color: '#0D9488' },
-              { label: 'Texts / SMS', done: 0, target: 300, color: '#7C3AED' },
+              { label: 'Emails', done: analytics?.outreach?.emails || 0, target: (Number(analytics?.targets?.daily_email_target) || 0) * (Number(analytics?.targets?.working_days_per_month) || 22), color: '#315EF6' },
+              { label: 'Calls', done: analytics?.outreach?.calls || 0, target: (Number(analytics?.targets?.daily_call_target_preferred) || 0) * (Number(analytics?.targets?.working_days_per_month) || 22), color: '#0D9488' },
+              { label: 'Texts / SMS', done: analytics?.outreach?.texts || 0, target: (Number(analytics?.targets?.daily_text_target) || 0) * (Number(analytics?.targets?.working_days_per_month) || 22), color: '#7C3AED' },
             ].map(o => (
               <div key={o.label} style={{ marginBottom: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
                   <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--t2)' }}>{o.label}</span>
                   <span style={{ fontSize: 12, color: 'var(--t3)', fontFamily: 'var(--mono)' }}>
-                    <span style={{ fontWeight: 700, color: 'var(--t1)' }}>{o.done}</span> / {o.target}
+                    <span style={{ fontWeight: 700, color: 'var(--t1)' }}>{o.done}</span> / {o.target > 0 ? o.target : '—'}
                   </span>
                 </div>
-                <Prog pct={(o.done / o.target) * 100} color={o.color} tall />
+                <Prog pct={o.target > 0 ? (o.done / o.target) * 100 : 0} color={o.color} tall />
               </div>
             ))}
           </div>
@@ -1421,20 +1482,20 @@ const OutreachDashboard = () => {
             {
               label: 'Call Target', icon: I.phone, color: '#0D9488', done: callsDone, target: callsPref,
               details: [
-                { k: 'Answered', v: 0, color: 'var(--green)' },
-                { k: 'No Answer', v: 0, color: 'var(--amber)' },
-                { k: '→ Inquiry', v: 0, color: 'var(--brand)' },
-                { k: '→ Sale', v: 0, color: 'var(--green)' },
+                { k: 'Answered', v: outreach.calls_answered || 0, color: 'var(--green)' },
+                { k: 'No Answer', v: outreach.calls_unanswered || 0, color: 'var(--amber)' },
+                { k: 'Remaining', v: Math.max(0, callsPref - callsDone), color: 'var(--brand)' },
+                { k: 'Completion', v: `${safePct(callsDone, callsPref)}%`, color: 'var(--green)' },
               ],
               status: safePct(callsDone, callsPref) >= 100 ? 'Target Achieved' : 'Min Achieved', statusCls: 'b-green',
             },
             {
               label: 'Text / SMS Target', icon: I.inquiry, color: '#7C3AED', done: textsDone, target: textsTarget,
               details: [
-                { k: 'Remaining', v: textsTarget - textsDone, color: 'var(--amber)' },
-                { k: 'Replies', v: 0, color: 'var(--green)' },
-                { k: '→ Warm Leads', v: 0, color: 'var(--brand)' },
-                { k: '→ Inquiries', v: 0, color: 'var(--purple)' },
+                { k: 'Remaining', v: Math.max(0, textsTarget - textsDone), color: 'var(--amber)' },
+                { k: 'Replies', v: outreach.text_replies || 0, color: 'var(--green)' },
+                { k: 'Completion', v: `${safePct(textsDone, textsTarget)}%`, color: 'var(--brand)' },
+                { k: 'Valid Available', v: eligibleContacts, color: 'var(--purple)' },
               ],
               status: safePct(textsDone, textsTarget) >= 100 ? 'Completed' : 'On Track', statusCls: 'b-teal',
             },
@@ -1586,8 +1647,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [industry, setIndustry] = useState('')
   const [status, setStatus] = useState<'active' | 'converted' | 'removed' | 'all'>('active')
   const [missingContactOnly, setMissingContactOnly] = useState(false)
-  const [view, setView] = useState('grid')
-  const [tab, setTab] = useState('Standard A–Q View')
+  const [tab, setTab] = useState('Standard View')
 
   const [revision, setRevision] = useState(0)
   const [importMode, setImportMode] = useState<'file' | 'paste' | null>(null)
@@ -1686,6 +1746,18 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const getVal = (row: ReturnType<typeof mapPipelineRow>, field: string): string =>
     (row as any)[field] || ''
 
+  // Each tab is a real column subset of COLS rather than a decorative label --
+  // null means "show everything."
+  const VIEW_FIELDS: Record<string, string[] | null> = {
+    'Standard View':  null,
+    'Address Prep':   ['company', 'contact', 'country', 'state', 'city', 'address', 'phone'],
+    'Compact Outreach': ['company', 'contact', 'pic', 'cat', 'phone', 'emailAddr'],
+  }
+  const visibleCols = VIEW_FIELDS[tab] ? COLS.filter(c => VIEW_FIELDS[tab]!.includes(c.field)) : COLS
+
+  const [density, setDensity] = useState<'Compact' | 'Standard' | 'Comfortable'>('Standard')
+  const rowHeight = density === 'Compact' ? 30 : density === 'Comfortable' ? 46 : 38
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Header */}
@@ -1765,17 +1837,23 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 
         <div className="toolbar-right">
           <span className="count-label">{filtered.length} records</span>
-          <Btn variant="ghost" sm><Ic n={I.phone} size={13} /> Copy for RingCentral</Btn>
-          {['⊞', '☰'].map((ic, i) => (
-            <button key={i} className={`btn btn-ghost btn-sm btn-icon${view === (i === 0 ? 'grid' : 'table') ? '' : ''}`}
-              onClick={() => setView(i === 0 ? 'grid' : 'table')}>{ic}</button>
-          ))}
+          <Btn
+            variant="ghost" sm
+            onClick={() => {
+              const withPhone = filtered.filter(r => r.phone)
+              if (!withPhone.length) return toast('No phone numbers in the current view to copy.', 'error')
+              navigator.clipboard.writeText(withPhone.map(r => r.phone).join('\n'))
+              toast(`Copied ${withPhone.length} phone numbers for RingCentral.`, 'success')
+            }}
+          >
+            <Ic n={I.phone} size={13} /> Copy for RingCentral
+          </Btn>
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Tabs -- each one shows a real subset of columns, see VIEW_FIELDS above */}
       <div className="tabs">
-        {['Standard A–Q View', 'Address Prep A–U View', 'Compact Outreach View'].map(t => (
+        {Object.keys(VIEW_FIELDS).map(t => (
           <div key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>{t}</div>
         ))}
       </div>
@@ -1810,10 +1888,10 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
             <div style={{ width: 44, minWidth: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--border)', background: 'var(--s2)', position: 'sticky', left: 0, zIndex: 6 }}>
               <input type="checkbox" className="cb" onChange={e => setSelected(e.target.checked ? filtered.map(r => r.id) : [])} />
             </div>
-            {COLS.map(col => (
-              <div 
-                key={col.key} 
-                style={{ minWidth: col.w, width: col.w, padding: '7px 12px', borderRight: '1px solid var(--border)', cursor: 'context-menu', userSelect: 'none', display: 'flex', alignItems: 'center' }} 
+            {visibleCols.map(col => (
+              <div
+                key={col.key}
+                style={{ minWidth: col.w, width: col.w, padding: '7px 12px', borderRight: '1px solid var(--border)', cursor: 'context-menu', userSelect: 'none', display: 'flex', alignItems: 'center' }}
                 title={`Right-click to copy all ${col.label}`}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -1853,10 +1931,10 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                   />
                   <span style={{ fontSize: 10, color: 'var(--t4)', fontFamily: 'var(--mono)' }}>{ri + 1}</span>
                 </div>
-                {COLS.map(col => {
+                {visibleCols.map(col => {
                   const val = getVal(row, col.field)
                   return (
-                    <div key={col.key} style={{ minWidth: col.w, width: col.w, padding: '0 12px', height: 38, display: 'flex', alignItems: 'center', borderRight: '1px solid var(--border-s)', overflow: 'hidden' }}>
+                    <div key={col.key} style={{ minWidth: col.w, width: col.w, padding: '0 12px', height: rowHeight, display: 'flex', alignItems: 'center', borderRight: '1px solid var(--border-s)', overflow: 'hidden' }}>
                       {col.field === 'contact' && row.contactMissing ? (
                         <span style={{ fontSize: 11.5, color: 'var(--amber, #D97706)', fontStyle: 'italic' }}>No contact yet</span>
                       ) : col.badge && val ? (
@@ -1888,8 +1966,14 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
       <div style={{ padding: '7px 20px', background: 'var(--s2)', borderTop: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11.5, color: 'var(--t4)', flexShrink: 0 }}>
         <span>Showing {filtered.length} of {prospectsData.length} active records</span>
         <div style={{ display: 'flex', gap: 4 }}>
-          {['Compact', 'Standard', 'Comfortable'].map(d => (
-            <button key={d} className="btn btn-ghost btn-xs" style={{ fontWeight: d === 'Standard' ? 600 : 400, color: d === 'Standard' ? 'var(--brand)' : undefined }}>{d}</button>
+          {(['Compact', 'Standard', 'Comfortable'] as const).map(d => (
+            <button
+              key={d} className="btn btn-ghost btn-xs"
+              style={{ fontWeight: density === d ? 600 : 400, color: density === d ? 'var(--brand)' : undefined }}
+              onClick={() => setDensity(d)}
+            >
+              {d}
+            </button>
           ))}
         </div>
       </div>
@@ -2076,7 +2160,6 @@ const InquiryList = () => {
         <table className="crm">
           <thead>
             <tr>
-              <th className="col-check"><input type="checkbox" className="cb" /></th>
               <th>Inquiry #</th><th>Date / Time</th><th>Channel</th>
               <th 
                 style={{ cursor: 'context-menu' }} 
@@ -2101,7 +2184,6 @@ const InquiryList = () => {
           <tbody>
             {filtered.map(row => (
               <tr key={row.ref}>
-                <td className="col-check"><input type="checkbox" className="cb" /></td>
                 <td><span className="ref-id">{row.ref}</span></td>
                 <td>
                   <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t1)' }}>{row.date}</div>
@@ -2272,7 +2354,6 @@ const QuotationList = () => {
       <div className="table-wrap">
         <table className="crm">
           <thead><tr>
-            <th className="col-check"><input type="checkbox" className="cb" /></th>
             <th>Quote #</th><th>Date</th><th>Company</th><th>Category</th><th>Size</th>
             <th className="r">Qty</th><th className="r">Total Sell</th><th className="r">Est. Profit</th>
             <th className="r">Margin</th><th>Status</th><th>Source</th><th>PIC</th><th className="col-actions">Actions</th>
@@ -2280,7 +2361,6 @@ const QuotationList = () => {
           <tbody>
             {filteredQuotes.map(q => (
               <tr key={q.ref}>
-                <td className="col-check"><input type="checkbox" className="cb" /></td>
                 <td><span className="ref-id" style={{ color: 'var(--purple)' }}>{q.ref}</span></td>
                 <td style={{ fontSize: 12.5 }}>{q.date}</td>
                 <td>
@@ -2418,7 +2498,6 @@ const SalesTracker = () => {
       <div className="table-wrap">
         <table className="crm">
           <thead><tr>
-            <th className="col-check"><input type="checkbox" className="cb" /></th>
             <th>Sale #</th><th>Date</th><th>Company</th><th>Category</th><th>Size</th>
             <th>Condition</th><th className="r">Qty</th><th className="r">Buy/Unit</th>
             <th className="r">Sell/Unit</th><th className="r">Total Buy</th><th className="r">Total Sell</th>
@@ -2428,7 +2507,6 @@ const SalesTracker = () => {
           <tbody>
             {filteredSales.map(s => (
               <tr key={s.ref}>
-                <td className="col-check"><input type="checkbox" className="cb" /></td>
                 <td><span className="ref-id">{s.ref}</span></td>
                 <td style={{ fontSize: 12.5 }}>{s.date}</td>
                 <td>
@@ -2455,7 +2533,7 @@ const SalesTracker = () => {
           </tbody>
           <tfoot>
             <tr style={{ background: 'var(--s2)' }}>
-              <td colSpan={7} style={{ padding: '10px 14px', fontWeight: 700, color: 'var(--t1)' }}>Totals ({filteredSales.length} sales)</td>
+              <td colSpan={6} style={{ padding: '10px 14px', fontWeight: 700, color: 'var(--t1)' }}>Totals ({filteredSales.length} sales)</td>
               <td className="r mono bold" style={{ color: 'var(--t1)' }}>{totalUnits}</td>
               <td colSpan={2} />
               <td className="r cost-cell" style={{ fontWeight: 700 }}>${totalBuy.toLocaleString()}</td>
@@ -2508,7 +2586,10 @@ const CustomerAccounts = () => {
           <div className="page-title">Customer Accounts</div>
           <div className="page-desc">Companies with confirmed purchase history.</div>
         </div>
-        <Btn variant="primary" sm onClick={() => setShowNewCustomer(true)}><Ic n={I.plus} size={13} /> Add Customer</Btn>
+        {/* Customers are derived from purchase history (see page-desc above), so
+            there's no standalone "customer" record to create -- this records a sale,
+            which is what actually makes a company show up on this list. */}
+        <Btn variant="primary" sm onClick={() => setShowNewCustomer(true)} title="Customers are created by recording a sale"><Ic n={I.plus} size={13} /> Record Sale → New Customer</Btn>
         {showNewCustomer && <NewManualSaleDialog onClose={() => setShowNewCustomer(false)} onSaved={() => { setShowNewCustomer(false); setRevision(r => r + 1); }} />}
       </div>
       <div className="tabs">
@@ -2524,7 +2605,6 @@ const CustomerAccounts = () => {
       <div className="table-wrap">
         <table className="crm">
           <thead><tr>
-            <th className="col-check"><input type="checkbox" className="cb" /></th>
             <th>Company</th><th>Contact</th><th>State</th><th>PIC</th>
             <th className="r">Sales</th><th className="r">Units</th><th className="r">Revenue</th>
             <th className="r">Gross Profit</th><th>Last Purchase</th><th>Status</th>
@@ -2533,7 +2613,6 @@ const CustomerAccounts = () => {
           <tbody>
             {(tab === 'All' ? customers : customers.filter(c => c.status === tab)).map(c => (
               <tr key={c.id}>
-                <td className="col-check"><input type="checkbox" className="cb" /></td>
                 <td>
                   <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{c.co}</div>
                   <div style={{ fontSize: 11, color: 'var(--t4)', fontFamily: 'var(--mono)' }}>{c.phone}</div>
@@ -3061,10 +3140,13 @@ const RemovedSheet = () => {
       })))
     }).catch(console.error)
   }, [revision])
+  const [typeFilter, setTypeFilter] = useState<'' | 'phone' | 'email'>('')
   const filtered = data.filter(row => {
     const term = search.trim().toLowerCase()
-    return !term || [row.co, row.contact, row.phone, row.email, row.reason]
+    const typeMatch = !typeFilter || row.type === typeFilter
+    const searchMatch = !term || [row.co, row.contact, row.phone, row.email, row.reason]
       .some(value => String(value || '').toLowerCase().includes(term))
+    return typeMatch && searchMatch
   })
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -3073,19 +3155,20 @@ const RemovedSheet = () => {
         <span style={{ fontSize: 12.5, fontWeight: 600, color: '#9F1239' }}>All records here are excluded from call, text, and email outreach automatically.</span>
       </div>
       <div className="toolbar">
-        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search removed records…" value={search} onChange={e => setSearch(e.target.value)} /></div>
-        <select className="sel"><option>All Types</option><option>Phone Only</option><option>Email Only</option><option>Entire Contact</option></select>
-        <select className="sel"><option>All Reasons</option><option>Opted Out</option><option>Bounced</option></select>
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search removed records, or reason…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+        <select className="sel" value={typeFilter} onChange={e => setTypeFilter(e.target.value as any)}>
+          <option value="">All Types</option>
+          <option value="phone">Phone Only</option>
+          <option value="email">Email Only</option>
+        </select>
         <div className="toolbar-right">
-          <Btn variant="secondary" sm onClick={() => setShowPaste(true)}><Ic n={I.copy} size={13} /> Paste Opted-Out</Btn>
+          <Btn variant="danger" sm onClick={() => setShowPaste(true)}><Ic n={I.plus} size={13} /> Paste Opted-Out / Bounced</Btn>
           <ExportMenu data={data} filename="removed" />
-          <Btn variant="danger" sm onClick={() => setShowPaste(true)}><Ic n={I.plus} size={13} /> Add Entry</Btn>
         </div>
       </div>
       <div className="table-wrap">
         <table className="crm">
           <thead><tr>
-            <th className="col-check"><input type="checkbox" className="cb" /></th>
             <th>Date</th><th>Removal Type</th><th>Phone</th><th>Email</th>
             <th>Company</th><th>Contact</th><th>Reason</th><th>Channel</th>
             <th>Prev Status</th><th>Curr Status</th><th>Added By</th>
@@ -3093,7 +3176,6 @@ const RemovedSheet = () => {
           <tbody>
             {filtered.map((r, i) => (
               <tr key={r.id || i} style={{ background: 'var(--red-bg)' }}>
-                <td className="col-check"><input type="checkbox" className="cb" /></td>
                 <td className="mono" style={{ fontSize: 12 }}>{r.date}</td>
                 <td><span className="badge b-red">{r.type}</span></td>
                 <td className="mono" style={{ fontSize: 12, color: r.phone ? 'var(--t2)' : 'var(--t4)' }}>{r.phone || '—'}</td>
@@ -3343,7 +3425,11 @@ const PICPerformance = () => {
     <div className="greeting-bar" style={{ marginBottom: 16 }}>
       <p className="greeting-title">PIC Performance</p>
       <div style={{ display: 'flex', gap: 8 }}>
-        <div className="date-range"><Ic n={I.calendar} size={13} /><span>This Month</span><Ic n={I.chevDown} size={12} /></div>
+        {/* Not a dropdown: PIC_DATA is computed server-side for the current calendar
+            month only, so there's nothing to select yet. */}
+        <div className="date-range" style={{ cursor: 'default' }} title="Scored on the current calendar month">
+          <Ic n={I.calendar} size={13} /><span>This Month</span>
+        </div>
         <ExportMenu data={PIC_DATA} filename="pic_performance" />
       </div>
     </div>
@@ -3418,14 +3504,18 @@ const ProfitAnalytics = () => {
   <div className="page-scroll">
     <div className="greeting-bar" style={{ marginBottom: 0 }}>
       <p className="greeting-title">Profit Analytics</p>
-      <div className="date-range"><Ic n={I.calendar} size={13} /><span>2024 YTD</span><Ic n={I.chevDown} size={12} /></div>
+      {/* Not a dropdown: these KPIs are all-time totals, not year-scoped -- labeled
+          accordingly rather than a "2024 YTD" claim the numbers don't back up. */}
+      <div className="date-range" style={{ cursor: 'default' }} title="All-time totals">
+        <Ic n={I.calendar} size={13} /><span>All-Time</span>
+      </div>
     </div>
     <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
         {[
-          { label: 'YTD Revenue', val: money(revenue), color: 'var(--brand)' },
-          { label: 'YTD Buying Cost', val: money(buyingCost), color: 'var(--t3)' },
-          { label: 'YTD Gross Profit', val: money(grossProfit), color: 'var(--green)' },
+          { label: 'Total Revenue', val: money(revenue), color: 'var(--brand)' },
+          { label: 'Total Buying Cost', val: money(buyingCost), color: 'var(--t3)' },
+          { label: 'Total Gross Profit', val: money(grossProfit), color: 'var(--green)' },
           { label: 'Avg Profit Margin', val: `${margin.toFixed(1)}%`, color: 'var(--teal)' },
         ].map(k => (
           <div key={k.label} className="kpi-card">
@@ -4339,7 +4429,7 @@ const InventoryManagement = ({ role }: { role?: string }) => {
                     <td className="r mono">${Number(row.unit_cost).toLocaleString()}</td>
                     <td className="r mono">${Number(row.target_sell_price||0).toLocaleString()}</td>
                     <td><span style={{ padding:'3px 8px', borderRadius:5, fontSize:11, fontWeight:600, background:sc.bg, color:sc.color }}>{row.status}</span></td>
-                    {canWrite && <td><div style={{ display:'flex', gap:4 }}><Btn variant="ghost" sm onClick={() => setEditRow(row)}><Ic n={I.edit} size={13} /></Btn>{role==='admin' && <Btn variant="ghost" sm onClick={() => handleDelete(row.id)}><Ic n={I.removed} size={13} /></Btn>}</div></td>}
+                    {canWrite && <td><div style={{ display:'flex', gap:4 }}><Btn variant="ghost" sm title="Edit" onClick={() => setEditRow(row)}><Ic n={I.edit} size={13} /></Btn>{role==='admin' && <Btn variant="ghost" sm title="Delete" onClick={() => handleDelete(row.id)}><Ic n={I.removed} size={13} /></Btn>}</div></td>}
                   </tr>
                 )
               })}

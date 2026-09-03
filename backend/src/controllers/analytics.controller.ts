@@ -77,7 +77,7 @@ export class AnalyticsController {
 
       let activityQuery = supabaseAdmin
         .from('daily_activity')
-        .select('emails_completed, calls_completed, texts_completed, email_replies, text_replies, calls_answered')
+        .select('emails_completed, calls_completed, texts_completed, email_replies, text_replies, calls_answered, calls_unanswered')
         .gte('entry_date', monthStartStr);
       if (!isAdmin) activityQuery = activityQuery.eq('pic_id', picId);
 
@@ -93,8 +93,9 @@ export class AnalyticsController {
         texts:          acc.texts          + (row.texts_completed  || 0),
         email_replies:  acc.email_replies  + (row.email_replies    || 0),
         text_replies:   acc.text_replies   + (row.text_replies     || 0),
-        calls_answered: acc.calls_answered + (row.calls_answered   || 0),
-      }), { emails: 0, calls: 0, texts: 0, email_replies: 0, text_replies: 0, calls_answered: 0 });
+        calls_answered:   acc.calls_answered   + (row.calls_answered   || 0),
+        calls_unanswered: acc.calls_unanswered + (row.calls_unanswered || 0),
+      }), { emails: 0, calls: 0, texts: 0, email_replies: 0, text_replies: 0, calls_answered: 0, calls_unanswered: 0 });
 
       res.json({
         success: true,

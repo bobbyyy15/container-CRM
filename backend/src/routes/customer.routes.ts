@@ -4,8 +4,9 @@ import { requireRoles } from '../middleware/auth.middleware';
 
 const router = Router();
 
-// Only admin and sales_manager can access customers
-router.use(requireRoles('admin', 'sales_manager'));
+// Customer Accounts is in the operations nav (see App.tsx NAV) alongside
+// admin/sales_manager, so it needs the same read access here.
+router.use(requireRoles('admin', 'sales_manager', 'operations'));
 
 router.get('/', CustomerController.listCustomers);
 
