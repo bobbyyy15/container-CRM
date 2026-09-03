@@ -8,7 +8,34 @@ const GoogleSheetExportSchema = z.object({
           .min(1, 'There is nothing to export.'),
 });
 
+const GoogleWorkbookExportSchema = z.object({
+  title: z.string({ error: 'A sheet title is required.' }).min(1, 'A sheet title is required.').max(200),
+  tabs:  z.array(z.object({
+    name: z.string().min(1),
+    rows: z.array(z.record(z.string(), z.any())),
+  }), { error: 'There is nothing to export.' }).min(1, 'There is nothing to export.'),
+});
+
 export class ExportController {
+
+  // POST /api/v1/export/google-workbook -- multi-tab, used by the Monthly Report
+  static async toGoogleWorkbook(req: Request, res: Response) {
+    try {
+      const parsed = GoogleWorkbookExportSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: { message: parsed.error.issues[0].message } });
+      }
+
+      const data = await ExportService.createGoogleWorkbook(
+        req.auth!.user.id,
+        parsed.data.title,
+        parsed.data.tabs,
+      );
+      res.json({ success: true, data });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: { message: err.message } });
+    }
+  }
 
   // POST /api/v1/export/google-sheet
   static async toGoogleSheet(req: Request, res: Response) {

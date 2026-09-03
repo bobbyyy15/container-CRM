@@ -19,6 +19,25 @@ export class ExportService {
     if (rows.length > MAX_ROWS) {
       throw new Error(`This export has ${rows.length} rows, which is over the ${MAX_ROWS} row limit. Filter it down or use the CSV export instead.`);
     }
+    return this.createGoogleWorkbook(actorId, title, [{ name: 'Export', rows }]);
+  }
+
+  /**
+   * Multi-tab variant, used by the Monthly Report so each section lands on its own
+   * tab instead of being flattened into one grid.
+   */
+  static async createGoogleWorkbook(
+    actorId: string,
+    title: string,
+    tabs: { name: string; rows: Record<string, any>[] }[],
+  ) {
+    const populated = tabs.filter(t => t.rows.length > 0);
+    if (!populated.length) throw new Error('There is nothing to export.');
+
+    const total = populated.reduce((n, t) => n + t.rows.length, 0);
+    if (total > MAX_ROWS) {
+      throw new Error(`This export has ${total} rows, which is over the ${MAX_ROWS} row limit. Narrow it down or use the CSV export instead.`);
+    }
 
     const googleConfig = getGoogleOAuthConfig();
 
@@ -35,17 +54,22 @@ export class ExportService {
     const authClient = new google.auth.OAuth2(googleConfig.clientId, googleConfig.clientSecret, googleConfig.redirectUri);
     authClient.setCredentials({ refresh_token: credential.refresh_token });
 
-    // Flatten to a header row plus value rows, stringifying so Sheets doesn't reinterpret
-    // things like reference ids or phone numbers as numbers/dates.
-    const headers = Object.keys(rows[0]);
-    const values = [
-      headers,
-      ...rows.map(row => headers.map(h => {
-        const v = row[h];
-        if (v === null || v === undefined) return '';
-        return typeof v === 'object' ? JSON.stringify(v) : String(v);
-      })),
-    ];
+    // Flatten each tab to a header row plus value rows, stringifying so Sheets doesn't
+    // reinterpret things like reference ids or phone numbers as numbers/dates.
+    const toValues = (rows: Record<string, any>[]) => {
+      const headers = Object.keys(rows[0]);
+      return [
+        headers,
+        ...rows.map(row => headers.map(h => {
+          const v = row[h];
+          if (v === null || v === undefined) return '';
+          return typeof v === 'object' ? JSON.stringify(v) : String(v);
+        })),
+      ];
+    };
+
+    // Sheet titles can't contain : \ / ? * [ ] and are capped at 100 chars.
+    const safeName = (name: string) => name.replace(/[:\\/?*[\]]/g, ' ').slice(0, 90) || 'Sheet';
 
     const sheets = google.sheets({ version: 'v4', auth: authClient });
 
@@ -53,37 +77,44 @@ export class ExportService {
       const created = await sheets.spreadsheets.create({
         requestBody: {
           properties: { title },
-          sheets: [{ properties: { title: 'Export', gridProperties: { frozenRowCount: 1 } } }],
+          sheets: populated.map(t => ({
+            properties: { title: safeName(t.name), gridProperties: { frozenRowCount: 1 } },
+          })),
         },
       });
 
       const spreadsheetId = created.data.spreadsheetId!;
 
-      await sheets.spreadsheets.values.update({
+      await sheets.spreadsheets.values.batchUpdate({
         spreadsheetId,
-        range: 'Export!A1',
-        valueInputOption: 'RAW',
-        requestBody: { values },
+        requestBody: {
+          valueInputOption: 'RAW',
+          data: populated.map(t => ({
+            range: `'${safeName(t.name)}'!A1`,
+            values: toValues(t.rows),
+          })),
+        },
       });
 
-      // Bold the header row so the sheet is readable on open.
+      // Bold each tab's header row so the workbook is readable on open.
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
         requestBody: {
-          requests: [{
+          requests: created.data.sheets!.map(s => ({
             repeatCell: {
-              range: { sheetId: created.data.sheets![0].properties!.sheetId!, startRowIndex: 0, endRowIndex: 1 },
+              range: { sheetId: s.properties!.sheetId!, startRowIndex: 0, endRowIndex: 1 },
               cell: { userEnteredFormat: { textFormat: { bold: true } } },
               fields: 'userEnteredFormat.textFormat.bold',
             },
-          }],
+          })),
         },
       });
 
       return {
         spreadsheetId,
         url: created.data.spreadsheetUrl ?? `https://docs.google.com/spreadsheets/d/${spreadsheetId}`,
-        rowCount: rows.length,
+        rowCount: total,
+        tabs: populated.length,
         googleEmail: credential.google_email,
       };
     } catch (err: any) {

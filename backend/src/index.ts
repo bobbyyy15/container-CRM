@@ -18,6 +18,7 @@ import notificationRoutes from './routes/notification.routes';
 import inventoryRoutes from './routes/inventory.routes';
 import settingsRoutes from './routes/settings.routes';
 import exportRoutes from './routes/export.routes';
+import reportRoutes from './routes/report.routes';
 
 import { requireAuth } from './middleware/auth.middleware';
 import { requestContext } from './middleware/request-context.middleware';
@@ -59,6 +60,7 @@ app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/inventory',     inventoryRoutes);
 app.use('/api/v1/settings',      settingsRoutes);
 app.use('/api/v1/export',        exportRoutes);
+app.use('/api/v1/reports',       reportRoutes);
 
 
 // Start Server
