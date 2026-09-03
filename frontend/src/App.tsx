@@ -1070,7 +1070,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
       {/* Greeting */}
       <div className="greeting-bar">
         <div>
-          <p className="greeting-title">{timeGreeting}, {userName}</p>
+          <p className="greeting-title">{timeGreeting}, {userName}!</p>
           <p className="greeting-sub">Here's what's happening across your sales pipeline {dateRange.toLowerCase()}.</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
