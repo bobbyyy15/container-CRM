@@ -213,6 +213,28 @@ const downloadPdfDocument = async (opts: {
 
 const titleCase = (s: string) => s.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 
+// ─── Persisted UI preferences ─────────────────────────────────────────────────
+// localStorage throws rather than no-ops in some contexts (Safari private mode,
+// blocked third-party storage), so every access is guarded -- a preference is
+// never worth crashing a screen over.
+type DensityOption = 'Compact' | 'Standard' | 'Comfortable'
+const DENSITY_KEY = 'sheetDensity'
+
+const readDensity = (): DensityOption => {
+  try {
+    const stored = localStorage.getItem(DENSITY_KEY)
+    return stored === 'Compact' || stored === 'Comfortable' || stored === 'Standard'
+      ? stored
+      : 'Standard'
+  } catch {
+    return 'Standard'
+  }
+}
+
+const writeDensity = (value: DensityOption) => {
+  try { localStorage.setItem(DENSITY_KEY, value) } catch { /* preference is best-effort */ }
+}
+
 const exportToPDF = (data: any[], filename: string) => {
   if (!data || !data.length) return toast('There is nothing to export.', 'error')
   void downloadPdfDocument({
@@ -1980,7 +2002,13 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   }
   const visibleCols = VIEW_FIELDS[tab] ? COLS.filter(c => VIEW_FIELDS[tab]!.includes(c.field)) : COLS
 
-  const [density, setDensity] = useState<'Compact' | 'Standard' | 'Comfortable'>('Standard')
+  // Row density is a personal preference, so it outlives the component. Shared by
+  // the Prospect and Warm Lead views, which are the same sheet in two modes.
+  const [density, setDensityState] = useState<DensityOption>(() => readDensity())
+  const setDensity = (value: DensityOption) => {
+    writeDensity(value)
+    setDensityState(value)
+  }
   const rowHeight = density === 'Compact' ? 30 : density === 'Comfortable' ? 46 : 38
 
   return (
