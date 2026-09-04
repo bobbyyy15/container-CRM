@@ -289,7 +289,31 @@ const run = async () => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${strangerSignedIn.session.access_token}` },
   });
-  if (crossPicBackfill.ok) throw new Error('Cross-PIC Inquiry to Warm Lead backfill was not rejected');
+  // Assert the specific code, not just "not 2xx" -- a 500 from an unexpected crash would
+  // have satisfied a bare !ok check while hiding a real failure. Owning the wrong PIC is
+  // an authorization failure and must read as one.
+  if (crossPicBackfill.status !== 403) {
+    throw new Error(`Cross-PIC Inquiry backfill should return 403, got ${crossPicBackfill.status}`);
+  }
+
+  // A missing Inquiry is a 404, not a malformed request.
+  const missingInquiryBackfill = await fetch(`${apiBase}/leads/inquiries/${randomUUID()}/add-to-warm-leads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+  });
+  if (missingInquiryBackfill.status !== 404) {
+    throw new Error(`Backfill of an unknown Inquiry should return 404, got ${missingInquiryBackfill.status}`);
+  }
+
+  // A malformed id must return one readable message, not a serialised ZodError.
+  const malformedBackfill = await fetch(`${apiBase}/leads/inquiries/not-a-uuid/add-to-warm-leads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+  });
+  const malformedBody = await malformedBackfill.json().catch(() => ({} as any));
+  if (malformedBackfill.status !== 400 || typeof malformedBody?.error?.message !== 'string' || malformedBody.error.message.trim().startsWith('[')) {
+    throw new Error(`Malformed Inquiry id should return a 400 with a readable message, got ${malformedBackfill.status}: ${JSON.stringify(malformedBody)}`);
+  }
 
   const backfilled = await request(token, `/leads/inquiries/${ids.standaloneInquiry}/add-to-warm-leads`, { method: 'POST' });
   ids.backfilledWarmLead = backfilled.data.id;

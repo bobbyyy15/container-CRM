@@ -256,12 +256,21 @@ export class LeadController {
 
   static async addInquiryToWarmLeads(req: Request, res: Response) {
     try {
-      const { inquiryId } = AddInquiryToWarmLeadsSchema.parse({ inquiryId: req.params.entityId });
+      // .parse() would surface the raw ZodError JSON to the caller; every other
+      // endpoint returns a single readable message.
+      const parsed = AddInquiryToWarmLeadsSchema.safeParse({ inquiryId: req.params.entityId });
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'A valid inquiry id is required.' },
+        });
+      }
+
       const picId = requirePicId(req, res);
       if (!picId) return;
 
       const warmLead = await LeadService.addInquiryToWarmLeads(
-        inquiryId,
+        parsed.data.inquiryId,
         req.auth!.user.id,
         picId,
       );
@@ -271,7 +280,15 @@ export class LeadController {
         message: 'Inquiry added to Warm Leads',
       });
     } catch (error: any) {
-      res.status(400).json({ success: false, error: { message: error.message } });
+      // Failing to own the inquiry is an authorization error, not a malformed request:
+      // returning 400 made it indistinguishable from a bad payload, and inconsistent
+      // with the 403 requireRoles already returns for procurement/operations. Message
+      // matching follows the same pattern as inventory.controller.
+      const message = String(error?.message ?? 'Failed to add the inquiry to Warm Leads.');
+      const status = /not found/i.test(message) ? 404
+        : /owned by your own PIC|active Admin or Sales Manager/i.test(message) ? 403
+        : 400;
+      res.status(status).json({ success: false, error: { message } });
     }
   }
 
