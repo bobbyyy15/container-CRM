@@ -150,11 +150,13 @@ export const preloadAppData = () => {
       { key: 'leads:inquiries:active', url: '/leads/inquiries?limit=500&status=active' },
       { key: 'deals:quotations', url: '/deals/quotations' },
       { key: 'deals:sales', url: '/deals/sales' },
-      { key: 'customers:All', url: '/customers?status=All&search=' },
+      { key: 'customers:All::all', url: '/customers?status=All&search=' },
+      { key: 'contracts:All Statuses:All Pickup Statuses:', url: '/contracts?status=All+Statuses&pickStatus=All+Pickup+Statuses&search=' },
+      { key: 'inventory:{}', url: '/inventory' },
       { key: 'analytics:dashboard', url: '/analytics/dashboard' },
       { key: 'inventory:summary', url: '/inventory/summary' },
-      { key: 'catalog:sizes', url: '/catalog/sizes' },
-      { key: 'catalog:conditions', url: '/catalog/conditions' },
+      { key: 'catalog:/catalog/sizes', url: '/catalog/sizes' },
+      { key: 'catalog:/catalog/conditions', url: '/catalog/conditions' },
       { key: 'pics:all', url: '/pics' },
     ]
 

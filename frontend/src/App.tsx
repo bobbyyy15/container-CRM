@@ -585,31 +585,43 @@ const useNotifications = (revision = 0) => {
   return { notifications: data, unread, refresh }
 }
 
+const mapContractRow = (c: any) => ({
+  id: c.id,
+  ref: c.contract_number,
+  co: c.company_name,
+  contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
+  category: c.items && c.items.length > 0 ? c.items[0].description.split(' ')[0] : '-',
+  size: c.items && c.items.length > 0 ? c.items[0].description : '-',
+  qty: c.allocated_quantity ?? c.total_units,
+  value: Number(c.revenue),
+  pickup: c.pickup_date ? new Date(c.pickup_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Unscheduled',
+  pickupDateRaw: c.pickup_date ? String(c.pickup_date).slice(0, 10) : '',
+  pickStatus: c.pickup_status,
+  storedPickStatus: c.stored_pickup_status || c.pickup_status,
+  status: c.contract_status,
+  pic: c.pic_name || '-',
+  sale: c.sale_number,
+  inventory: c.inventory_label || 'Legacy contract — no stock allocation',
+})
+
 const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses', search = '', revision = 0) => {
-  const [data, setData] = useState<any[]>([]);
+  const cacheKey = `contracts:${status}:${pickStatus}:${search}`
   const liveRevision = useRealtimeRevision(['contracts', 'deals']);
+  const [data, setData] = useState<any[]>(() => {
+    const cached = getFromCache<any[]>(cacheKey)
+    return cached ? cached.map(mapContractRow) : []
+  });
+
   useEffect(() => {
-    api.get('/contracts', { params: { status, pickStatus, search } }).then(res => {
-      setData((res.data.data || []).map((c: any) => ({
-        id: c.id,
-        ref: c.contract_number,
-        co: c.company_name,
-        contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
-        category: c.items && c.items.length > 0 ? c.items[0].description.split(' ')[0] : '-',
-        size: c.items && c.items.length > 0 ? c.items[0].description : '-',
-        qty: c.allocated_quantity ?? c.total_units,
-        value: Number(c.revenue),
-        pickup: c.pickup_date ? new Date(c.pickup_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Unscheduled',
-        pickupDateRaw: c.pickup_date ? String(c.pickup_date).slice(0, 10) : '',
-        pickStatus: c.pickup_status,
-        storedPickStatus: c.stored_pickup_status || c.pickup_status,
-        status: c.contract_status,
-        pic: c.pic_name || '-',
-        sale: c.sale_number,
-        inventory: c.inventory_label || 'Legacy contract — no stock allocation',
-      })));
-    }).catch(console.error);
+    let cancelled = false;
+    fetchCached(cacheKey, () => api.get('/contracts', { params: { status, pickStatus, search } }).then(res => res.data.data || []), 60_000)
+      .then(raw => {
+        if (!cancelled) setData((raw || []).map(mapContractRow));
+      })
+      .catch(console.error);
+    return () => { cancelled = true; };
   }, [status, pickStatus, search, revision, liveRevision]);
+
   return data;
 }
 
@@ -659,13 +671,20 @@ const useProspects = (revision = 0, status: 'active' | 'converted' | 'removed' |
 }
 
 const useInventory = (filters: Record<string, string> = {}, revision = 0) => {
-  const [data, setData] = useState<any[]>([])
+  const cacheKey = `inventory:${JSON.stringify(filters)}`
   const liveRevision = useRealtimeRevision(['inventory', 'contracts'])
+  const [data, setData] = useState<any[]>(() => getFromCache<any[]>(cacheKey) ?? [])
+
   useEffect(() => {
-    api.get('/inventory', { params: filters }).then(res => {
-      if (res.data.success) setData(res.data.data || [])
-    }).catch(console.error)
+    let cancelled = false
+    fetchCached(cacheKey, () => api.get('/inventory', { params: filters }).then(res => res.data.data || []), 60_000)
+      .then(fresh => {
+        if (!cancelled) setData(fresh)
+      })
+      .catch(console.error)
+    return () => { cancelled = true }
   }, [JSON.stringify(filters), revision, liveRevision])
+
   return data
 }
 
