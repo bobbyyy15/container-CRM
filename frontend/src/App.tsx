@@ -4346,11 +4346,10 @@ const RemovedSheet = () => {
 
   const handleRestore = async (row: any) => {
     const label = row.contact ? `${row.contact} (${row.co || 'Company'})` : (row.co || row.email || row.phone || 'this entry')
-    const confirmed = await notify.confirm({
+    const { confirmed } = await askConfirm({
       title: 'Restore Removed Record',
       message: `Are you sure you want to restore ${label}? They will be unblocked and restored back to their active pipeline stage.`,
       confirmLabel: 'Restore Record',
-      variant: 'primary',
     })
     if (!confirmed) return
 
