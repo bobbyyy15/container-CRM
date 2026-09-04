@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { DealService } from '../services/deal.service';
-import { CreateQuotationSchema, UpdateQuotationStatusSchema, ConvertToSaleSchema, CreateManualSaleSchema } from '../schemas/deal.schema';
+import { CreateQuotationSchema, UpdateQuotationStatusSchema, ConvertToSaleSchema, CreateManualSaleSchema, UpdateSaleStatusSchema } from '../schemas/deal.schema';
 
 // A record created with no PIC stamped on it is invisible under the pic_id-based data
 // silos (NULL never equals NULL for row-ownership checks), so it becomes unreachable the
@@ -111,6 +111,77 @@ export class DealController {
       const userId = req.auth!.user.id;
       const sale = await DealService.convertToSale(id, payload, userId);
       res.status(201).json({ success: true, data: sale });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async updateSaleStatus(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const { status } = UpdateSaleStatusSchema.parse(req.body);
+
+      const { data: existing, error: lookupError } = await supabaseAdmin
+        .from('sales')
+        .select('id, pic_id')
+        .eq('id', id)
+        .maybeSingle();
+      if (lookupError) throw lookupError;
+      if (!existing) return res.status(404).json({ success: false, error: { message: 'Sale not found.' } });
+      if (req.auth?.profile.role === 'sales_manager'
+        && (!req.auth.profile.pic_id || existing.pic_id !== req.auth.profile.pic_id)) {
+        return res.status(403).json({ success: false, error: { message: 'You can only update Sales owned by your own PIC.' } });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('sales')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select('*, companies(*), pics(name)')
+        .single();
+
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async deleteSale(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+
+      const { data: existing, error: lookupError } = await supabaseAdmin
+        .from('sales')
+        .select('id, pic_id')
+        .eq('id', id)
+        .maybeSingle();
+      if (lookupError) throw lookupError;
+      if (!existing) return res.status(404).json({ success: false, error: { message: 'Sale not found.' } });
+      if (req.auth?.profile.role === 'sales_manager'
+        && (!req.auth.profile.pic_id || existing.pic_id !== req.auth.profile.pic_id)) {
+        return res.status(403).json({ success: false, error: { message: 'You can only delete Sales owned by your own PIC.' } });
+      }
+
+      const { count: contractCount, error: contractError } = await supabaseAdmin
+        .from('contracts')
+        .select('id', { count: 'exact', head: true })
+        .eq('sale_id', id);
+      if (contractError) throw contractError;
+      if ((contractCount ?? 0) > 0) {
+        return res.status(409).json({
+          success: false,
+          error: { message: 'This Sale has a Contract and cannot be deleted.' },
+        });
+      }
+
+      const { error } = await supabaseAdmin
+        .from('sales')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      res.json({ success: true, message: 'Sale deleted successfully.' });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });
     }

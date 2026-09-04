@@ -9,7 +9,7 @@ import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import type { Screen, BadgeStatus } from '../../app/types'
 import AssignPicModal from '../../components/ui/AssignPicModal'
 const ProspectImportDialog = lazy(() => import('../import/ProspectImportDialog'))
-import { NewWarmLeadDialog, NewProspectDialog, NewInquiryDialog, type WarmLeadOption } from '../pipeline/PipelineDialogs'
+import { NewWarmLeadDialog, NewProspectDialog, NewInquiryDialog, usePics, type WarmLeadOption } from '../pipeline/PipelineDialogs'
 import { mapPipelineRow } from '../../hooks/mapPipelineRow'
 import { useProspects } from '../../hooks/useProspects'
 import { useWarmLeads } from '../../hooks/useWarmLeads'
@@ -33,10 +33,49 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [inquiryWarmLeadId, setInquiryWarmLeadId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
   const [showAssignPic, setShowAssignPic] = useState(false)
+  const pics = usePics()
+  const [localOverrides, setLocalOverrides] = useState<Record<string, Record<string, any>>>({})
+  const [editingCell, setEditingCell] = useState<{
+    r: number
+    c: number
+    rowId: string
+    field: string
+    value: string
+    originalValue: string
+  } | null>(null)
 
   const _prospectsData = useProspects(revision, mode === 'prospect' ? status : 'active', mode === 'prospect')
   const _warmData = useWarmLeads(revision, mode === 'warm')
   const prospectsData = mode === 'warm' ? _warmData : _prospectsData
+
+  const commitCellEdit = async (rowId: string, field: string, newValue: string, oldValue: string) => {
+    setEditingCell(null)
+    if (newValue === oldValue) return
+    setLocalOverrides(previous => ({
+      ...previous,
+      [rowId]: { ...(previous[rowId] || {}), [field]: newValue },
+    }))
+    try {
+      await api.patch(`/leads/${mode === 'prospect' ? 'prospect' : 'warm_lead'}/${rowId}/cell`, {
+        field,
+        value: newValue,
+      })
+      toast('Saved', 'success')
+    } catch (error: any) {
+      toast(error.response?.data?.error?.message ?? 'Failed to update cell', 'error')
+      setLocalOverrides(previous => {
+        const next = { ...previous }
+        if (next[rowId]) {
+          const rowOverrides = { ...next[rowId] }
+          delete rowOverrides[field]
+          if (Object.keys(rowOverrides).length) next[rowId] = rowOverrides
+          else delete next[rowId]
+        }
+        return next
+      })
+      setRevision(value => value + 1)
+    }
+  }
 
   const handleConvert = async (id: string) => {
     try {
@@ -102,7 +141,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 
   const COLS = [
     { key: 'A', label: 'Date Added', field: 'added', w: 108 },
-    { key: 'B', label: 'PIC', field: 'pic', w: 56 },
+    { key: 'B', label: 'PIC', field: 'pic', w: 70 },
     ...(mode === 'warm' ? [{ key: 'B2', label: 'Entry Path', field: 'entryPath', w: 112 }] : []),
     { key: 'C', label: 'Category', field: 'cat', w: 90, badge: true },
     { key: 'D', label: 'SMS Deliv.', field: 'sms', w: 100, badge: true },
@@ -121,8 +160,14 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     { key: 'Q', label: 'Address', field: 'address', w: 260 },
   ]
 
-  const getVal = (row: ReturnType<typeof mapPipelineRow>, field: string): string =>
-    (row as any)[field] || ''
+  const getVal = (row: ReturnType<typeof mapPipelineRow>, field: string): string => {
+    if (localOverrides[row.id]?.[field] !== undefined) return localOverrides[row.id][field]
+    return (row as any)[field] || ''
+  }
+
+  const isFieldEditable = (field: string) =>
+    !['added', 'entryPath'].includes(field)
+    && (mode === 'prospect' || !['cat', 'sms', 'email', 'territory'].includes(field))
 
   // Each tab is a real column subset of COLS rather than a decorative label --
   // null means "show everything."
@@ -175,6 +220,44 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     return () => window.removeEventListener('mouseup', stop)
   }, [])
 
+  useEffect(() => {
+    if (!bounds || editingCell) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
+
+      if (event.key === 'Enter' || event.key === 'F2') {
+        if (bounds.r1 === bounds.r2 && bounds.c1 === bounds.c2) {
+          const row = filtered[bounds.r1]
+          const col = visibleCols[bounds.c1]
+          if (row && col && isFieldEditable(col.field)) {
+            event.preventDefault()
+            const value = getVal(row, col.field)
+            setEditingCell({ r: bounds.r1, c: bounds.c1, rowId: row.id, field: col.field, value: String(value || ''), originalValue: String(value || '') })
+          }
+        }
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        const row = Math.min(filtered.length - 1, bounds.r2 + 1)
+        setAnchor({ r: row, c: bounds.c1 }); setFocusCell({ r: row, c: bounds.c1 })
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        const row = Math.max(0, bounds.r1 - 1)
+        setAnchor({ r: row, c: bounds.c1 }); setFocusCell({ r: row, c: bounds.c1 })
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        const column = Math.min(visibleCols.length - 1, bounds.c2 + 1)
+        setAnchor({ r: bounds.r1, c: column }); setFocusCell({ r: bounds.r1, c: column })
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        const column = Math.max(0, bounds.c1 - 1)
+        setAnchor({ r: bounds.r1, c: column }); setFocusCell({ r: bounds.r1, c: column })
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [bounds, editingCell, filtered, visibleCols, localOverrides])
+
   // Ctrl/Cmd+C over the grid copies the selected block, not the whole page.
   useEffect(() => {
     if (!bounds) return
@@ -196,7 +279,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     }
     window.addEventListener('keydown', onCopy)
     return () => window.removeEventListener('keydown', onCopy)
-  }, [bounds, filtered, visibleCols])
+  }, [bounds, filtered, visibleCols, localOverrides])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -393,15 +476,32 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                 {visibleCols.map((col, ci) => {
                   const val = getVal(row, col.field)
                   const picked = inSelection(ri, ci)
+                  const isEditing = editingCell?.r === ri && editingCell.c === ci
+                  const isEditable = isFieldEditable(col.field)
                   return (
                     <div
                       key={col.key}
-                      onMouseDown={event => { event.preventDefault(); beginSelect(ri, ci, event.shiftKey) }}
-                      onMouseEnter={() => { if (draggingRef.current) setFocusCell({ r: ri, c: ci }) }}
+                      onMouseDown={event => {
+                        if (isEditing) return
+                        event.preventDefault()
+                        beginSelect(ri, ci, event.shiftKey)
+                      }}
+                      onMouseEnter={event => {
+                        if (draggingRef.current && anchor && !isEditing) {
+                          setFocusCell({ r: ri, c: event.shiftKey ? ci : anchor.c })
+                        }
+                      }}
+                      onDoubleClick={event => {
+                        event.stopPropagation()
+                        if (!isEditable) return
+                        setEditingCell({ r: ri, c: ci, rowId: row.id, field: col.field, value: String(val || ''), originalValue: String(val || '') })
+                      }}
+                      title={isEditable ? 'Double-click or press Enter to edit' : undefined}
                       style={{
-                        minWidth: col.w, width: col.w, padding: '0 12px', height: rowHeight,
-                        display: 'flex', alignItems: 'center', overflow: 'hidden',
-                        cursor: 'cell', userSelect: 'none',
+                        minWidth: col.w, width: col.w, padding: isEditing ? 0 : '0 12px', height: rowHeight,
+                        display: 'flex', alignItems: 'center', overflow: isEditing ? 'visible' : 'hidden',
+                        cursor: isEditing ? 'text' : isEditable ? 'cell' : 'default', userSelect: isEditing ? 'auto' : 'none',
+                        position: 'relative',
                         background: picked ? 'rgba(49,94,246,0.14)' : undefined,
                         // Outline the block edges so a range reads as one selection.
                         borderRight: picked && bounds && ci === bounds.c2 ? '1px solid var(--brand)' : '1px solid var(--border-s)',
@@ -410,7 +510,81 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                         borderBottom: picked && bounds && ri === bounds.r2 ? '1px solid var(--brand)' : undefined,
                       }}
                     >
-                      {col.field === 'contact' && row.contactMissing ? (
+                      {isEditing ? (
+                        <div
+                          style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'var(--ws, #ffffff)', display: 'flex', alignItems: 'center', boxShadow: '0 0 0 2px var(--brand, #315EF6)' }}
+                          onClick={event => event.stopPropagation()}
+                          onMouseDown={event => event.stopPropagation()}
+                        >
+                          {col.field === 'cat' ? (
+                            <select
+                              autoFocus className="inp" value={editingCell.value}
+                              style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 6px', fontSize: 12, background: 'transparent' }}
+                              onChange={event => setEditingCell({ ...editingCell, value: event.target.value })}
+                              onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
+                              onKeyDown={event => { if (event.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue); if (event.key === 'Escape') setEditingCell(null) }}
+                            >
+                              <option value="Proceed">Proceed</option><option value="Removed">Removed</option>
+                            </select>
+                          ) : col.field === 'sms' ? (
+                            <select
+                              autoFocus className="inp" value={editingCell.value}
+                              style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 6px', fontSize: 12, background: 'transparent' }}
+                              onChange={event => setEditingCell({ ...editingCell, value: event.target.value })}
+                              onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
+                              onKeyDown={event => { if (event.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue); if (event.key === 'Escape') setEditingCell(null) }}
+                            >
+                              <option value="">—</option><option value="Call/Text">Call/Text</option><option value="Calls Only">Calls Only</option><option value="Text Only">Text Only</option>
+                            </select>
+                          ) : col.field === 'email' ? (
+                            <select
+                              autoFocus className="inp" value={editingCell.value}
+                              style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 6px', fontSize: 12, background: 'transparent' }}
+                              onChange={event => setEditingCell({ ...editingCell, value: event.target.value })}
+                              onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
+                              onKeyDown={event => { if (event.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue); if (event.key === 'Escape') setEditingCell(null) }}
+                            >
+                              {['Available', 'Unavailable', 'Mail Delivery Report', 'Bounced', 'Hard Bounce', 'Soft Bounce', 'Unsubscribed', 'Spam Complaint'].map(option => <option key={option} value={option}>{option}</option>)}
+                            </select>
+                          ) : col.field === 'pic' ? (
+                            <select
+                              autoFocus className="inp" value={editingCell.value}
+                              style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 6px', fontSize: 12, background: 'transparent' }}
+                              onChange={event => setEditingCell({ ...editingCell, value: event.target.value })}
+                              onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
+                              onKeyDown={event => { if (event.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue); if (event.key === 'Escape') setEditingCell(null) }}
+                            >
+                              <option value="">Unassigned</option>
+                              {pics.map(pic => <option key={pic.id} value={pic.name}>{pic.name}</option>)}
+                            </select>
+                          ) : (
+                            <input
+                              autoFocus className="inp" value={editingCell.value}
+                              style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 8px', fontSize: 12.5, background: 'transparent' }}
+                              onChange={event => setEditingCell({ ...editingCell, value: event.target.value })}
+                              onFocus={event => event.target.select()}
+                              onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
+                              onKeyDown={event => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault()
+                                  commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                  if (ri < filtered.length - 1) { setAnchor({ r: ri + 1, c: ci }); setFocusCell({ r: ri + 1, c: ci }) }
+                                } else if (event.key === 'Tab') {
+                                  event.preventDefault()
+                                  commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                  const nextColumnIndex = event.shiftKey ? Math.max(0, ci - 1) : Math.min(visibleCols.length - 1, ci + 1)
+                                  setAnchor({ r: ri, c: nextColumnIndex }); setFocusCell({ r: ri, c: nextColumnIndex })
+                                  const nextColumn = visibleCols[nextColumnIndex]
+                                  if (nextColumn && isFieldEditable(nextColumn.field)) {
+                                    const nextValue = String(getVal(row, nextColumn.field) || '')
+                                    setEditingCell({ r: ri, c: nextColumnIndex, rowId: row.id, field: nextColumn.field, value: nextValue, originalValue: nextValue })
+                                  }
+                                } else if (event.key === 'Escape') setEditingCell(null)
+                              }}
+                            />
+                          )}
+                        </div>
+                      ) : col.field === 'contact' && row.contactMissing ? (
                         <span style={{ fontSize: 11.5, color: 'var(--amber, #D97706)', fontStyle: 'italic' }}>No contact yet</span>
                       ) : col.badge && val ? (
                         <Badge status={val as BadgeStatus} />

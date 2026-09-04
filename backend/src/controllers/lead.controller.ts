@@ -12,6 +12,7 @@ import {
   BulkRemovedEntriesSchema,
   ValidateInquiryTicketSchema,
   AddInquiryToWarmLeadsSchema,
+  UpdateLeadCellSchema,
 } from '../schemas/lead.schema';
 import { supabaseAdmin } from '../config/supabase';
 
@@ -423,6 +424,37 @@ export class LeadController {
       res.json({ success: true, data: updated });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async updateLeadCell(req: Request, res: Response) {
+    try {
+      const payload = UpdateLeadCellSchema.parse({
+        stage: req.params.stage,
+        entityId: req.params.entityId,
+        field: req.body.field,
+        value: req.body.value,
+      });
+
+      const isAdmin = req.auth?.profile.role === 'admin';
+      const picId = isAdmin ? req.auth?.profile.pic_id : requirePicId(req, res);
+      if (!isAdmin && !picId) return;
+
+      const result = await LeadService.updateLeadCell(
+        payload.stage,
+        payload.entityId,
+        payload.field,
+        payload.value,
+        req.auth!.user.id,
+        picId,
+        isAdmin,
+      );
+
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      const message = String(error?.message ?? 'Failed to update the record.');
+      const status = /not found or unauthorized/i.test(message) ? 403 : 400;
+      res.status(status).json({ success: false, error: { message } });
     }
   }
 }

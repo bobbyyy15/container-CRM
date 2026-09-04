@@ -34,7 +34,12 @@ export const CreateManualSaleSchema = z.object({
   country: z.string().trim().max(100).optional(),
 });
 
+export const UpdateSaleStatusSchema = z.object({
+  status: z.enum(['Pending', 'Won', 'Cancelled']),
+});
+
 export type CreateQuotationPayload = z.infer<typeof CreateQuotationSchema>;
 export type ConvertToSalePayload = z.infer<typeof ConvertToSaleSchema>;
 export type UpdateQuotationStatusPayload = z.infer<typeof UpdateQuotationStatusSchema>;
 export type CreateManualSalePayload = z.infer<typeof CreateManualSaleSchema>;
+export type UpdateSaleStatusPayload = z.infer<typeof UpdateSaleStatusSchema>;

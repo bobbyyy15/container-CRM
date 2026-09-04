@@ -72,6 +72,7 @@ const InquiryList = () => {
       {showNewInquiry && (
         <NewInquiryDialog
           warmLeads={warmLeads as WarmLeadOption[]}
+          initialIdentity={lookup.trim() || undefined}
           onClose={() => setShowNewInquiry(false)}
           onSaved={() => { setShowNewInquiry(false); setRevision(value => value + 1); }}
         />

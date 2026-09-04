@@ -127,6 +127,39 @@ export const ValidateInquiryTicketSchema = z.object({
   path: ['rejectionReason'],
 });
 
+export const UpdateLeadCellSchema = z.object({
+  stage: z.enum(['prospect', 'warm_lead']),
+  entityId: z.string().uuid(),
+  field: z.enum([
+    'company',
+    'contact',
+    'phone',
+    'phone2',
+    'emailAddr',
+    'email2',
+    'country',
+    'state',
+    'city',
+    'address',
+    'industry',
+    'territory',
+    'cat',
+    'sms',
+    'email',
+    'pic',
+    'notes',
+  ]),
+  value: z.string().nullable().optional(),
+}).superRefine((data, context) => {
+  if (data.stage === 'warm_lead' && ['cat', 'sms', 'email', 'territory'].includes(data.field)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['field'],
+      message: `${data.field} is not editable for Warm Leads`,
+    });
+  }
+});
+
 export type CreateInquiryPayload = z.infer<typeof CreateInquirySchema>;
 export type CreateManualWarmLeadPayload = z.infer<typeof CreateManualWarmLeadSchema>;
 export type CreateManualInquiryPayload = z.infer<typeof CreateManualInquirySchema>;
@@ -134,3 +167,4 @@ export type CreateManualProspectPayload = z.infer<typeof CreateManualProspectSch
 export type AssignPicToEntryPayload = z.infer<typeof AssignPicToEntrySchema>;
 export type BulkRemovedEntriesPayload = z.infer<typeof BulkRemovedEntriesSchema>;
 export type ValidateInquiryTicketPayload = z.infer<typeof ValidateInquiryTicketSchema>;
+export type UpdateLeadCellPayload = z.infer<typeof UpdateLeadCellSchema>;

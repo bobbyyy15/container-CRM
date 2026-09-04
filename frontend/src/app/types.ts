@@ -49,6 +49,8 @@ export type BadgeStatus =
   | 'Text Only' | 'Mail Delivery Report' | 'Overdue' | 'Scheduled' | 'Confirmed'
   | 'Picked Up' | 'Accepted' | 'Rejected' | 'Under Review' | 'Awaiting Response'
   | 'Pending Validation' | 'Validation Rejected' | 'Quotation Created' | 'Quotation Rejected'
+  | 'Available' | 'Unavailable' | 'Bounced' | 'Hard Bounce' | 'Soft Bounce'
+  | 'Unsubscribed' | 'Spam Complaint'
 
 export type DetailField = { label: string; value: React.ReactNode }
 

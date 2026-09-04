@@ -3,7 +3,7 @@ import { api } from '../../lib/api'
 import { toast, askConfirm, askReason } from '../../lib/notify'
 import { Ic, I } from '../../components/ui/icons'
 import Btn from '../../components/ui/Button'
-import { Badge, ChipPIC } from '../../components/ui/primitives'
+import { Badge, ChipPIC, StatusSmartChip } from '../../components/ui/primitives'
 import ExportMenu from '../../components/ui/ExportMenu'
 import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import type { Screen, BadgeStatus } from '../../app/types'
@@ -48,6 +48,33 @@ const SalesTracker = () => {
   const totalSell = filteredSales.reduce((s, r) => s + r.totalSell, 0)
   const totalProfit = filteredSales.reduce((s, r) => s + r.profit, 0)
   const totalUnits = filteredSales.reduce((s, r) => s + r.qty, 0)
+
+  const handleUpdateSaleStatus = async (id: string, ref: string, newStatus: string) => {
+    try {
+      await api.patch(`/deals/sales/${id}/status`, { status: newStatus })
+      toast(`Sale ${ref} status updated to ${newStatus}.`, 'success')
+      setRevision(value => value + 1)
+    } catch (error: any) {
+      toast(error.response?.data?.error?.message || 'Failed to update status.', 'error')
+    }
+  }
+
+  const handleDeleteSale = async (id: string, ref: string) => {
+    const confirmed = await askConfirm({
+      title: `Delete Sale ${ref}`,
+      message: 'Are you sure you want to delete this sale record? This action cannot be undone.',
+      confirmLabel: 'Delete Sale',
+      danger: true,
+    })
+    if (!confirmed) return
+    try {
+      await api.delete(`/deals/sales/${id}`)
+      toast(`Sale ${ref} deleted successfully.`, 'success')
+      setRevision(value => value + 1)
+    } catch (error: any) {
+      toast(error.response?.data?.error?.message || 'Failed to delete sale.', 'error')
+    }
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -121,9 +148,25 @@ const SalesTracker = () => {
                 <td className="r profit-cell">${s.profit.toLocaleString()}</td>
                 <td className="r mono" style={{ fontWeight: 700, color: s.margin >= 30 ? 'var(--green)' : 'var(--amber)' }}>{s.margin.toFixed(1)}%</td>
                 <td><ChipPIC label={s.pic} /></td>
-                <td><Badge status={s.status as BadgeStatus} /></td>
+                <td>
+                  <StatusSmartChip
+                    status={s.status}
+                    onStatusChange={newStatus => handleUpdateSaleStatus(s.id, s.ref, newStatus)}
+                  />
+                </td>
                 <td className="col-actions">
-                  <div className="row-actions"><Btn variant="ghost" sm onClick={() => setViewRow(s)}>View</Btn></div>
+                  <div className="row-actions">
+                    <Btn variant="ghost" sm onClick={() => setViewRow(s)}>View</Btn>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ color: 'var(--red)', padding: '0 6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                      title={`Delete ${s.ref}`}
+                      onClick={() => handleDeleteSale(s.id, s.ref)}
+                    >
+                      <Ic n={I.removed} size={13} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

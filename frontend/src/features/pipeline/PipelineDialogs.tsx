@@ -55,9 +55,18 @@ const ErrorMessage = ({ message }: { message: string }) => message
 
 const apiError = (error: any) => error.response?.data?.error?.message ?? error.message ?? 'The operation failed.'
 
-export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
+const FieldLabel = ({ label, required, optional, style }: { label: string; required?: boolean; optional?: boolean; style?: React.CSSProperties }) => (
+  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6, ...style }}>
+    {label}
+    {required && <span style={{ color: 'var(--red, #DC2626)', marginLeft: 3, fontWeight: 700 }} title="Required">*</span>}
+    {optional && <span style={{ color: 'var(--t4)', fontWeight: 400, fontSize: 11, marginLeft: 4 }}>(optional)</span>}
+  </label>
+)
+
+export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClose, onSaved }: {
   warmLeads: WarmLeadOption[]
   initialId?: string
+  initialIdentity?: string
   onClose: () => void
   onSaved: () => void
 }) => {
@@ -68,7 +77,7 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   // inquiry with no Warm Lead in between at all.
   const [source, setSource] = useState<'warmLead' | 'manual'>(initialId ? 'warmLead' : 'manual')
   const [warmLeadId, setWarmLeadId] = useState(initialId ?? warmLeads[0]?.id ?? '')
-  const [identity, setIdentity] = useState('')
+  const [identity, setIdentity] = useState(initialIdentity ?? '')
   const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'found' | 'notfound'>('idle')
   const [matchedStage, setMatchedStage] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
@@ -93,10 +102,10 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   useEffect(() => { if (!containerSizeId && sizes.length) setContainerSizeId(sizes[0].id) }, [sizes, containerSizeId])
   useEffect(() => { if (!containerConditionId && conditions.length) setContainerConditionId(conditions[0].id) }, [conditions, containerConditionId])
 
-  // Resolve the typed email/phone to an existing client and fill the rest of the form.
+  // Resolve typed email/phone/name to an existing client and auto-fill the rest of the form.
   useEffect(() => {
     const value = identity.trim()
-    if (source !== 'manual' || value.length < 4) { setLookupState('idle'); setMatchedStage(null); return }
+    if (source !== 'manual' || value.length < 3) { setLookupState('idle'); setMatchedStage(null); return }
 
     setLookupState('searching')
     let cancelled = false
@@ -119,10 +128,23 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
           if (match.pic_id) setPicId(match.pic_id)
         })
         .catch(() => { if (!cancelled) setLookupState('notfound') })
-    }, 400)
+    }, 350)
 
     return () => { cancelled = true; clearTimeout(handle) }
   }, [identity, source])
+
+  const clearLookup = () => {
+    setIdentity('')
+    setLookupState('idle')
+    setMatchedStage(null)
+    setCompanyName('')
+    setContactPerson('')
+    setPhone('')
+    setEmail('')
+    setStateProvince('')
+    setCountry('')
+    setPicId('')
+  }
 
   // Either an identity that resolved to a client, or a company typed in by hand.
   const canSubmit = containerSizeId && containerConditionId
@@ -175,21 +197,23 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   }
 
   return (
-    <Modal title="Create inquiry" description="Start from a Warm Lead or record a direct customer inquiry." onClose={onClose}>
+    <Modal title="Create inquiry" description="Start from a Warm Lead or record a direct customer inquiry with automatic client lookup." onClose={onClose}>
       <form onSubmit={submit}>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="tabs" style={{ gridColumn: '1 / -1', padding: 0 }}>
             <button type="button" className={`tab${source === 'warmLead' ? ' active' : ''}`} onClick={() => setSource('warmLead')}>From Warm Lead</button>
-            <button type="button" className={`tab${source === 'manual' ? ' active' : ''}`} onClick={() => setSource('manual')}>Direct Inquiry</button>
+            <button type="button" className={`tab${source === 'manual' ? ' active' : ''}`} onClick={() => setSource('manual')}>Direct Inquiry (Fast Lookup)</button>
           </div>
 
           {source === 'warmLead' ? (
             warmLeads.length ? (
               <>
-                <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Warm lead</label>
-                <select className="inp" style={{ gridColumn: '1 / -1' }} value={warmLeadId} onChange={event => setWarmLeadId(event.target.value)} required>
-                  {warmLeads.map(lead => <option key={lead.id} value={lead.id}>{lead.company} — {lead.contact}</option>)}
-                </select>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <FieldLabel label="Warm lead" required />
+                  <select className="inp" value={warmLeadId} onChange={event => setWarmLeadId(event.target.value)} required>
+                    {warmLeads.map(lead => <option key={lead.id} value={lead.id}>{lead.company} — {lead.contact}</option>)}
+                  </select>
+                </div>
               </>
             ) : (
               <div style={{ gridColumn: '1 / -1', padding: 12, background: 'var(--brand-bg)', borderRadius: 8, fontSize: 12 }}>
@@ -198,82 +222,159 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
             )
           ) : (
             <>
-              {/* An email or phone is enough -- everything below is pulled from the
-                  existing client record so the same company isn't retyped (and
-                  mistyped) into a parallel record. */}
-              <div style={{ gridColumn: '1 / -1' }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-                  Client email or phone
-                </label>
+              {/* Quick Client Lookup Card */}
+              <div style={{
+                gridColumn: '1 / -1',
+                padding: '12px 14px',
+                borderRadius: 8,
+                border: '1px solid var(--border-s, #E5E7EB)',
+                background: 'var(--surface-subtle, rgba(0,0,0,0.02))',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span>⚡ Quick Client Auto-Lookup</span>
+                  </div>
+                  {identity && (
+                    <button
+                      type="button"
+                      onClick={clearLookup}
+                      style={{ fontSize: 11, background: 'none', border: 'none', color: 'var(--t4)', cursor: 'pointer', textDecoration: 'underline' }}
+                    >
+                      Clear & Search Again
+                    </button>
+                  )}
+                </div>
                 <input
                   className="inp"
                   value={identity}
                   onChange={event => setIdentity(event.target.value)}
-                  placeholder="e.g. buyer@company.com or (385) 707-9484"
+                  placeholder="Enter client email, phone number, or company name…"
+                  autoFocus
                 />
-                <div style={{ fontSize: 11, marginTop: 5, color: lookupState === 'notfound' ? 'var(--amber)' : 'var(--t4)' }}>
-                  {lookupState === 'searching' && 'Looking up client…'}
-                  {lookupState === 'found' && matchedStage && `Matched an existing ${matchedStage.replace('_', ' ')} — details filled in below.`}
-                  {lookupState === 'notfound' && 'No existing client with that email or phone. Fill in the company below to create one.'}
-                  {lookupState === 'idle' && 'Enter an email or phone and the rest fills in automatically.'}
+                <div style={{ fontSize: 11.5, marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {lookupState === 'searching' && (
+                    <span style={{ color: 'var(--brand, #2563EB)' }}>🔍 Searching records across CRM…</span>
+                  )}
+                  {lookupState === 'found' && (
+                    <span style={{ color: 'var(--green, #16A34A)', fontWeight: 600 }}>
+                      ✓ Existing client record found ({matchedStage?.replace('_', ' ')}). Details auto-filled below!
+                    </span>
+                  )}
+                  {lookupState === 'notfound' && (
+                    <span style={{ color: 'var(--amber, #D97706)' }}>
+                      ℹ️ No existing record found. Fill in Company Name below to create a new client.
+                    </span>
+                  )}
+                  {lookupState === 'idle' && (
+                    <span style={{ color: 'var(--t4)' }}>
+                      💡 Enter an email or phone to auto-pull all customer & PIC details without re-typing.
+                    </span>
+                  )}
                 </div>
               </div>
-              <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Company</label><input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} required /></div>
-              <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Contact person</label><input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} /></div>
-              <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>PIC</label>
+
+              <div style={{ gridColumn: '1 / -1' }}>
+                <FieldLabel label="Company" required />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    className="inp"
+                    value={companyName}
+                    onChange={event => setCompanyName(event.target.value)}
+                    placeholder="Company Name"
+                    required
+                  />
+                  {lookupState === 'found' && companyName && (
+                    <span style={{
+                      position: 'absolute',
+                      right: 10,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: 'var(--green, #16A34A)',
+                      background: 'rgba(22, 163, 74, 0.1)',
+                      padding: '2px 6px',
+                      borderRadius: 4
+                    }}>
+                      Auto-filled
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <FieldLabel label="Contact person" optional />
+                <input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} placeholder="Full Name" />
+              </div>
+              <div>
+                <FieldLabel label="PIC (Account Owner)" optional />
                 <select className="inp" value={picId} onChange={event => setPicId(event.target.value)}>
                   <option value="">Unassigned</option>
                   {pics.map(pic => <option key={pic.id} value={pic.id}>{pic.name}</option>)}
                 </select>
               </div>
-              <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Phone</label><input className="inp" value={phone} onChange={event => setPhone(event.target.value)} /></div>
-              <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Email</label><input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} /></div>
+              <div>
+                <FieldLabel label="Phone" optional />
+                <input className="inp" value={phone} onChange={event => setPhone(event.target.value)} placeholder="(555) 000-0000" />
+              </div>
+              <div>
+                <FieldLabel label="Email" optional />
+                <input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="name@company.com" />
+              </div>
             </>
           )}
 
           {(source === 'warmLead' ? warmLeads.length > 0 : true) && <>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>State/Province</label>
+              <FieldLabel label="State / Province" optional />
               <input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. CO, ON" />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Country</label>
+              <FieldLabel label="Country" optional />
               <input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Container size</label>
+              <FieldLabel label="Container size" required />
               <select className="inp" value={containerSizeId} onChange={event => setContainerSizeId(event.target.value)} required>
                 {sizes.map(size => <option key={size.id} value={size.id}>{size.name}</option>)}
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Condition</label>
+              <FieldLabel label="Condition" required />
               <select className="inp" value={containerConditionId} onChange={event => setContainerConditionId(event.target.value)} required>
                 {conditions.map(condition => <option key={condition.id} value={condition.id}>{condition.name}</option>)}
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Quantity</label>
+              <FieldLabel label="Quantity" required />
               <input className="inp" type="number" min="1" value={quantity} onChange={event => setQuantity(Number(event.target.value))} required />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Asking price</label>
-              <input className="inp" type="number" min="0" step="0.01" value={askingPrice} onChange={event => setAskingPrice(event.target.value)} placeholder="If available" />
+              <FieldLabel label="Asking price ($)" optional />
+              <input className="inp" type="number" min="0" step="0.01" value={askingPrice} onChange={event => setAskingPrice(event.target.value)} placeholder="Target budget" />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Needed by</label>
+              <FieldLabel label="Needed by" optional />
               <input className="inp" type="date" value={neededByDate} onChange={event => setNeededByDate(event.target.value)} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Follow-up date</label>
+              <FieldLabel label="Follow-up date" optional />
               <input className="inp" type="date" value={followUpDate} onChange={event => setFollowUpDate(event.target.value)} />
             </div>
-            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Inquiry details</label>
-            <textarea className="inp" style={{ gridColumn: '1 / -1' }} rows={3} value={requirements} onChange={event => setRequirements(event.target.value)} placeholder="What the customer is asking for…" />
-            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Special requirements</label>
-            <textarea className="inp" style={{ gridColumn: '1 / -1' }} rows={2} value={specialRequirements} onChange={event => setSpecialRequirements(event.target.value)} placeholder="Liftgate delivery, modification, timing constraints…" />
-            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Remarks</label>
-            <textarea className="inp" style={{ gridColumn: '1 / -1' }} rows={2} value={remarks} onChange={event => setRemarks(event.target.value)} />
+            <div style={{ gridColumn: '1 / -1' }}>
+              <FieldLabel label="Inquiry details" optional />
+              <textarea className="inp" rows={3} value={requirements} onChange={event => setRequirements(event.target.value)} placeholder="What the customer is asking for…" />
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <FieldLabel label="Special requirements" optional />
+              <textarea className="inp" rows={2} value={specialRequirements} onChange={event => setSpecialRequirements(event.target.value)} placeholder="Liftgate delivery, modification, timing constraints…" />
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <FieldLabel label="Remarks" optional />
+              <textarea className="inp" rows={2} value={remarks} onChange={event => setRemarks(event.target.value)} placeholder="Internal notes…" />
+            </div>
           </>}
           <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
         </div>
@@ -286,11 +387,15 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   )
 }
 
-export const NewWarmLeadDialog = ({ onClose, onSaved }: {
+export const NewWarmLeadDialog = ({ initialIdentity, onClose, onSaved }: {
+  initialIdentity?: string
   onClose: () => void
   onSaved: () => void
 }) => {
   const pics = usePics()
+  const [identity, setIdentity] = useState(initialIdentity ?? '')
+  const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'found' | 'notfound'>('idle')
+  const [matchedStage, setMatchedStage] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
   const [contactPerson, setContactPerson] = useState('')
   const [phone, setPhone] = useState('')
@@ -305,6 +410,49 @@ export const NewWarmLeadDialog = ({ onClose, onSaved }: {
   const [followUpNotes, setFollowUpNotes] = useState('')
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
+
+  // Resolve typed email/phone/name to an existing client and auto-fill the form
+  useEffect(() => {
+    const value = identity.trim()
+    if (value.length < 3) { setLookupState('idle'); setMatchedStage(null); return }
+
+    setLookupState('searching')
+    let cancelled = false
+    const handle = setTimeout(() => {
+      api.get('/leads/client-lookup', { params: { identity: value } })
+        .then(response => {
+          if (cancelled) return
+          const match = response.data.data
+          if (!match) { setLookupState('notfound'); setMatchedStage(null); return }
+
+          setLookupState('found')
+          setMatchedStage(match.stage ?? null)
+          setCompanyName(match.company_name ?? '')
+          setContactPerson(match.contact_person ?? '')
+          setEmail(match.email ?? '')
+          setPhone(match.phone ?? '')
+          setStateProvince(match.state_province ?? '')
+          setCountry(match.country ?? '')
+          if (match.pic_id) setPicId(match.pic_id)
+        })
+        .catch(() => { if (!cancelled) setLookupState('notfound') })
+    }, 350)
+
+    return () => { cancelled = true; clearTimeout(handle) }
+  }, [identity])
+
+  const clearLookup = () => {
+    setIdentity('')
+    setLookupState('idle')
+    setMatchedStage(null)
+    setCompanyName('')
+    setContactPerson('')
+    setPhone('')
+    setEmail('')
+    setStateProvince('')
+    setCountry('')
+    setPicId('')
+  }
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -336,32 +484,139 @@ export const NewWarmLeadDialog = ({ onClose, onSaved }: {
   }
 
   return (
-    <Modal title="New warm lead" description="For contacts already known to be interested, with or without a Prospect record on file." onClose={onClose}>
+    <Modal title="New warm lead" description="Record a warm lead with optional automatic client lookup." onClose={onClose}>
       <form onSubmit={submit}>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Company</label><input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} required /></div>
+          {/* Quick Client Lookup Card */}
+          <div style={{
+            gridColumn: '1 / -1',
+            padding: '12px 14px',
+            borderRadius: 8,
+            border: '1px solid var(--border-s, #E5E7EB)',
+            background: 'var(--surface-subtle, rgba(0,0,0,0.02))',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span>⚡ Quick Client Auto-Lookup</span>
+              </div>
+              {identity && (
+                <button
+                  type="button"
+                  onClick={clearLookup}
+                  style={{ fontSize: 11, background: 'none', border: 'none', color: 'var(--t4)', cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  Clear & Search Again
+                </button>
+              )}
+            </div>
+            <input
+              className="inp"
+              value={identity}
+              onChange={event => setIdentity(event.target.value)}
+              placeholder="Enter client email, phone number, or company name…"
+              autoFocus
+            />
+            <div style={{ fontSize: 11.5, marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {lookupState === 'searching' && (
+                <span style={{ color: 'var(--brand, #2563EB)' }}>🔍 Searching records across CRM…</span>
+              )}
+              {lookupState === 'found' && (
+                <span style={{ color: 'var(--green, #16A34A)', fontWeight: 600 }}>
+                  ✓ Existing client record found ({matchedStage?.replace('_', ' ')}). Details auto-filled below!
+                </span>
+              )}
+              {lookupState === 'notfound' && (
+                <span style={{ color: 'var(--amber, #D97706)' }}>
+                  ℹ️ No existing record found. Fill in Company Name below to create a new client.
+                </span>
+              )}
+              {lookupState === 'idle' && (
+                <span style={{ color: 'var(--t4)' }}>
+                  💡 Enter an email or phone to auto-pull all customer & PIC details without re-typing.
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div style={{ gridColumn: '1 / -1' }}>
+            <FieldLabel label="Company" required />
+            <div style={{ position: 'relative' }}>
+              <input
+                className="inp"
+                value={companyName}
+                onChange={event => setCompanyName(event.target.value)}
+                placeholder="Company Name"
+                required
+              />
+              {lookupState === 'found' && companyName && (
+                <span style={{
+                  position: 'absolute',
+                  right: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: 'var(--green, #16A34A)',
+                  background: 'rgba(22, 163, 74, 0.1)',
+                  padding: '2px 6px',
+                  borderRadius: 4
+                }}>
+                  Auto-filled
+                </span>
+              )}
+            </div>
+          </div>
           <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--t4)', marginTop: -6 }}>Add at least a contact person, phone, or email so this lead can be identified without a Prospect record.</div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Contact person</label><input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>PIC</label>
+          <div>
+            <FieldLabel label="Contact person" optional />
+            <input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} placeholder="Full Name" />
+          </div>
+          <div>
+            <FieldLabel label="PIC (Account Owner)" optional />
             <select className="inp" value={picId} onChange={event => setPicId(event.target.value)}>
               <option value="">Unassigned</option>
               {pics.map(pic => <option key={pic.id} value={pic.id}>{pic.name}</option>)}
             </select>
           </div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Phone</label><input className="inp" value={phone} onChange={event => setPhone(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Email</label><input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>State/Province</label><input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. CO, ON" /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Country</label><input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Source</label><input className="inp" value={source} onChange={event => setSource(event.target.value)} placeholder="Referral, cold call, trade show…" /></div>
+          <div>
+            <FieldLabel label="Phone" optional />
+            <input className="inp" value={phone} onChange={event => setPhone(event.target.value)} placeholder="(555) 000-0000" />
+          </div>
+          <div>
+            <FieldLabel label="Email" optional />
+            <input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="name@company.com" />
+          </div>
+          <div>
+            <FieldLabel label="State / Province" optional />
+            <input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. CO, ON" />
+          </div>
+          <div>
+            <FieldLabel label="Country" optional />
+            <input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" />
+          </div>
+          <div>
+            <FieldLabel label="Source" optional />
+            <input className="inp" value={source} onChange={event => setSource(event.target.value)} placeholder="Referral, cold call, trade show…" />
+          </div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 20 }}>
             <input type="checkbox" checked={previousInquiryIndicator} onChange={event => setPreviousInquiryIndicator(event.target.checked)} />
             Made a previous inquiry (details not on file)
           </label>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Follow-up date</label><input className="inp" type="date" value={followUpDate} onChange={event => setFollowUpDate(event.target.value)} /></div>
-          <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Notes</label>
-          <textarea className="inp" style={{ gridColumn: '1 / -1' }} rows={3} value={notes} onChange={event => setNotes(event.target.value)} placeholder="Whatever is still known about this contact…" />
-          <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Follow-up notes</label>
-          <textarea className="inp" style={{ gridColumn: '1 / -1' }} rows={2} value={followUpNotes} onChange={event => setFollowUpNotes(event.target.value)} />
+          <div>
+            <FieldLabel label="Follow-up date" optional />
+            <input className="inp" type="date" value={followUpDate} onChange={event => setFollowUpDate(event.target.value)} />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <FieldLabel label="Notes" optional />
+            <textarea className="inp" rows={3} value={notes} onChange={event => setNotes(event.target.value)} placeholder="Whatever is still known about this contact…" />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <FieldLabel label="Follow-up notes" optional />
+            <textarea className="inp" rows={2} value={followUpNotes} onChange={event => setFollowUpNotes(event.target.value)} placeholder="Next steps…" />
+          </div>
           <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
         </div>
         <div className="modal-footer">
@@ -431,25 +686,42 @@ export const NewProspectDialog = ({ onClose, onSaved }: {
     <Modal title="New prospect" description="Manually add a prospect that isn't from a spreadsheet import." onClose={onClose}>
       <form onSubmit={submit}>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Company</label><input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} required /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Contact person</label><input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Date added</label><input className="inp" type="date" value={dateAdded} onChange={event => setDateAdded(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Phone</label><input className="inp" value={phone} onChange={event => setPhone(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Email</label><input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>PIC</label>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <FieldLabel label="Company" required />
+            <input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder="Company Name" required />
+          </div>
+          <div>
+            <FieldLabel label="Contact person" optional />
+            <input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} placeholder="Full Name" />
+          </div>
+          <div>
+            <FieldLabel label="Date added" optional />
+            <input className="inp" type="date" value={dateAdded} onChange={event => setDateAdded(event.target.value)} />
+          </div>
+          <div>
+            <FieldLabel label="Phone" optional />
+            <input className="inp" value={phone} onChange={event => setPhone(event.target.value)} placeholder="(555) 000-0000" />
+          </div>
+          <div>
+            <FieldLabel label="Email" optional />
+            <input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="name@company.com" />
+          </div>
+          <div>
+            <FieldLabel label="PIC" optional />
             <select className="inp" value={picId} onChange={event => setPicId(event.target.value)}>
               <option value="">Unassigned</option>
               {pics.map(pic => <option key={pic.id} value={pic.id}>{pic.name}</option>)}
             </select>
           </div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Category</label>
+          <div>
+            <FieldLabel label="Category" required />
             <select className="inp" value={category} onChange={event => setCategory(event.target.value as typeof category)}>
               <option value="Proceed">Proceed</option>
               <option value="Removed">Removed</option>
             </select>
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>SMS Deliverability</label>
+            <FieldLabel label="SMS Deliverability" optional />
             <select className="inp" value={smsDeliverability} onChange={event => setSmsDeliverability(event.target.value as typeof smsDeliverability)}>
               <option value="">Unknown</option>
               <option value="Call/Text">Call/Text</option>
@@ -458,19 +730,34 @@ export const NewProspectDialog = ({ onClose, onSaved }: {
             </select>
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Industry</label>
+            <FieldLabel label="Industry" optional />
             <select className="inp" value={industry} onChange={event => setIndustry(event.target.value)}>
               <option value="">Not specified</option>
               {INDUSTRY_OPTIONS.map(value => <option key={value} value={value}>{value}</option>)}
             </select>
           </div>
           {industry === 'Others' && (
-            <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Specify industry</label><input className="inp" value={industryOther} onChange={event => setIndustryOther(event.target.value)} /></div>
+            <div>
+              <FieldLabel label="Specify industry" optional />
+              <input className="inp" value={industryOther} onChange={event => setIndustryOther(event.target.value)} />
+            </div>
           )}
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Service location</label><input className="inp" value={serviceLocation} onChange={event => setServiceLocation(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Country</label><input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>State/Province</label><input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. CO, ON" /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>City</label><input className="inp" value={city} onChange={event => setCity(event.target.value)} /></div>
+          <div>
+            <FieldLabel label="Service location" optional />
+            <input className="inp" value={serviceLocation} onChange={event => setServiceLocation(event.target.value)} placeholder="Location or Yard" />
+          </div>
+          <div>
+            <FieldLabel label="Country" optional />
+            <input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" />
+          </div>
+          <div>
+            <FieldLabel label="State / Province" optional />
+            <input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. CO, ON" />
+          </div>
+          <div>
+            <FieldLabel label="City" optional />
+            <input className="inp" value={city} onChange={event => setCity(event.target.value)} placeholder="City" />
+          </div>
           <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
         </div>
         <div className="modal-footer">
@@ -538,21 +825,49 @@ export const NewManualSaleDialog = ({ onClose, onSaved }: {
     <Modal title="Record sale manually" description="For a sale that didn't go through a Quotation." onClose={onClose}>
       <form onSubmit={submit}>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Company</label><input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} required /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Contact person</label><input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>PIC</label>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <FieldLabel label="Company" required />
+            <input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder="Company Name" required />
+          </div>
+          <div>
+            <FieldLabel label="Contact person" optional />
+            <input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} placeholder="Full Name" />
+          </div>
+          <div>
+            <FieldLabel label="PIC" optional />
             <select className="inp" value={picId} onChange={event => setPicId(event.target.value)}>
               <option value="">Unassigned</option>
               {pics.map(pic => <option key={pic.id} value={pic.id}>{pic.name}</option>)}
             </select>
           </div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Phone</label><input className="inp" value={phone} onChange={event => setPhone(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Email</label><input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>State/Province</label><input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Country</label><input className="inp" value={country} onChange={event => setCountry(event.target.value)} /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Units</label><input className="inp" type="number" min="1" value={totalUnits} onChange={event => setTotalUnits(Number(event.target.value))} required /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Buying cost / unit</label><input className="inp" type="number" min="0" step="1" value={buyPerUnit || ''} onChange={event => setBuyPerUnit(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Selling cost / unit</label><input className="inp" type="number" min="0" step="1" value={sellPerUnit || ''} onChange={event => setSellPerUnit(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required /></div>
+          <div>
+            <FieldLabel label="Phone" optional />
+            <input className="inp" value={phone} onChange={event => setPhone(event.target.value)} placeholder="(555) 000-0000" />
+          </div>
+          <div>
+            <FieldLabel label="Email" optional />
+            <input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="name@company.com" />
+          </div>
+          <div>
+            <FieldLabel label="State / Province" optional />
+            <input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. TX, CA" />
+          </div>
+          <div>
+            <FieldLabel label="Country" optional />
+            <input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" />
+          </div>
+          <div>
+            <FieldLabel label="Units" required />
+            <input className="inp" type="number" min="1" value={totalUnits} onChange={event => setTotalUnits(Number(event.target.value))} required />
+          </div>
+          <div>
+            <FieldLabel label="Buying cost / unit ($)" required />
+            <input className="inp" type="number" min="0" step="1" value={buyPerUnit || ''} onChange={event => setBuyPerUnit(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required />
+          </div>
+          <div>
+            <FieldLabel label="Selling cost / unit ($)" required />
+            <input className="inp" type="number" min="0" step="1" value={sellPerUnit || ''} onChange={event => setSellPerUnit(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required />
+          </div>
           <div style={{ gridColumn: '1 / -1', padding: 12, borderRadius: 8, background: 'var(--s2)', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
             <div>
               <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 2 }}>Total buying cost</div>
@@ -617,15 +932,28 @@ export const QuotationDialog = ({ inquiries, initialId, onClose, onSaved }: {
       <form onSubmit={submit}>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           {inquiries.length ? <>
-            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Inquiry</label>
-            <select className="inp" style={{ gridColumn: '1 / -1' }} value={inquiryId} onChange={event => setInquiryId(event.target.value)} required>
-              {inquiries.map(inquiry => <option key={inquiry.id} value={inquiry.id}>{inquiry.ref} — {inquiry.company} — {inquiry.contact}</option>)}
-            </select>
-            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Item description</label>
-            <input className="inp" style={{ gridColumn: '1 / -1' }} value={description} onChange={event => setDescription(event.target.value)} required />
-            <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Quantity</label><input className="inp" type="number" min="1" value={quantity} onChange={event => setQuantity(Number(event.target.value))} required /></div>
-            <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Unit price</label><input className="inp" type="number" min="0" step="0.01" value={unitPrice || ''} onChange={event => setUnitPrice(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required /></div>
-            <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Valid until</label><input className="inp" type="date" value={validUntil} onChange={event => setValidUntil(event.target.value)} /></div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <FieldLabel label="Inquiry" required />
+              <select className="inp" value={inquiryId} onChange={event => setInquiryId(event.target.value)} required>
+                {inquiries.map(inquiry => <option key={inquiry.id} value={inquiry.id}>{inquiry.ref} — {inquiry.company} — {inquiry.contact}</option>)}
+              </select>
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <FieldLabel label="Item description" required />
+              <input className="inp" value={description} onChange={event => setDescription(event.target.value)} placeholder="e.g. 40ft High Cube CW" required />
+            </div>
+            <div>
+              <FieldLabel label="Quantity" required />
+              <input className="inp" type="number" min="1" value={quantity} onChange={event => setQuantity(Number(event.target.value))} required />
+            </div>
+            <div>
+              <FieldLabel label="Unit price ($)" required />
+              <input className="inp" type="number" min="0" step="0.01" value={unitPrice || ''} onChange={event => setUnitPrice(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required />
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <FieldLabel label="Valid until" optional />
+              <input className="inp" type="date" value={validUntil} onChange={event => setValidUntil(event.target.value)} />
+            </div>
             <div style={{ gridColumn: '1 / -1', padding: 10, borderRadius: 8, background: 'var(--s2)', fontWeight: 700 }}>Quotation total: ${(quantity * unitPrice).toLocaleString()}</div>
           </> : <div style={{ gridColumn: '1 / -1', padding: 12, background: 'var(--brand-bg)', borderRadius: 8, fontSize: 12 }}>There are no active inquiries available for quotation.</div>}
           <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
@@ -688,13 +1016,24 @@ export const SaleDialog = ({ quotations, initialId, onClose, onSaved }: {
       <form onSubmit={submit}>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           {accepted.length ? <>
-            <label style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 600 }}>Accepted quotation</label>
-            <select className="inp" style={{ gridColumn: '1 / -1' }} value={quotationId} onChange={event => selectQuote(event.target.value)} required>
-              {accepted.map(quote => <option key={quote.id} value={quote.id}>{quote.ref} — {quote.co}</option>)}
-            </select>
-            <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Units</label><input className="inp" type="number" min="1" value={units} onChange={event => setUnits(Number(event.target.value))} required /></div>
-            <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Buying cost total</label><input className="inp" type="number" min="0" step="1" value={buyingCost || ''} onChange={event => setBuyingCost(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required /></div>
-            <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Revenue total</label><input className="inp" type="number" min="0" step="1" value={revenue || ''} onChange={event => setRevenue(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required /></div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <FieldLabel label="Accepted quotation" required />
+              <select className="inp" value={quotationId} onChange={event => selectQuote(event.target.value)} required>
+                {accepted.map(quote => <option key={quote.id} value={quote.id}>{quote.ref} — {quote.co}</option>)}
+              </select>
+            </div>
+            <div>
+              <FieldLabel label="Units" required />
+              <input className="inp" type="number" min="1" value={units} onChange={event => setUnits(Number(event.target.value))} required />
+            </div>
+            <div>
+              <FieldLabel label="Buying cost total ($)" required />
+              <input className="inp" type="number" min="0" step="1" value={buyingCost || ''} onChange={event => setBuyingCost(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required />
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <FieldLabel label="Revenue total ($)" required />
+              <input className="inp" type="number" min="0" step="1" value={revenue || ''} onChange={event => setRevenue(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required />
+            </div>
             <div style={{ gridColumn: '1 / -1', padding: 10, borderRadius: 8, background: 'var(--s2)', color: revenue - buyingCost >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>Gross profit: ${(revenue - buyingCost).toLocaleString()}</div>
           </> : <div style={{ gridColumn: '1 / -1', padding: 12, background: 'var(--brand-bg)', borderRadius: 8, fontSize: 12 }}>No accepted quotations are available. Open Quotations and accept one first.</div>}
           <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
@@ -707,7 +1046,6 @@ export const SaleDialog = ({ quotations, initialId, onClose, onSaved }: {
     </Modal>
   )
 }
-
 
 export const NewContractDialog = ({ sales, onClose, onSaved }: {
   sales: any[];
@@ -772,10 +1110,9 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
           <ErrorMessage message={error ?? ''} />
 
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Source sale</label>
+            <FieldLabel label="Source sale" required />
             <select className="inp" value={saleId} onChange={e => setSaleId(e.target.value)} disabled={submitting}>
               <option value="">-- Select a sale --</option>
-
               {sales.map(s => (
                 <option key={s.id} value={s.id}>
                   {s.company || 'Unknown Company'} (Total: ${(s.totalSell || 0).toLocaleString()})
@@ -785,7 +1122,7 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Inventory to reserve</label>
+            <FieldLabel label="Inventory to reserve" required />
             <select className="inp" value={inventoryId} onChange={e => { setInventoryId(e.target.value); const row = inventory.find(item => item.id === e.target.value); if (row) setQuantity(value => Math.min(value, Number(row.quantity_available) - Number(row.quantity_reserved))); }} disabled={submitting}>
               <option value="">-- Select available stock --</option>
               {inventory.map(row => {
@@ -796,17 +1133,16 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Units to reserve</label>
+            <FieldLabel label="Units to reserve" required />
             <input type="number" min={1} max={maximumQuantity} className="inp" value={quantity} onChange={e => setQuantity(Number(e.target.value))} disabled={submitting} />
             <div style={{ marginTop: 5, fontSize: 11, color: 'var(--t4)' }}>Maximum for this sale and batch: {maximumQuantity}</div>
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Target pickup date (optional)</label>
+            <FieldLabel label="Target pickup date" optional />
             <input
               type="date"
               className="inp"
-
               value={pickupDate}
               onChange={e => setPickupDate(e.target.value)}
               disabled={submitting}
@@ -817,7 +1153,6 @@ export const NewContractDialog = ({ sales, onClose, onSaved }: {
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
           <button className="btn btn-primary" disabled={submitting || !saleId || !inventoryId || quantity < 1}>
             {submitting ? 'Generating…' : 'Generate Contract'}
-
           </button>
         </div>
       </form>
