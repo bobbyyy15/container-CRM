@@ -67,38 +67,45 @@ type ConfirmRequest = {
   needsReason?: boolean
   confirmLabel?: string
   defaultValue?: string
-  resolve: (result: { confirmed: boolean; reason?: string }) => void
+  checkboxLabel?: string
+  defaultChecked?: boolean
+  resolve: (result: { confirmed: boolean; reason?: string; checked?: boolean }) => void
 }
 let confirmListener: ((r: ConfirmRequest) => void) | null = null
 let confirmSeq = 0
 
 // Drop-in async replacement for confirm('...') -- await it, check .confirmed.
 export const askConfirm = (opts: { title: string; message: string; danger?: boolean; confirmLabel?: string }) =>
-  new Promise<{ confirmed: boolean; reason?: string }>(resolve => {
+  new Promise<{ confirmed: boolean; reason?: string; checked?: boolean }>(resolve => {
     confirmListener?.({ id: ++confirmSeq, resolve, ...opts })
   })
 
-// Drop-in async replacement for window.prompt('...') -- await it, check .confirmed, read .reason.
-export const askReason = (opts: { title: string; message: string; confirmLabel?: string; defaultValue?: string }) =>
-  new Promise<{ confirmed: boolean; reason?: string }>(resolve => {
+// Drop-in async replacement for window.prompt('...') -- await it, check .confirmed, read .reason and .checked.
+export const askReason = (opts: { title: string; message: string; confirmLabel?: string; defaultValue?: string; checkboxLabel?: string; defaultChecked?: boolean; danger?: boolean }) =>
+  new Promise<{ confirmed: boolean; reason?: string; checked?: boolean }>(resolve => {
     confirmListener?.({ id: ++confirmSeq, resolve, needsReason: true, ...opts })
   })
 
 export const ConfirmHost = () => {
   const [request, setRequest] = useState<ConfirmRequest | null>(null)
   const [reasonText, setReasonText] = useState('')
+  const [checked, setChecked] = useState(false)
   useEffect(() => {
-    confirmListener = (r) => { setReasonText(r.defaultValue ?? ''); setRequest(r) }
+    confirmListener = (r) => {
+      setReasonText(r.defaultValue ?? '')
+      setChecked(r.defaultChecked ?? false)
+      setRequest(r)
+    }
     return () => { confirmListener = null }
   }, [])
   if (!request) return null
   const settle = (confirmed: boolean) => {
-    request.resolve({ confirmed, reason: confirmed ? reasonText.trim() : undefined })
+    request.resolve({ confirmed, reason: confirmed ? reasonText.trim() : undefined, checked: confirmed ? checked : false })
     setRequest(null)
   }
   return (
     <div className="overlay" onClick={() => settle(false)}>
-      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
+      <div className="modal" style={{ width: 440 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">{request.title}</div>
           <button className="btn btn-ghost btn-sm" aria-label="Cancel" onClick={() => settle(false)}><NIcon path={ICONS.x} size={16} /></button>
@@ -113,6 +120,17 @@ export const ConfirmHost = () => {
               onChange={e => setReasonText(e.target.value)}
               placeholder="Reason…"
             />
+          )}
+          {request.checkboxLabel && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 12, cursor: 'pointer', fontSize: 12.5, color: 'var(--t1)', fontWeight: 600, background: 'var(--s2)', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border-s)' }}>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={e => setChecked(e.target.checked)}
+                style={{ cursor: 'pointer' }}
+              />
+              <span>{request.checkboxLabel}</span>
+            </label>
           )}
         </div>
         <div className="modal-footer">

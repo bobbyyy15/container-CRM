@@ -157,12 +157,13 @@ export class LeadService {
     return data;
   }
 
-  static async removePipelineEntry(stage: string, entityId: string, actorId: string, reason: string) {
+  static async removePipelineEntry(stage: string, entityId: string, actorId: string, reason: string, blockCompany = false) {
     const { data, error } = await supabaseAdmin.rpc('remove_pipeline_entry', {
       p_stage: stage,
       p_entity_id: entityId,
       p_actor_id: actorId,
       p_reason: reason,
+      p_block_company: blockCompany,
     });
     if (error) throw new Error(`Failed to remove pipeline entry: ${error.message}`);
     return data;

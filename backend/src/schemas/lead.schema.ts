@@ -97,6 +97,7 @@ export const RemovePipelineEntrySchema = z.object({
   stage: z.enum(['prospect', 'warm_lead', 'inquiry', 'quotation']),
   entityId: z.string().uuid(),
   reason: z.string().trim().min(3).max(500),
+  blockCompany: z.boolean().optional().default(false),
 });
 
 export const AssignPicToEntrySchema = z.object({

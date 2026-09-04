@@ -2186,15 +2186,26 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     }
   }
 
-  const handleRemove = async (id: string) => {
-    const { confirmed, reason } = await askReason({
+  const handleRemove = async (target: any) => {
+    const id = typeof target === 'string' ? target : target.id
+    const rowObj = typeof target === 'object' ? target : prospectsData.find(r => r.id === id)
+    const companyName = rowObj?.company || ''
+    const { confirmed, reason, checked } = await askReason({
       title: 'Remove from active lists',
       message: 'Why should this contact be removed from active CRM lists?',
       confirmLabel: 'Remove',
+      danger: true,
+      checkboxLabel: companyName
+        ? `Block entire company (${companyName}) and all associated contacts`
+        : 'Block entire company and all associated contacts',
     })
     if (!confirmed || !reason) return
     try {
-      await api.post(`/leads/${mode === 'prospect' ? 'prospect' : 'warm_lead'}/${id}/remove`, { reason })
+      await api.post(`/leads/${mode === 'prospect' ? 'prospect' : 'warm_lead'}/${id}/remove`, {
+        reason,
+        blockCompany: checked ?? false,
+      })
+      toast(checked ? `Entire company ${companyName ? `"${companyName}" ` : ''}& all contacts removed and blocked` : 'Contact removed from active lists', 'success')
       setSelected(current => current.filter(value => value !== id))
       setRevision(value => value + 1)
     } catch (e: any) {
@@ -2764,7 +2775,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                     ? <Btn variant="ghost" sm style={{ color: 'var(--brand)' }} onClick={(e) => { e.stopPropagation(); handleConvert(row.id); }}>→ Warm</Btn>
                     : <Btn variant="ghost" sm style={{ color: 'var(--brand)' }} onClick={(e) => { e.stopPropagation(); setInquiryWarmLeadId(row.id); }}>Inquiry</Btn>
                   }
-                  <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={(e) => { e.stopPropagation(); handleRemove(row.id); }}>Remove</Btn>
+                  <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={(e) => { e.stopPropagation(); handleRemove(row); }}>Remove</Btn>
                 </div>
               </div>
             )
@@ -3140,16 +3151,24 @@ const QuotationList = () => {
     Accepted: ['Rejected'],
   }
 
-  const removeQuotation = async (id: string) => {
-    const { confirmed, reason } = await askReason({
+  const removeQuotation = async (target: any) => {
+    const id = typeof target === 'string' ? target : target.id
+    const rowObj = typeof target === 'object' ? target : (quotations as any[]).find(q => q.id === id)
+    const companyName = rowObj?.co || ''
+    const { confirmed, reason, checked } = await askReason({
       title: 'Remove quotation',
       message: 'Why should this quotation be removed?',
       confirmLabel: 'Remove',
+      danger: true,
+      checkboxLabel: companyName
+        ? `Block entire company (${companyName}) and all associated contacts`
+        : 'Block entire company and all associated contacts',
     })
     if (!confirmed || !reason) return
     setActionError('')
     try {
-      await api.post(`/leads/quotation/${id}/remove`, { reason })
+      await api.post(`/leads/quotation/${id}/remove`, { reason, blockCompany: checked ?? false })
+      toast(checked ? `Entire company ${companyName ? `"${companyName}" ` : ''}& all contacts removed and blocked` : 'Quotation removed', 'success')
       setRevision(value => value + 1)
     } catch (error: any) {
       setActionError(error.response?.data?.error?.message ?? error.message ?? 'Could not remove the quotation.')
@@ -3246,7 +3265,7 @@ const QuotationList = () => {
                       </select>
                     )}
                     {q.status === 'Accepted' && <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => setSaleQuotationId(q.id)}>→ Sale</Btn>}
-                    {q.status !== 'Converted' && <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={() => removeQuotation(q.id)}>Remove</Btn>}
+                    {q.status !== 'Converted' && <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={() => removeQuotation(q)}>Remove</Btn>}
                   </div>
                 </td>
               </tr>
@@ -4333,7 +4352,7 @@ const RemovedSheet = () => {
       })))
     }).catch(console.error)
   }, [revision])
-  const [typeFilter, setTypeFilter] = useState<'' | 'phone' | 'email'>('')
+  const [typeFilter, setTypeFilter] = useState<'' | 'phone' | 'email' | 'company' | 'contact'>('')
   const filtered = data.filter(row => {
     const term = search.trim().toLowerCase()
     const typeMatch = !typeFilter || row.type === typeFilter
@@ -4348,9 +4367,11 @@ const RemovedSheet = () => {
         <span style={{ fontSize: 12.5, fontWeight: 600, color: '#9F1239' }}>All records here are excluded from call, text, and email outreach automatically.</span>
       </div>
       <div className="toolbar">
-        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search removed records, or reason…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search removed records, company, contact, reason…" value={search} onChange={e => setSearch(e.target.value)} /></div>
         <select className="sel" value={typeFilter} onChange={e => setTypeFilter(e.target.value as any)}>
           <option value="">All Types</option>
+          <option value="company">Company Block</option>
+          <option value="contact">Contact Opt-Out</option>
           <option value="phone">Phone Only</option>
           <option value="email">Email Only</option>
         </select>
@@ -4370,11 +4391,11 @@ const RemovedSheet = () => {
             {filtered.map((r, i) => (
               <tr key={r.id || i} style={{ background: 'var(--red-bg)' }}>
                 <td className="mono" style={{ fontSize: 12 }}>{r.date}</td>
-                <td><span className="badge b-red">{r.type}</span></td>
+                <td><span className={r.type === 'company' ? 'badge b-amber' : 'badge b-red'}>{r.type === 'company' ? 'Company Block' : r.type === 'contact' ? 'Contact' : r.type}</span></td>
                 <td className="mono" style={{ fontSize: 12, color: r.phone ? 'var(--t2)' : 'var(--t4)' }}>{r.phone || '—'}</td>
                 <td className="mono" style={{ fontSize: 12, color: r.email ? 'var(--t2)' : 'var(--t4)' }}>{r.email || '—'}</td>
-                <td style={{ fontWeight: 600, fontSize: 12.5 }}>{r.co}</td>
-                <td style={{ fontSize: 12.5 }}>{r.contact}</td>
+                <td style={{ fontWeight: 600, fontSize: 12.5 }}>{r.co || '—'}</td>
+                <td style={{ fontSize: 12.5 }}>{r.contact || '—'}</td>
                 <td style={{ fontSize: 12.5 }}>{r.reason}</td>
                 <td style={{ fontSize: 12 }}>{r.channel}</td>
                 <td><Badge status={r.prevStatus as BadgeStatus} /></td>
@@ -4390,12 +4411,12 @@ const RemovedSheet = () => {
         <div className="overlay" onClick={() => setShowPaste(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <div className="modal-title">Paste Opted-Out Contacts</div>
+              <div className="modal-title">Paste Opted-Out Contacts & Companies</div>
               <Btn variant="ghost" sm onClick={() => setShowPaste(false)}><Ic n={I.x} size={16} /></Btn>
             </div>
             <div className="modal-body">
-              <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 12 }}>Paste phone numbers or email addresses (one per line). The system will find and update matching CRM records.</p>
-              <textarea className="inp" rows={8} autoFocus value={pasteText} onChange={e => setPasteText(e.target.value)} placeholder={'+1-206-555-0088\nbounce@example.com\n+1-701-555-0341'} style={{ height: 'auto', padding: '10px 12px', fontFamily: 'var(--mono)', fontSize: 12 }} />
+              <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 12 }}>Paste phone numbers, email addresses, or company names (one per line). The system will find and update matching CRM records.</p>
+              <textarea className="inp" rows={8} autoFocus value={pasteText} onChange={e => setPasteText(e.target.value)} placeholder={'+1-206-555-0088\nbounce@example.com\nAcme Industrial Corp\n+1-701-555-0341'} style={{ height: 'auto', padding: '10px 12px', fontFamily: 'var(--mono)', fontSize: 12 }} />
               <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--t4)' }}>Detected: {detectedCount} {detectedCount === 1 ? 'entry' : 'entries'}</div>
             </div>
             <div className="modal-footer">

@@ -386,12 +386,14 @@ export class LeadController {
         stage: req.params.stage,
         entityId: req.params.entityId,
         reason: req.body.reason,
+        blockCompany: req.body.blockCompany ?? false,
       });
       const removed = await LeadService.removePipelineEntry(
         payload.stage,
         payload.entityId,
         req.auth!.user.id,
         payload.reason,
+        payload.blockCompany,
       );
       invalidateRemovedCache();
       res.json({ success: true, data: removed });
