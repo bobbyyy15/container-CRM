@@ -3526,8 +3526,8 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
           <div className="page-desc">Your dedicated client portfolio. Manage repeat buyers, monitor lifetime value, and trigger quick deals.</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn variant="secondary" sm onClick={() => setShowNewInquiry(true)}><Ic n={I.inquiry} size={13} /> + New Inquiry</Btn>
-          <Btn variant="primary" sm onClick={() => setShowManualSale(true)}><Ic n={I.plus} size={13} /> + Record Sale</Btn>
+          <Btn variant="secondary" sm onClick={() => setShowNewInquiry(true)}><Ic n={I.inquiry} size={13} /> New Inquiry</Btn>
+          <Btn variant="primary" sm onClick={() => setShowManualSale(true)}><Ic n={I.plus} size={13} /> Record Sale</Btn>
         </div>
         {showNewInquiry && (
           <NewInquiryDialog
@@ -3634,8 +3634,8 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
                   <td><Badge status={c.status as BadgeStatus} /></td>
                   <td className="col-actions">
                     <div className="row-actions" style={{ display: 'flex', gap: 4 }}>
-                      <Btn variant="secondary" sm onClick={() => handleFastInquiry(c)} title="Fast 1-Click Inquiry"><Ic n={I.inquiry} size={12} /> + Inquiry</Btn>
-                      <Btn variant="ghost" sm onClick={() => handleFastSale(c)} title="Fast Direct Sale"><Ic n={I.plus} size={12} /> + Sale</Btn>
+                      <Btn variant="secondary" sm onClick={() => handleFastInquiry(c)} title="Fast 1-Click Inquiry"><Ic n={I.inquiry} size={12} /> Inquiry</Btn>
+                      <Btn variant="ghost" sm onClick={() => handleFastSale(c)} title="Fast Direct Sale"><Ic n={I.plus} size={12} /> Sale</Btn>
                       <Btn variant="ghost" sm onClick={() => setViewRow(c)}>View</Btn>
                     </div>
                   </td>
