@@ -31,7 +31,8 @@ export const NAV: NavGroup[] = [
     items: [
       { id: 'pickups', label: 'Pickup Tracking', icon: I.pickup, roles: ['admin', 'operations', 'sales_manager'] },
       { id: 'contracts', label: 'Customer Contracts', icon: I.contract, roles: ['admin', 'operations', 'sales_manager'] },
-      { id: 'customers', label: 'Customer Accounts', icon: I.customer, roles: ['admin', 'operations', 'sales_manager'] },
+      { id: 'active-clients', label: 'Active Clients', icon: I.customer, roles: ['admin', 'sales_manager'] },
+      { id: 'customers', label: 'Customer Accounts (Master)', icon: I.customer, roles: ['admin', 'operations', 'sales_manager'] },
     ],
   },
   {
@@ -85,7 +86,8 @@ export const SCREEN_LABELS: Record<Screen, string> = {
   'inquiries': 'Inquiries',
   'quotations': 'Quotations',
   'sales-tracker': 'Sales Tracker',
-  'customers': 'Customer Accounts',
+  'active-clients': 'Active Clients Dashboard',
+  'customers': 'Customer Accounts (Master)',
   'contact-outreach': 'Contact Outreach Sheet',
   'contracts': 'Customer Contracts',
   'pickups': 'Pickup Tracking',

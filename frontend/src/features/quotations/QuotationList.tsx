@@ -48,16 +48,24 @@ const QuotationList = () => {
     Accepted: ['Rejected'],
   }
 
-  const removeQuotation = async (id: string) => {
-    const { confirmed, reason } = await askReason({
+  const removeQuotation = async (target: any) => {
+    const id = typeof target === 'string' ? target : target.id
+    const rowObj = typeof target === 'object' ? target : (quotes as any[]).find(q => q.id === id)
+    const companyName = rowObj?.co || ''
+    const { confirmed, reason, checked } = await askReason({
       title: 'Remove quotation',
       message: 'Why should this quotation be removed?',
       confirmLabel: 'Remove',
+      danger: true,
+      checkboxLabel: companyName
+        ? `Block entire company (${companyName}) and all associated contacts`
+        : 'Block entire company and all associated contacts',
     })
     if (!confirmed || !reason) return
     setActionError('')
     try {
-      await api.post(`/leads/quotation/${id}/remove`, { reason })
+      await api.post(`/leads/quotation/${id}/remove`, { reason, blockCompany: checked ?? false })
+      toast(checked ? `Entire company ${companyName ? `"${companyName}" ` : ''}& all contacts removed and blocked` : 'Quotation removed', 'success')
       setRevision(value => value + 1)
     } catch (error: any) {
       setActionError(error.response?.data?.error?.message ?? error.message ?? 'Could not remove the quotation.')
@@ -154,7 +162,7 @@ const QuotationList = () => {
                       </select>
                     )}
                     {q.status === 'Accepted' && <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => setSaleQuotationId(q.id)}>→ Sale</Btn>}
-                    {q.status !== 'Converted' && <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={() => removeQuotation(q.id)}>Remove</Btn>}
+                    {q.status !== 'Converted' && <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={() => removeQuotation(q)}>Remove</Btn>}
                   </div>
                 </td>
               </tr>
@@ -185,5 +193,6 @@ const QuotationList = () => {
   )
 }
 
+// ─── Sales Tracker ────────────────────────────────────────────────────────────
 
 export default QuotationList

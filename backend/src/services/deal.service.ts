@@ -46,6 +46,14 @@ export class DealService {
       })
       .single();
     if (error) throw new Error(`Failed to create sale: ${error.message}`);
+    const convertedCompanyId = (sale as { company_id?: string } | null)?.company_id;
+    if (convertedCompanyId) {
+      await supabaseAdmin
+        .from('prospect_clients')
+        .update({ lifecycle_status: 'converted', converted_at: new Date().toISOString() })
+        .eq('company_id', convertedCompanyId)
+        .eq('lifecycle_status', 'active');
+    }
     return sale;
   }
 
@@ -60,6 +68,14 @@ export class DealService {
       })
       .single();
     if (error) throw new Error(`Failed to record sale: ${error.message}`);
+    const convertedCompanyId = (sale as { company_id?: string } | null)?.company_id;
+    if (convertedCompanyId) {
+      await supabaseAdmin
+        .from('prospect_clients')
+        .update({ lifecycle_status: 'converted', converted_at: new Date().toISOString() })
+        .eq('company_id', convertedCompanyId)
+        .eq('lifecycle_status', 'active');
+    }
     return sale;
   }
 

@@ -34,14 +34,15 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
   const [showAssignPic, setShowAssignPic] = useState(false)
   const pics = usePics()
+
   const [localOverrides, setLocalOverrides] = useState<Record<string, Record<string, any>>>({})
   const [editingCell, setEditingCell] = useState<{
-    r: number
-    c: number
-    rowId: string
-    field: string
-    value: string
-    originalValue: string
+    r: number;
+    c: number;
+    rowId: string;
+    field: string;
+    value: string;
+    originalValue: string;
   } | null>(null)
 
   const _prospectsData = useProspects(revision, mode === 'prospect' ? status : 'active', mode === 'prospect')
@@ -49,33 +50,28 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const prospectsData = mode === 'warm' ? _warmData : _prospectsData
 
   const commitCellEdit = async (rowId: string, field: string, newValue: string, oldValue: string) => {
-    setEditingCell(null)
-    if (newValue === oldValue) return
-    setLocalOverrides(previous => ({
-      ...previous,
-      [rowId]: { ...(previous[rowId] || {}), [field]: newValue },
-    }))
+    setEditingCell(null);
+    if (newValue === oldValue) return;
+    setLocalOverrides(prev => ({
+      ...prev,
+      [rowId]: { ...(prev[rowId] || {}), [field]: newValue },
+    }));
     try {
       await api.patch(`/leads/${mode === 'prospect' ? 'prospect' : 'warm_lead'}/${rowId}/cell`, {
         field,
         value: newValue,
-      })
-      toast('Saved', 'success')
-    } catch (error: any) {
-      toast(error.response?.data?.error?.message ?? 'Failed to update cell', 'error')
-      setLocalOverrides(previous => {
-        const next = { ...previous }
-        if (next[rowId]) {
-          const rowOverrides = { ...next[rowId] }
-          delete rowOverrides[field]
-          if (Object.keys(rowOverrides).length) next[rowId] = rowOverrides
-          else delete next[rowId]
-        }
-        return next
-      })
-      setRevision(value => value + 1)
+      });
+      toast('Saved', 'success');
+    } catch (err: any) {
+      toast(err.response?.data?.error?.message ?? 'Failed to update cell', 'error');
+      setLocalOverrides(prev => {
+        const next = { ...prev };
+        if (next[rowId]) delete next[rowId][field];
+        return next;
+      });
+      setRevision(v => v + 1);
     }
-  }
+  };
 
   const handleConvert = async (id: string) => {
     try {
@@ -87,15 +83,26 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     }
   }
 
-  const handleRemove = async (id: string) => {
-    const { confirmed, reason } = await askReason({
+  const handleRemove = async (target: any) => {
+    const id = typeof target === 'string' ? target : target.id
+    const rowObj = typeof target === 'object' ? target : prospectsData.find(r => r.id === id)
+    const companyName = rowObj?.company || ''
+    const { confirmed, reason, checked } = await askReason({
       title: 'Remove from active lists',
       message: 'Why should this contact be removed from active CRM lists?',
       confirmLabel: 'Remove',
+      danger: true,
+      checkboxLabel: companyName
+        ? `Block entire company (${companyName}) and all associated contacts`
+        : 'Block entire company and all associated contacts',
     })
     if (!confirmed || !reason) return
     try {
-      await api.post(`/leads/${mode === 'prospect' ? 'prospect' : 'warm_lead'}/${id}/remove`, { reason })
+      await api.post(`/leads/${mode === 'prospect' ? 'prospect' : 'warm_lead'}/${id}/remove`, {
+        reason,
+        blockCompany: checked ?? false,
+      })
+      toast(checked ? `Entire company ${companyName ? `"${companyName}" ` : ''}& all contacts removed and blocked` : 'Contact removed from active lists', 'success')
       setSelected(current => current.filter(value => value !== id))
       setRevision(value => value + 1)
     } catch (e: any) {
@@ -161,13 +168,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   ]
 
   const getVal = (row: ReturnType<typeof mapPipelineRow>, field: string): string => {
-    if (localOverrides[row.id]?.[field] !== undefined) return localOverrides[row.id][field]
-    return (row as any)[field] || ''
+    if (localOverrides[row.id]?.[field] !== undefined) return localOverrides[row.id][field];
+    return (row as any)[field] || '';
   }
-
-  const isFieldEditable = (field: string) =>
-    !['added', 'entryPath'].includes(field)
-    && (mode === 'prospect' || !['cat', 'sms', 'email', 'territory'].includes(field))
 
   // Each tab is a real column subset of COLS rather than a decorative label --
   // null means "show everything."
@@ -187,12 +190,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   }
   const rowHeight = density === 'Compact' ? 30 : density === 'Comfortable' ? 46 : 38
 
-  // ── Spreadsheet-style cell selection ───────────────────────────────────────
-  // Clicking a row used to select the whole record, and dragging just ran the
-  // browser's native text selection across the entire table. This mirrors a
-  // spreadsheet instead: click a cell, drag or shift-click to extend a range, and
-  // Ctrl/Cmd+C copies exactly that block as TSV so it pastes into Sheets/Excel
-  // with its rows and columns intact. Row selection now lives on the checkbox.
+  // ── Spreadsheet-style cell selection & keyboard navigation ─────────────────
   type CellRef = { r: number; c: number }
   const [anchor, setAnchor] = useState<CellRef | null>(null)
   const [focusCell, setFocusCell] = useState<CellRef | null>(null)
@@ -220,6 +218,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     return () => window.removeEventListener('mouseup', stop)
   }, [])
 
+  // Keyboard navigation & activation for spreadsheet grid
   useEffect(() => {
     if (!bounds || editingCell) return
     const onKeyDown = (event: KeyboardEvent) => {
@@ -230,28 +229,39 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
         if (bounds.r1 === bounds.r2 && bounds.c1 === bounds.c2) {
           const row = filtered[bounds.r1]
           const col = visibleCols[bounds.c1]
-          if (row && col && isFieldEditable(col.field)) {
+          if (row && col && !['added', 'entryPath'].includes(col.field)) {
             event.preventDefault()
-            const value = getVal(row, col.field)
-            setEditingCell({ r: bounds.r1, c: bounds.c1, rowId: row.id, field: col.field, value: String(value || ''), originalValue: String(value || '') })
+            const val = getVal(row, col.field)
+            setEditingCell({
+              r: bounds.r1,
+              c: bounds.c1,
+              rowId: row.id,
+              field: col.field,
+              value: String(val || ''),
+              originalValue: String(val || ''),
+            })
           }
         }
       } else if (event.key === 'ArrowDown') {
         event.preventDefault()
-        const row = Math.min(filtered.length - 1, bounds.r2 + 1)
-        setAnchor({ r: row, c: bounds.c1 }); setFocusCell({ r: row, c: bounds.c1 })
+        const nextR = Math.min(filtered.length - 1, bounds.r2 + 1)
+        setAnchor({ r: nextR, c: bounds.c1 })
+        setFocusCell({ r: nextR, c: bounds.c1 })
       } else if (event.key === 'ArrowUp') {
         event.preventDefault()
-        const row = Math.max(0, bounds.r1 - 1)
-        setAnchor({ r: row, c: bounds.c1 }); setFocusCell({ r: row, c: bounds.c1 })
+        const nextR = Math.max(0, bounds.r1 - 1)
+        setAnchor({ r: nextR, c: bounds.c1 })
+        setFocusCell({ r: nextR, c: bounds.c1 })
       } else if (event.key === 'ArrowRight') {
         event.preventDefault()
-        const column = Math.min(visibleCols.length - 1, bounds.c2 + 1)
-        setAnchor({ r: bounds.r1, c: column }); setFocusCell({ r: bounds.r1, c: column })
+        const nextC = Math.min(visibleCols.length - 1, bounds.c2 + 1)
+        setAnchor({ r: bounds.r1, c: nextC })
+        setFocusCell({ r: bounds.r1, c: nextC })
       } else if (event.key === 'ArrowLeft') {
         event.preventDefault()
-        const column = Math.max(0, bounds.c1 - 1)
-        setAnchor({ r: bounds.r1, c: column }); setFocusCell({ r: bounds.r1, c: column })
+        const nextC = Math.max(0, bounds.c1 - 1)
+        setAnchor({ r: bounds.r1, c: nextC })
+        setFocusCell({ r: bounds.r1, c: nextC })
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -476,8 +486,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                 {visibleCols.map((col, ci) => {
                   const val = getVal(row, col.field)
                   const picked = inSelection(ri, ci)
-                  const isEditing = editingCell?.r === ri && editingCell.c === ci
-                  const isEditable = isFieldEditable(col.field)
+                  const isEditing = editingCell && editingCell.r === ri && editingCell.c === ci
+                  const isEditable = !['added', 'entryPath'].includes(col.field)
+
                   return (
                     <div
                       key={col.key}
@@ -487,16 +498,20 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                         beginSelect(ri, ci, event.shiftKey)
                       }}
                       onMouseEnter={event => {
-                        if (draggingRef.current && anchor && !isEditing) {
-                          setFocusCell({ r: ri, c: event.shiftKey ? ci : anchor.c })
-                        }
+                        if (draggingRef.current && anchor && !isEditing) setFocusCell({ r: ri, c: event.shiftKey ? ci : anchor.c })
                       }}
                       onDoubleClick={event => {
                         event.stopPropagation()
                         if (!isEditable) return
-                        setEditingCell({ r: ri, c: ci, rowId: row.id, field: col.field, value: String(val || ''), originalValue: String(val || '') })
+                        setEditingCell({
+                          r: ri,
+                          c: ci,
+                          rowId: row.id,
+                          field: col.field,
+                          value: String(val || ''),
+                          originalValue: String(val || ''),
+                        })
                       }}
-                      title={isEditable ? 'Double-click or press Enter to edit' : undefined}
                       style={{
                         minWidth: col.w, width: col.w, padding: isEditing ? 0 : '0 12px', height: rowHeight,
                         display: 'flex', alignItems: 'center', overflow: isEditing ? 'visible' : 'hidden',
@@ -509,77 +524,131 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                         borderTop: picked && bounds && ri === bounds.r1 ? '1px solid var(--brand)' : undefined,
                         borderBottom: picked && bounds && ri === bounds.r2 ? '1px solid var(--brand)' : undefined,
                       }}
+                      title={isEditable ? 'Double-click or press Enter to edit' : undefined}
                     >
                       {isEditing ? (
                         <div
-                          style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'var(--ws, #ffffff)', display: 'flex', alignItems: 'center', boxShadow: '0 0 0 2px var(--brand, #315EF6)' }}
-                          onClick={event => event.stopPropagation()}
-                          onMouseDown={event => event.stopPropagation()}
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            zIndex: 20,
+                            background: 'var(--ws, #ffffff)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            boxShadow: '0 0 0 2px var(--brand, #315EF6)',
+                          }}
+                          onClick={e => e.stopPropagation()}
+                          onMouseDown={e => e.stopPropagation()}
                         >
                           {col.field === 'cat' ? (
                             <select
-                              autoFocus className="inp" value={editingCell.value}
+                              autoFocus
+                              className="inp"
                               style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 6px', fontSize: 12, background: 'transparent' }}
-                              onChange={event => setEditingCell({ ...editingCell, value: event.target.value })}
+                              value={editingCell.value}
+                              onChange={e => setEditingCell({ ...editingCell, value: e.target.value })}
                               onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
-                              onKeyDown={event => { if (event.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue); if (event.key === 'Escape') setEditingCell(null) }}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                if (e.key === 'Escape') setEditingCell(null)
+                              }}
                             >
-                              <option value="Proceed">Proceed</option><option value="Removed">Removed</option>
+                              <option value="Proceed">Proceed</option>
+                              <option value="Removed">Removed</option>
                             </select>
                           ) : col.field === 'sms' ? (
                             <select
-                              autoFocus className="inp" value={editingCell.value}
+                              autoFocus
+                              className="inp"
                               style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 6px', fontSize: 12, background: 'transparent' }}
-                              onChange={event => setEditingCell({ ...editingCell, value: event.target.value })}
+                              value={editingCell.value}
+                              onChange={e => setEditingCell({ ...editingCell, value: e.target.value })}
                               onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
-                              onKeyDown={event => { if (event.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue); if (event.key === 'Escape') setEditingCell(null) }}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                if (e.key === 'Escape') setEditingCell(null)
+                              }}
                             >
-                              <option value="">—</option><option value="Call/Text">Call/Text</option><option value="Calls Only">Calls Only</option><option value="Text Only">Text Only</option>
+                              <option value="">—</option>
+                              <option value="Call/Text">Call/Text</option>
+                              <option value="Calls Only">Calls Only</option>
+                              <option value="Text Only">Text Only</option>
                             </select>
                           ) : col.field === 'email' ? (
                             <select
-                              autoFocus className="inp" value={editingCell.value}
+                              autoFocus
+                              className="inp"
                               style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 6px', fontSize: 12, background: 'transparent' }}
-                              onChange={event => setEditingCell({ ...editingCell, value: event.target.value })}
+                              value={editingCell.value}
+                              onChange={e => setEditingCell({ ...editingCell, value: e.target.value })}
                               onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
-                              onKeyDown={event => { if (event.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue); if (event.key === 'Escape') setEditingCell(null) }}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                if (e.key === 'Escape') setEditingCell(null)
+                              }}
                             >
-                              {['Available', 'Unavailable', 'Mail Delivery Report', 'Bounced', 'Hard Bounce', 'Soft Bounce', 'Unsubscribed', 'Spam Complaint'].map(option => <option key={option} value={option}>{option}</option>)}
+                              <option value="Available">Available</option>
+                              <option value="Unavailable">Unavailable</option>
+                              <option value="Mail Delivery Report">Mail Delivery Report</option>
+                              <option value="Bounced">Bounced</option>
+                              <option value="Hard Bounce">Hard Bounce</option>
+                              <option value="Soft Bounce">Soft Bounce</option>
+                              <option value="Unsubscribed">Unsubscribed</option>
+                              <option value="Spam Complaint">Spam Complaint</option>
                             </select>
                           ) : col.field === 'pic' ? (
                             <select
-                              autoFocus className="inp" value={editingCell.value}
+                              autoFocus
+                              className="inp"
                               style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 6px', fontSize: 12, background: 'transparent' }}
-                              onChange={event => setEditingCell({ ...editingCell, value: event.target.value })}
+                              value={editingCell.value}
+                              onChange={e => setEditingCell({ ...editingCell, value: e.target.value })}
                               onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
-                              onKeyDown={event => { if (event.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue); if (event.key === 'Escape') setEditingCell(null) }}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                if (e.key === 'Escape') setEditingCell(null)
+                              }}
                             >
                               <option value="">Unassigned</option>
-                              {pics.map(pic => <option key={pic.id} value={pic.name}>{pic.name}</option>)}
+                              {pics.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
                             </select>
                           ) : (
                             <input
-                              autoFocus className="inp" value={editingCell.value}
+                              autoFocus
+                              className="inp"
                               style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 8px', fontSize: 12.5, background: 'transparent' }}
-                              onChange={event => setEditingCell({ ...editingCell, value: event.target.value })}
-                              onFocus={event => event.target.select()}
+                              value={editingCell.value}
+                              onChange={e => setEditingCell({ ...editingCell, value: e.target.value })}
+                              onFocus={e => e.target.select()}
                               onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
-                              onKeyDown={event => {
-                                if (event.key === 'Enter') {
-                                  event.preventDefault()
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
                                   commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
-                                  if (ri < filtered.length - 1) { setAnchor({ r: ri + 1, c: ci }); setFocusCell({ r: ri + 1, c: ci }) }
-                                } else if (event.key === 'Tab') {
-                                  event.preventDefault()
-                                  commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
-                                  const nextColumnIndex = event.shiftKey ? Math.max(0, ci - 1) : Math.min(visibleCols.length - 1, ci + 1)
-                                  setAnchor({ r: ri, c: nextColumnIndex }); setFocusCell({ r: ri, c: nextColumnIndex })
-                                  const nextColumn = visibleCols[nextColumnIndex]
-                                  if (nextColumn && isFieldEditable(nextColumn.field)) {
-                                    const nextValue = String(getVal(row, nextColumn.field) || '')
-                                    setEditingCell({ r: ri, c: nextColumnIndex, rowId: row.id, field: nextColumn.field, value: nextValue, originalValue: nextValue })
+                                  if (ri < filtered.length - 1) {
+                                    setAnchor({ r: ri + 1, c: ci })
+                                    setFocusCell({ r: ri + 1, c: ci })
                                   }
-                                } else if (event.key === 'Escape') setEditingCell(null)
+                                } else if (e.key === 'Tab') {
+                                  e.preventDefault()
+                                  commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                  const nextCi = e.shiftKey ? Math.max(0, ci - 1) : Math.min(visibleCols.length - 1, ci + 1)
+                                  setAnchor({ r: ri, c: nextCi })
+                                  setFocusCell({ r: ri, c: nextCi })
+                                  const nextCol = visibleCols[nextCi]
+                                  if (nextCol && !['added', 'entryPath'].includes(nextCol.field)) {
+                                    setEditingCell({
+                                      r: ri,
+                                      c: nextCi,
+                                      rowId: row.id,
+                                      field: nextCol.field,
+                                      value: String(getVal(row, nextCol.field) || ''),
+                                      originalValue: String(getVal(row, nextCol.field) || ''),
+                                    })
+                                  }
+                                } else if (e.key === 'Escape') {
+                                  setEditingCell(null)
+                                }
                               }}
                             />
                           )}
@@ -603,7 +672,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                     ? <Btn variant="ghost" sm style={{ color: 'var(--brand)' }} onClick={(e) => { e.stopPropagation(); handleConvert(row.id); }}>→ Warm</Btn>
                     : <Btn variant="ghost" sm style={{ color: 'var(--brand)' }} onClick={(e) => { e.stopPropagation(); setInquiryWarmLeadId(row.id); }}>Inquiry</Btn>
                   }
-                  <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={(e) => { e.stopPropagation(); handleRemove(row.id); }}>Remove</Btn>
+                  <Btn variant="ghost" sm style={{ color: 'var(--red)' }} onClick={(e) => { e.stopPropagation(); handleRemove(row); }}>Remove</Btn>
                 </div>
               </div>
             )
@@ -634,7 +703,6 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
         </div>
       </div>
       {importMode && (
-        <Suspense fallback={null}>
         <ProspectImportDialog
           key={importMode}
           open
@@ -642,7 +710,6 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           onClose={() => setImportMode(null)}
           onImported={() => setRevision(value => value + 1)}
         />
-        </Suspense>
       )}
       {showNewWarmLead && (
         <NewWarmLeadDialog
@@ -675,5 +742,6 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   )
 }
 
+// ─── Inquiry List ─────────────────────────────────────────────────────────────
 
 export default ProspectSheet

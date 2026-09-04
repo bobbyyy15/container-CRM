@@ -13,6 +13,8 @@ router.get('/inquiries/pending-validation', requireRoles('admin', 'procurement')
 router.get('/inquiries/board', requireRoles('admin', 'procurement'), LeadController.getInquiryBoard);
 router.get('/removed', LeadController.getRemoved);
 router.post('/removed/bulk', requireRoles('admin', 'sales_manager'), LeadController.bulkRemove);
+router.post('/removed/:removedId/restore', requireRoles('admin', 'sales_manager'), LeadController.restoreRemoved);
+router.delete('/removed/:removedId', requireRoles('admin', 'sales_manager'), LeadController.restoreRemoved);
 
 // Inquiry ticket validation (Procurement approves/rejects before it's quotable)
 router.post('/inquiries/:entityId/validate', requireRoles('admin', 'procurement'), LeadController.validateTicket);

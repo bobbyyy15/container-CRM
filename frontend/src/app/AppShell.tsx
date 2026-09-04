@@ -12,6 +12,7 @@ import InquiryList from '../features/inquiries/InquiryList'
 import QuotationList from '../features/quotations/QuotationList'
 import SalesTracker from '../features/sales/SalesTracker'
 import CustomerAccounts from '../features/customers/CustomerAccounts'
+import ActiveClientsDashboard from '../features/customers/ActiveClientsDashboard'
 import ContactOutreach from '../features/outreach/ContactOutreach'
 import DailyTasks from '../features/outreach/DailyTasks'
 import RemovedSheet from '../features/outreach/RemovedSheet'
@@ -75,7 +76,8 @@ export default function AppShell({ session, currentProfile }: AppShellProps) {
       case 'inquiries':           return <InquiryList />
       case 'quotations':          return <QuotationList />
       case 'sales-tracker':       return <SalesTracker />
-      case 'customers':           return <CustomerAccounts />
+      case 'active-clients':      return <ActiveClientsDashboard role={currentProfile?.role} onNav={handleNav} />
+      case 'customers':           return <CustomerAccounts role={currentProfile?.role} />
       case 'contact-outreach':    return <ContactOutreach />
       case 'contracts':           return <Contracts />
       case 'daily-tasks':         return <DailyTasks />

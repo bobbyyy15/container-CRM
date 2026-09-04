@@ -1,13 +1,16 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../../lib/api'
+import { fetchCached, getFromCache } from '../../lib/dataCache'
 
 type CatalogOption = { id: string; name: string }
 
 const useCatalog = (path: string) => {
-  const [options, setOptions] = useState<CatalogOption[]>([])
+  const [options, setOptions] = useState<CatalogOption[]>(() => getFromCache(`catalog:${path}`) ?? [])
   useEffect(() => {
     let cancelled = false
-    api.get(path).then(response => { if (!cancelled) setOptions(response.data.data ?? []) }).catch(() => {})
+    fetchCached(`catalog:${path}`, () => api.get(path).then(res => res.data.data ?? []), 300_000)
+      .then(data => { if (!cancelled) setOptions(data) })
+      .catch(() => {})
     return () => { cancelled = true }
   }, [path])
   return options
@@ -16,10 +19,12 @@ const useCatalog = (path: string) => {
 export type PicOption = { id: string; name: string }
 
 export const usePics = () => {
-  const [options, setOptions] = useState<PicOption[]>([])
+  const [options, setOptions] = useState<PicOption[]>(() => getFromCache('pics:all') ?? [])
   useEffect(() => {
     let cancelled = false
-    api.get('/pics').then(response => { if (!cancelled) setOptions(response.data.data ?? []) }).catch(() => {})
+    fetchCached('pics:all', () => api.get('/pics').then(res => res.data.data ?? []), 300_000)
+      .then(data => { if (!cancelled) setOptions(data) })
+      .catch(() => {})
     return () => { cancelled = true }
   }, [])
   return options
@@ -769,23 +774,32 @@ export const NewProspectDialog = ({ onClose, onSaved }: {
   )
 }
 
-export const NewManualSaleDialog = ({ onClose, onSaved }: {
+export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
+  initialData?: {
+    companyName?: string
+    contactPerson?: string
+    phone?: string
+    email?: string
+    stateProvince?: string
+    country?: string
+    picId?: string
+  }
   onClose: () => void
   onSaved: () => void
 }) => {
   const pics = usePics()
-  const [companyName, setCompanyName] = useState('')
-  const [contactPerson, setContactPerson] = useState('')
-  const [phone, setPhone] = useState('')
-  const [email, setEmail] = useState('')
-  const [picId, setPicId] = useState('')
+  const [companyName, setCompanyName] = useState(initialData?.companyName ?? '')
+  const [contactPerson, setContactPerson] = useState(initialData?.contactPerson ?? '')
+  const [phone, setPhone] = useState(initialData?.phone ?? '')
+  const [email, setEmail] = useState(initialData?.email ?? '')
+  const [picId, setPicId] = useState(initialData?.picId ?? '')
   const [totalUnits, setTotalUnits] = useState(1)
   // Entered per unit; the totals below are derived, never typed. Revenue is what the
   // sale generates in full, profit is the per-unit margin across those units.
   const [buyPerUnit, setBuyPerUnit] = useState(0)
   const [sellPerUnit, setSellPerUnit] = useState(0)
-  const [stateProvince, setStateProvince] = useState('')
-  const [country, setCountry] = useState('')
+  const [stateProvince, setStateProvince] = useState(initialData?.stateProvince ?? '')
+  const [country, setCountry] = useState(initialData?.country ?? '')
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
 

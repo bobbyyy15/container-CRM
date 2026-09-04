@@ -1,5 +1,3 @@
-// Row shape shared by the prospect and warm-lead spreadsheet views.
-
 export const mapPipelineRow = (p: any) => ({
   id: p.id,
   added: new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
@@ -29,4 +27,3 @@ export const mapPipelineRow = (p: any) => ({
       ? 'From Prospect'
       : 'Direct Entry',
 })
-

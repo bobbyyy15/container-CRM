@@ -34,11 +34,48 @@ const requirePicId = (req: Request, res: Response): string | null => {
   return picId;
 };
 
+let cachedRemoved: {
+  companies: Set<string>;
+  contacts: Set<string>;
+  emails: Set<string>;
+  phones: Set<string>;
+  timestamp: number;
+} | null = null;
+
+export const invalidateRemovedCache = () => {
+  cachedRemoved = null;
+};
+
+const getCachedRemovedEntries = async () => {
+  const now = Date.now();
+  if (cachedRemoved && now - cachedRemoved.timestamp < 30_000) {
+    return cachedRemoved;
+  }
+  const { data: removed, error: removedError } = await supabaseAdmin
+    .from('removed_entries')
+    .select('company_id, contact_id, identity_type, normalized_value');
+  if (removedError) throw removedError;
+
+  cachedRemoved = {
+    companies: new Set((removed ?? []).filter(row => row.identity_type === 'company' && !row.contact_id).map(row => row.company_id).filter(Boolean)),
+    contacts: new Set((removed ?? []).map(row => row.contact_id).filter(Boolean)),
+    emails: new Set((removed ?? []).filter(row => row.identity_type === 'email').map(row => row.normalized_value)),
+    phones: new Set((removed ?? []).filter(row => row.identity_type === 'phone').map(row => row.normalized_value)),
+    timestamp: now,
+  };
+  return cachedRemoved;
+};
+
 const listActiveLeads = async (
   table: 'prospect_clients' | 'warm_leads' | 'inquiries',
   req: Request,
 ) => {
   const query = LeadListQuerySchema.parse(req.query);
+  const picId = req.auth?.profile.pic_id;
+  if (!picId) {
+    return { data: [], meta: { total: 0, limit: query.limit, offset: query.offset } };
+  }
+
   // Two FKs to container_sizes/container_conditions (the ticket's own spec, and the
   // Procurement-suggested alternative) means PostgREST needs the !column disambiguation
   // hint -- an unqualified container_sizes(...) errors with "more than one relationship".
@@ -48,72 +85,77 @@ const listActiveLeads = async (
       + 'alt_size:container_sizes!alt_container_size_id(id, name), alt_condition:container_conditions!alt_container_condition_id(id, name), '
       + 'backfilled_warm_leads:warm_leads!source_inquiry_id(id)'
     : '*, companies(*), contacts(*), pics(name)';
+
+  const fetchLimit = Math.min(Math.max(query.limit * 2, 500), 1000);
   let dbQuery = supabaseAdmin
     .from(table)
     .select(select)
+    .eq('pic_id', picId)
     .order('created_at', { ascending: false })
-    .limit(5000);
-
-  // DATA SILOS ENFORCEMENT -- every role, including admin, only sees the pipeline data
-  // stamped with their own PIC identity. A user with no PIC assigned yet (or an admin, who
-  // never gets one) has nothing to see: .eq('pic_id', null) is not a valid NULL check in
-  // PostgREST and would error, so short-circuit to an empty result instead.
-  const picId = req.auth?.profile.pic_id;
-  if (!picId) {
-    return { data: [], meta: { total: 0, limit: query.limit, offset: query.offset } };
-  }
-  dbQuery = dbQuery.eq('pic_id', picId);
+    .limit(fetchLimit);
 
   if (table === 'prospect_clients' && query.status !== 'all') dbQuery = dbQuery.eq('lifecycle_status', query.status);
   if (table === 'warm_leads' && query.status !== 'all') dbQuery = dbQuery.eq('status', 'active');
   if (table === 'inquiries' && query.status !== 'all') dbQuery = dbQuery.not('status', 'in', '(Removed,Lost,Quotation Created,Converted to Sale)');
 
-  // A prospect that has already moved down the pipeline must not still be sitting in the
-  // Prospect Clients list. lifecycle_status only covers the explicit "convert" action --
-  // a warm lead, inquiry or sale raised manually for the same company leaves the original
-  // prospect row untouched and it keeps showing up. Exclude by company instead, which is
-  // self-correcting for rows already in that state.
   const needsDownstreamFilter = table === 'prospect_clients' && query.status === 'active';
+  const applySuppressionFilter = table !== 'prospect_clients' || query.status === 'active';
 
-  const [{ data, error }, { data: removed, error: removedError }, downstream] = await Promise.all([
+  const [{ data, error }, removedSet, downstream] = await Promise.all([
     dbQuery,
-    supabaseAdmin.from('removed_entries').select('company_id, contact_id, identity_type, normalized_value'),
+    applySuppressionFilter ? getCachedRemovedEntries() : Promise.resolve(null),
     needsDownstreamFilter
       ? Promise.all([
-          supabaseAdmin.from('warm_leads').select('company_id').eq('status', 'active'),
-          supabaseAdmin.from('inquiries').select('company_id'),
-          supabaseAdmin.from('sales').select('company_id'),
+          supabaseAdmin.from('warm_leads').select('company_id, contact_id, companies(name), contacts(email_active, email_2, phone_direct, phone_2)').eq('pic_id', picId).eq('status', 'active'),
+          supabaseAdmin.from('inquiries').select('company_id, contact_id, companies(name), contacts(email_active, email_2, phone_direct, phone_2)').eq('pic_id', picId).not('status', 'in', '(Removed,Lost)'),
+          supabaseAdmin.from('sales').select('company_id, companies(name)').eq('pic_id', picId).eq('status', 'Won'),
         ])
       : Promise.resolve(null),
   ]);
   if (error) throw error;
-  if (removedError) throw removedError;
 
-  const downstreamCompanies = new Set(
-    (downstream ?? []).flatMap(result => (result.data ?? []).map((row: any) => row.company_id)).filter(Boolean)
-  );
+  const downstreamCompanyIds = new Set<string>();
+  const downstreamContactIds = new Set<string>();
+  const downstreamCompanyNames = new Set<string>();
+  const downstreamEmails = new Set<string>();
+  const downstreamPhones = new Set<string>();
 
-  const removedCompanies = new Set((removed ?? []).map(row => row.company_id).filter(Boolean));
-  const removedContacts = new Set((removed ?? []).map(row => row.contact_id).filter(Boolean));
-  const removedEmails = new Set((removed ?? []).filter(row => row.identity_type === 'email').map(row => row.normalized_value));
-  const removedPhones = new Set((removed ?? []).filter(row => row.identity_type === 'phone').map(row => row.normalized_value));
-
-  // Outreach-suppression filtering only makes sense for the "active" working view -- a
-  // Converted/Removed/All view on Prospect Clients is meant to show exactly those records,
-  // including ones that are also on the removed_entries suppression list.
-  const applySuppressionFilter = table !== 'prospect_clients' || query.status === 'active';
+  if (downstream) {
+    for (const res of downstream) {
+      for (const row of (res.data ?? []) as any[]) {
+        if (row.company_id) downstreamCompanyIds.add(row.company_id);
+        if (row.contact_id) downstreamContactIds.add(row.contact_id);
+        if (row.companies?.name) downstreamCompanyNames.add(text(row.companies.name));
+        const c = row.contacts;
+        if (c) {
+          if (c.email_active) downstreamEmails.add(text(c.email_active));
+          if (c.email_2) downstreamEmails.add(text(c.email_2));
+          if (c.phone_direct) downstreamPhones.add(digits(c.phone_direct));
+          if (c.phone_2) downstreamPhones.add(digits(c.phone_2));
+        }
+      }
+    }
+  }
 
   const eligible = (data ?? []).filter((row: any) => {
     const company = row.companies ?? {};
     const contact = row.contacts ?? {};
 
-    // Already a warm lead / inquiry / customer -- it belongs to that stage now.
-    if (needsDownstreamFilter && downstreamCompanies.has(row.company_id)) return false;
+    // Already a warm lead / inquiry / active client / customer -- it belongs to that stage now.
+    if (needsDownstreamFilter) {
+      if (row.company_id && downstreamCompanyIds.has(row.company_id)) return false;
+      if (row.contact_id && downstreamContactIds.has(row.contact_id)) return false;
+      if (company.name && downstreamCompanyNames.has(text(company.name))) return false;
+      const emails = [contact.email_active, contact.email_2].map(text).filter(Boolean);
+      const phones = [contact.phone_direct, contact.phone_2].map(digits).filter(Boolean);
+      if (emails.some((e: string) => downstreamEmails.has(e))) return false;
+      if (phones.some((p: string) => downstreamPhones.has(p))) return false;
+    }
 
-    if (applySuppressionFilter) {
-      if (removedCompanies.has(row.company_id) || removedContacts.has(row.contact_id)) return false;
-      if ([contact.email_active, contact.email_2].some(value => removedEmails.has(text(value)))) return false;
-      if ([contact.phone_direct, contact.phone_2].some(value => removedPhones.has(digits(value)))) return false;
+    if (applySuppressionFilter && removedSet) {
+      if (removedSet.companies.has(row.company_id) || removedSet.contacts.has(row.contact_id)) return false;
+      if ([contact.email_active, contact.email_2].some(value => removedSet.emails.has(text(value)))) return false;
+      if ([contact.phone_direct, contact.phone_2].some(value => removedSet.phones.has(digits(value)))) return false;
     }
 
     const haystack = [company.name, contact.first_name, contact.last_name, contact.email_active, contact.email_2, contact.phone_direct, contact.phone_2]
@@ -301,7 +343,39 @@ export class LeadController {
         .order('created_at', { ascending: false })
         .limit(1000);
       if (error) throw error;
-      res.json({ success: true, data, meta: { total: data?.length ?? 0 } });
+
+      // Deduplicate so each contact or company block appears exactly once
+      const companiesWithContacts = new Set<string>();
+      for (const row of (data ?? [])) {
+        if (row.contact_id && row.company_id) {
+          companiesWithContacts.add(row.company_id);
+        }
+      }
+
+      const seenContacts = new Set<string>();
+      const seenCompanies = new Set<string>();
+      const seenIdentities = new Set<string>();
+      const deduped: any[] = [];
+
+      for (const row of (data ?? [])) {
+        if (row.contact_id) {
+          if (seenContacts.has(row.contact_id)) continue;
+          seenContacts.add(row.contact_id);
+          deduped.push(row);
+        } else if (row.identity_type === 'company' && row.company_id) {
+          if (companiesWithContacts.has(row.company_id)) continue;
+          if (seenCompanies.has(row.company_id)) continue;
+          seenCompanies.add(row.company_id);
+          deduped.push(row);
+        } else {
+          const idKey = `${row.identity_type}:${row.normalized_value}`;
+          if (seenIdentities.has(idKey)) continue;
+          seenIdentities.add(idKey);
+          deduped.push(row);
+        }
+      }
+
+      res.json({ success: true, data: deduped, meta: { total: deduped.length } });
     } catch (error: any) {
       res.status(500).json({ success: false, error: { message: error.message } });
     }
@@ -310,8 +384,23 @@ export class LeadController {
   static async bulkRemove(req: Request, res: Response) {
     try {
       const payload = BulkRemovedEntriesSchema.parse(req.body);
-      const results = await LeadService.bulkAddRemovedEntries(payload.text, payload.reason, req.auth!.user.id);
+      const results = await LeadService.bulkAddRemovedEntries(payload.text, payload.reason, req.auth!.user.id, payload.blockCompany);
+      invalidateRemovedCache();
       res.json({ success: true, data: results });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async restoreRemoved(req: Request, res: Response) {
+    try {
+      const removedId = String(req.params.removedId ?? '').trim();
+      if (!removedId) {
+        return res.status(400).json({ success: false, error: { message: 'A removed entry ID is required.' } });
+      }
+      const result = await LeadService.restoreRemovedEntry(removedId, req.auth!.user.id);
+      invalidateRemovedCache();
+      res.json({ success: true, data: result, message: 'Record restored successfully' });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });
     }
@@ -343,13 +432,16 @@ export class LeadController {
         stage: req.params.stage,
         entityId: req.params.entityId,
         reason: req.body.reason,
+        blockCompany: req.body.blockCompany ?? false,
       });
       const removed = await LeadService.removePipelineEntry(
         payload.stage,
         payload.entityId,
         req.auth!.user.id,
         payload.reason,
+        payload.blockCompany,
       );
+      invalidateRemovedCache();
       res.json({ success: true, data: removed });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });

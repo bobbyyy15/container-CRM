@@ -1,28 +1,39 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 import { useRealtimeRevision } from '../lib/realtime'
+import { fetchCached, getFromCache } from '../lib/dataCache'
+import { mapCustomerRow } from './mappers'
 
-export const useCustomers = (status = 'All', search = '', revision = 0, limit?: number) => {
-  const [data, setData] = useState<any[]>([]);
-  const liveRevision = useRealtimeRevision(['deals', 'contracts']);
+export const useCustomers = (status = 'All', search = '', revision = 0, limit?: number, scope?: 'personal' | 'master', picId?: string) => {
+  const cacheKey = `customers:${scope ?? 'default'}:${picId ?? 'all'}:${status}:${search}:${limit ?? 'all'}`
+  const liveRevision = useRealtimeRevision(['deals', 'contracts'])
+  const [data, setData] = useState<any[]>(() => {
+    const cached = getFromCache<any[]>(cacheKey)
+    return cached ? cached.map(mapCustomerRow) : []
+  })
+
   useEffect(() => {
-    api.get('/customers', { params: { status, search, ...(limit ? { limit } : {}) } }).then(res => {
-      setData((res.data.data || []).map((c: any) => ({
-        id: c.company_id,
-        co: c.company_name,
-        contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
-        phone: c.primary_contact ? (c.primary_contact.phone_1 || c.primary_contact.phone_2) : '-',
-        state: c.state || '-',
-        country: c.country || '-',
-        sales: c.sales_count,
-        units: c.total_units,
-        revenue: Number(c.total_revenue),
-        profit: Number(c.total_gross_profit),
-        last: new Date(c.last_purchase_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        pic: c.pic_name || '-',
-        status: c.status
-      })));
-    }).catch(console.error);
-  }, [status, search, revision, liveRevision, limit]);
-  return data;
+    let cancelled = false
+    fetchCached(
+      cacheKey,
+      () =>
+        api.get('/customers', {
+          params: {
+            status,
+            search,
+            ...(limit ? { limit } : {}),
+            ...(scope ? { scope } : {}),
+            ...(picId ? { pic_id: picId } : {}),
+          },
+        }).then(res => res.data.data || []),
+      60_000
+    )
+      .then(raw => {
+        if (!cancelled) setData((raw || []).map(mapCustomerRow))
+      })
+      .catch(console.error)
+    return () => { cancelled = true }
+  }, [status, search, revision, liveRevision, limit, scope, picId])
+
+  return data
 }

@@ -54,15 +54,15 @@ const SalesTracker = () => {
       await api.patch(`/deals/sales/${id}/status`, { status: newStatus })
       toast(`Sale ${ref} status updated to ${newStatus}.`, 'success')
       setRevision(value => value + 1)
-    } catch (error: any) {
-      toast(error.response?.data?.error?.message || 'Failed to update status.', 'error')
+    } catch (err: any) {
+      toast(err.response?.data?.error?.message || 'Failed to update status.', 'error')
     }
   }
 
   const handleDeleteSale = async (id: string, ref: string) => {
     const confirmed = await askConfirm({
       title: `Delete Sale ${ref}`,
-      message: 'Are you sure you want to delete this sale record? This action cannot be undone.',
+      message: `Are you sure you want to delete this sale record? This action cannot be undone.`,
       confirmLabel: 'Delete Sale',
       danger: true,
     })
@@ -71,8 +71,8 @@ const SalesTracker = () => {
       await api.delete(`/deals/sales/${id}`)
       toast(`Sale ${ref} deleted successfully.`, 'success')
       setRevision(value => value + 1)
-    } catch (error: any) {
-      toast(error.response?.data?.error?.message || 'Failed to delete sale.', 'error')
+    } catch (err: any) {
+      toast(err.response?.data?.error?.message || 'Failed to delete sale.', 'error')
     }
   }
 
@@ -209,5 +209,6 @@ const SalesTracker = () => {
   )
 }
 
+// ─── Active Clients Dashboard (Sales Core) ──────────────────────────────────
 
 export default SalesTracker

@@ -2,7 +2,7 @@ import type React from 'react'
 
 export type Screen =
   | 'dashboard' | 'outreach-dashboard' | 'inquiry-dashboard'
-  | 'prospects' | 'warm-leads' | 'inquiries' | 'quotations' | 'sales-tracker'
+  | 'prospects' | 'warm-leads' | 'inquiries' | 'quotations' | 'sales-tracker' | 'active-clients'
   | 'customers' | 'contact-outreach' | 'contracts' | 'pickups'
   | 'daily-tasks' | 'removed' | 'deliverability'
   | 'container-catalog'
