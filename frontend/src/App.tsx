@@ -2011,6 +2011,62 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   }
   const rowHeight = density === 'Compact' ? 30 : density === 'Comfortable' ? 46 : 38
 
+  // ── Spreadsheet-style cell selection ───────────────────────────────────────
+  // Clicking a row used to select the whole record, and dragging just ran the
+  // browser's native text selection across the entire table. This mirrors a
+  // spreadsheet instead: click a cell, drag or shift-click to extend a range, and
+  // Ctrl/Cmd+C copies exactly that block as TSV so it pastes into Sheets/Excel
+  // with its rows and columns intact. Row selection now lives on the checkbox.
+  type CellRef = { r: number; c: number }
+  const [anchor, setAnchor] = useState<CellRef | null>(null)
+  const [focusCell, setFocusCell] = useState<CellRef | null>(null)
+  const draggingRef = useRef(false)
+
+  const bounds = anchor && focusCell
+    ? {
+        r1: Math.min(anchor.r, focusCell.r), r2: Math.max(anchor.r, focusCell.r),
+        c1: Math.min(anchor.c, focusCell.c), c2: Math.max(anchor.c, focusCell.c),
+      }
+    : null
+
+  const inSelection = (r: number, c: number) =>
+    !!bounds && r >= bounds.r1 && r <= bounds.r2 && c >= bounds.c1 && c <= bounds.c2
+
+  const beginSelect = (r: number, c: number, extend: boolean) => {
+    draggingRef.current = true
+    if (extend && anchor) setFocusCell({ r, c })
+    else { setAnchor({ r, c }); setFocusCell({ r, c }) }
+  }
+
+  useEffect(() => {
+    const stop = () => { draggingRef.current = false }
+    window.addEventListener('mouseup', stop)
+    return () => window.removeEventListener('mouseup', stop)
+  }, [])
+
+  // Ctrl/Cmd+C over the grid copies the selected block, not the whole page.
+  useEffect(() => {
+    if (!bounds) return
+    const onCopy = (event: KeyboardEvent) => {
+      if (!(event.key === 'c' && (event.ctrlKey || event.metaKey))) return
+      const target = event.target as HTMLElement | null
+      // Don't hijack copying out of an input the user is editing.
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
+
+      const rows = filtered.slice(bounds.r1, bounds.r2 + 1)
+      const cols = visibleCols.slice(bounds.c1, bounds.c2 + 1)
+      const tsv = rows.map(row => cols.map(col => getVal(row, col.field)).join('\t')).join('\n')
+      if (!tsv) return
+      event.preventDefault()
+      navigator.clipboard.writeText(tsv).then(() => {
+        const cellCount = rows.length * cols.length
+        toast(`Copied ${cellCount} cell${cellCount === 1 ? '' : 's'}.`, 'success')
+      }).catch(() => toast('Could not copy to the clipboard.', 'error'))
+    }
+    window.addEventListener('keydown', onCopy)
+    return () => window.removeEventListener('keydown', onCopy)
+  }, [bounds, filtered, visibleCols])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Header */}
@@ -2170,8 +2226,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
             return (
               <div
                 key={row.id}
-                style={{ display: 'flex', background: isSel ? 'var(--brand-50)' : isRemoved ? 'var(--red-bg)' : ri % 2 === 1 ? 'var(--s2)' : 'var(--ws)', borderBottom: '1px solid var(--border-s)', cursor: 'pointer', transition: 'background 0.1s' }}
-                onClick={() => setSelected(s => s.includes(row.id) ? s.filter(x => x !== row.id) : [...s, row.id])}
+                style={{ display: 'flex', background: isSel ? 'var(--brand-50)' : isRemoved ? 'var(--red-bg)' : ri % 2 === 1 ? 'var(--s2)' : 'var(--ws)', borderBottom: '1px solid var(--border-s)', transition: 'background 0.1s' }}
               >
                 {/* Checkbox + row num */}
                 <div style={{ width: 44, minWidth: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--border-s)', background: 'var(--s2)', position: 'sticky', left: 0, zIndex: 1, gap: 4 }}>
@@ -2184,10 +2239,26 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                   />
                   <span style={{ fontSize: 10, color: 'var(--t4)', fontFamily: 'var(--mono)' }}>{ri + 1}</span>
                 </div>
-                {visibleCols.map(col => {
+                {visibleCols.map((col, ci) => {
                   const val = getVal(row, col.field)
+                  const picked = inSelection(ri, ci)
                   return (
-                    <div key={col.key} style={{ minWidth: col.w, width: col.w, padding: '0 12px', height: rowHeight, display: 'flex', alignItems: 'center', borderRight: '1px solid var(--border-s)', overflow: 'hidden' }}>
+                    <div
+                      key={col.key}
+                      onMouseDown={event => { event.preventDefault(); beginSelect(ri, ci, event.shiftKey) }}
+                      onMouseEnter={() => { if (draggingRef.current) setFocusCell({ r: ri, c: ci }) }}
+                      style={{
+                        minWidth: col.w, width: col.w, padding: '0 12px', height: rowHeight,
+                        display: 'flex', alignItems: 'center', overflow: 'hidden',
+                        cursor: 'cell', userSelect: 'none',
+                        background: picked ? 'rgba(49,94,246,0.14)' : undefined,
+                        // Outline the block edges so a range reads as one selection.
+                        borderRight: picked && bounds && ci === bounds.c2 ? '1px solid var(--brand)' : '1px solid var(--border-s)',
+                        borderLeft: picked && bounds && ci === bounds.c1 ? '1px solid var(--brand)' : undefined,
+                        borderTop: picked && bounds && ri === bounds.r1 ? '1px solid var(--brand)' : undefined,
+                        borderBottom: picked && bounds && ri === bounds.r2 ? '1px solid var(--brand)' : undefined,
+                      }}
+                    >
                       {col.field === 'contact' && row.contactMissing ? (
                         <span style={{ fontSize: 11.5, color: 'var(--amber, #D97706)', fontStyle: 'italic' }}>No contact yet</span>
                       ) : col.badge && val ? (
@@ -2217,7 +2288,14 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 
       {/* Footer */}
       <div style={{ padding: '7px 20px', background: 'var(--s2)', borderTop: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11.5, color: 'var(--t4)', flexShrink: 0 }}>
-        <span>Showing {filtered.length} of {prospectsData.length} active records</span>
+        <span>
+          Showing {filtered.length} of {prospectsData.length} active records
+          {bounds && (
+            <span style={{ marginLeft: 10, color: 'var(--brand)', fontWeight: 600 }}>
+              · {bounds.r2 - bounds.r1 + 1} × {bounds.c2 - bounds.c1 + 1} selected — Ctrl+C to copy
+            </span>
+          )}
+        </span>
         <div style={{ display: 'flex', gap: 4 }}>
           {(['Compact', 'Standard', 'Comfortable'] as const).map(d => (
             <button
