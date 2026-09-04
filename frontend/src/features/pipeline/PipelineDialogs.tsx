@@ -1,13 +1,16 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../../lib/api'
+import { fetchCached, getFromCache } from '../../lib/dataCache'
 
 type CatalogOption = { id: string; name: string }
 
 const useCatalog = (path: string) => {
-  const [options, setOptions] = useState<CatalogOption[]>([])
+  const [options, setOptions] = useState<CatalogOption[]>(() => getFromCache(`catalog:${path}`) ?? [])
   useEffect(() => {
     let cancelled = false
-    api.get(path).then(response => { if (!cancelled) setOptions(response.data.data ?? []) }).catch(() => {})
+    fetchCached(`catalog:${path}`, () => api.get(path).then(res => res.data.data ?? []), 300_000)
+      .then(data => { if (!cancelled) setOptions(data) })
+      .catch(() => {})
     return () => { cancelled = true }
   }, [path])
   return options
@@ -16,10 +19,12 @@ const useCatalog = (path: string) => {
 export type PicOption = { id: string; name: string }
 
 export const usePics = () => {
-  const [options, setOptions] = useState<PicOption[]>([])
+  const [options, setOptions] = useState<PicOption[]>(() => getFromCache('pics:all') ?? [])
   useEffect(() => {
     let cancelled = false
-    api.get('/pics').then(response => { if (!cancelled) setOptions(response.data.data ?? []) }).catch(() => {})
+    fetchCached('pics:all', () => api.get('/pics').then(res => res.data.data ?? []), 300_000)
+      .then(data => { if (!cancelled) setOptions(data) })
+      .catch(() => {})
     return () => { cancelled = true }
   }, [])
   return options

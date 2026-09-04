@@ -3,6 +3,7 @@ import { supabase } from './config/supabase'
 import { api } from './lib/api'
 import { useRealtimeRevision, useRealtimeStatus } from './lib/realtime'
 import { toast, askConfirm, askReason, ToastHost, ConfirmHost } from './lib/notify'
+import { fetchCached, getFromCache, preloadAppData, invalidateCache } from './lib/dataCache'
 import Login from './Login'
 // Admin screens and the import dialog are reached rarely, so they load on demand
 // instead of riding along in the initial bundle. Login stays eager -- it is the
@@ -352,151 +353,215 @@ const mapPipelineRow = (p: any) => ({
       : 'Direct Entry',
 })
 
+const mapInquiryRow = (row: any) => {
+  const created = new Date(row.created_at)
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    contactId: row.contact_id,
+    ref: `INQ-${row.id.slice(0, 8).toUpperCase()}`,
+    date: created.toLocaleDateString(),
+    time: created.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    channel: row.requirements?.match(/email/i) ? 'Email' : 'Direct',
+    company: row.companies?.name || '',
+    contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
+    phone: row.contacts?.phone_direct || row.contacts?.phone_2 || '',
+    email: row.contacts?.email_active || row.contacts?.email_2 || '',
+    category: row.requirements || 'To be qualified',
+    size: row.container_sizes?.name || '—',
+    condition: row.container_conditions?.name || '—',
+    qty: row.quantity ?? '—',
+    neededBy: row.needed_by_date ? new Date(row.needed_by_date).toLocaleDateString() : '—',
+    status: row.status || 'Under Review',
+    pic: row.pics?.name || 'Unassigned',
+    sourceWarmLeadId: row.source_warm_lead_id || null,
+    backfilledWarmLeadId: Array.isArray(row.backfilled_warm_leads)
+      ? row.backfilled_warm_leads[0]?.id || null
+      : row.backfilled_warm_leads?.id || null,
+    entryOrigin: row.entry_origin || (row.source_warm_lead_id ? 'warm_lead_conversion' : 'direct'),
+    rejectionReason: row.rejection_reason || '',
+    altSize: row.alt_size?.name || '',
+    altCondition: row.alt_condition?.name || '',
+    altQuantity: row.alt_quantity ?? null,
+    altAskingPrice: row.alt_asking_price != null ? Number(row.alt_asking_price) : null,
+    altNotes: row.alt_notes || '',
+    hasAlternative: !!(row.alt_size || row.alt_condition || row.alt_quantity != null || row.alt_asking_price != null),
+  }
+}
+
+const mapQuotationRow = (row: any) => {
+  const items = row.quotation_items || []
+  const quantity = items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0)
+  const total = Number(row.total_amount || 0)
+  return {
+    id: row.id,
+    inquiryId: row.inquiry_id,
+    ref: `QUO-${row.id.slice(0, 8).toUpperCase()}`,
+    date: new Date(row.created_at).toLocaleDateString(),
+    co: row.companies?.name || '',
+    contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
+    category: items[0]?.description || 'Container',
+    size: '—',
+    qty: quantity,
+    sellTotal: total,
+    profit: 0,
+    margin: 0,
+    status: row.status,
+    source: row.inquiry_id ? `INQ-${row.inquiry_id.slice(0, 8).toUpperCase()}` : 'Direct',
+    pic: row.pics?.name || 'Unassigned',
+  }
+}
+
+const mapSaleRow = (row: any) => {
+  const units = Number(row.total_units || 0)
+  const buyingCost = Number(row.buying_cost || 0)
+  const revenue = Number(row.revenue || 0)
+  const profit = Number(row.gross_profit || 0)
+  const quote = row.quotations || {}
+  const item = quote.quotation_items?.[0]
+  const fullName = (c: any) => c ? `${c.first_name || ''} ${c.last_name || ''}`.trim() : ''
+  const companyLinks = row.companies?.company_contacts ?? []
+  const companyContact = (companyLinks.find((l: any) => l.is_primary) ?? companyLinks[0])?.contacts
+  return {
+    id: row.id,
+    ref: `SAL-${row.id.slice(0, 8).toUpperCase()}`,
+    date: new Date(row.created_at).toLocaleDateString(),
+    createdAt: row.created_at,
+    company: row.companies?.name || '',
+    contact: fullName(quote.contacts) || fullName(companyContact),
+    category: item?.description || 'Container',
+    size: '—',
+    condition: '—',
+    qty: units,
+    buyPU: units ? buyingCost / units : 0,
+    sellPU: units ? revenue / units : 0,
+    totalBuy: buyingCost,
+    totalSell: revenue,
+    profit,
+    margin: revenue ? (profit / revenue) * 100 : 0,
+    pic: row.pics?.name || 'Unassigned',
+    status: row.status,
+  }
+}
+
+const mapCustomerRow = (c: any) => ({
+  id: c.company_id,
+  co: c.company_name,
+  contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
+  phone: c.primary_contact ? (c.primary_contact.phone_1 || c.primary_contact.phone_2) : '-',
+  state: c.state || '-',
+  country: c.country || '-',
+  sales: c.sales_count,
+  units: c.total_units,
+  revenue: Number(c.total_revenue),
+  profit: Number(c.total_gross_profit),
+  last: new Date(c.last_purchase_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+  pic: c.pic_name || '-',
+  status: c.status
+})
+
 // `enabled` exists because ProspectSheet renders both the Prospect and Warm Lead
 // views from one component -- without it, opening either page fetched both lists.
 export const useWarmLeads = (revision = 0, enabled = true) => {
-  const [data, setData] = useState<any[]>([])
+  const cacheKey = 'leads:warm-leads:active'
   const liveRevision = useRealtimeRevision(['leads', 'data'])
+  const [data, setData] = useState<any[]>(() => {
+    const cached = getFromCache<any[]>(cacheKey)
+    return cached ? cached.map(mapPipelineRow) : []
+  })
+
   useEffect(() => {
     if (!enabled) return
-    api.get('/leads/warm-leads', { params: { limit: 500 } }).then(res => {
-      if (res.data.success) setData((res.data.data || []).map(mapPipelineRow))
-    }).catch(console.error)
+    let cancelled = false
+    fetchCached(cacheKey, () => api.get('/leads/warm-leads', { params: { limit: 500 } }).then(res => res.data.data || []), 60_000)
+      .then(raw => {
+        if (!cancelled) setData((raw || []).map(mapPipelineRow))
+      })
+      .catch(console.error)
+    return () => { cancelled = true }
   }, [revision, liveRevision, enabled])
+
   return data
 }
 
 const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') => {
-  const [data, setData] = useState<any[]>([])
+  const cacheKey = `leads:inquiries:${status}`
   const liveRevision = useRealtimeRevision(['leads', 'deals'])
+  const [data, setData] = useState<any[]>(() => {
+    const cached = getFromCache<any[]>(cacheKey)
+    return cached ? cached.map(mapInquiryRow) : []
+  })
+
   useEffect(() => {
-    api.get('/leads/inquiries', { params: { limit: 500, status } }).then(res => {
-      if (res.data.success) setData((res.data.data || []).map((row: any) => {
-        const created = new Date(row.created_at)
-        return {
-          id: row.id,
-          companyId: row.company_id,
-          contactId: row.contact_id,
-          ref: `INQ-${row.id.slice(0, 8).toUpperCase()}`,
-          date: created.toLocaleDateString(),
-          time: created.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          channel: row.requirements?.match(/email/i) ? 'Email' : 'Direct',
-          company: row.companies?.name || '',
-          contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
-          // Carried so the Quick Contact Lookup bar can actually match on phone/email,
-          // which is what its placeholder promises.
-          phone: row.contacts?.phone_direct || row.contacts?.phone_2 || '',
-          email: row.contacts?.email_active || row.contacts?.email_2 || '',
-          category: row.requirements || 'To be qualified',
-          size: row.container_sizes?.name || '—',
-          condition: row.container_conditions?.name || '—',
-          qty: row.quantity ?? '—',
-          neededBy: row.needed_by_date ? new Date(row.needed_by_date).toLocaleDateString() : '—',
-          status: row.status || 'Under Review',
-          pic: row.pics?.name || 'Unassigned',
-          sourceWarmLeadId: row.source_warm_lead_id || null,
-          backfilledWarmLeadId: Array.isArray(row.backfilled_warm_leads)
-            ? row.backfilled_warm_leads[0]?.id || null
-            : row.backfilled_warm_leads?.id || null,
-          entryOrigin: row.entry_origin || (row.source_warm_lead_id ? 'warm_lead_conversion' : 'direct'),
-          rejectionReason: row.rejection_reason || '',
-          altSize: row.alt_size?.name || '',
-          altCondition: row.alt_condition?.name || '',
-          altQuantity: row.alt_quantity ?? null,
-          altAskingPrice: row.alt_asking_price != null ? Number(row.alt_asking_price) : null,
-          altNotes: row.alt_notes || '',
-          hasAlternative: !!(row.alt_size || row.alt_condition || row.alt_quantity != null || row.alt_asking_price != null),
-        }
-      }))
-    }).catch(console.error)
+    let cancelled = false
+    fetchCached(cacheKey, () => api.get('/leads/inquiries', { params: { limit: 500, status } }).then(res => res.data.data || []), 60_000)
+      .then(raw => {
+        if (!cancelled) setData((raw || []).map(mapInquiryRow))
+      })
+      .catch(console.error)
+    return () => { cancelled = true }
   }, [revision, liveRevision, status])
+
   return data
 }
 
 const useQuotations = (revision = 0) => {
-  const [data, setData] = useState<any[]>([])
+  const cacheKey = 'deals:quotations'
   const liveRevision = useRealtimeRevision(['deals', 'leads'])
+  const [data, setData] = useState<any[]>(() => {
+    const cached = getFromCache<any[]>(cacheKey)
+    return cached ? cached.map(mapQuotationRow) : []
+  })
+
   useEffect(() => {
-    api.get('/deals/quotations').then(res => {
-      if (res.data.success) setData((res.data.data || []).map((row: any) => {
-        const items = row.quotation_items || []
-        const quantity = items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0)
-        const total = Number(row.total_amount || 0)
-        return {
-          id: row.id,
-          inquiryId: row.inquiry_id,
-          ref: `QUO-${row.id.slice(0, 8).toUpperCase()}`,
-          date: new Date(row.created_at).toLocaleDateString(),
-          co: row.companies?.name || '',
-          contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
-          category: items[0]?.description || 'Container',
-          size: '—',
-          qty: quantity,
-          sellTotal: total,
-          profit: 0,
-          margin: 0,
-          status: row.status,
-          source: row.inquiry_id ? `INQ-${row.inquiry_id.slice(0, 8).toUpperCase()}` : 'Direct',
-          pic: row.pics?.name || 'Unassigned',
-        }
-      }))
-    }).catch(console.error)
+    let cancelled = false
+    fetchCached(cacheKey, () => api.get('/deals/quotations').then(res => res.data.data || []), 60_000)
+      .then(raw => {
+        if (!cancelled) setData((raw || []).map(mapQuotationRow))
+      })
+      .catch(console.error)
+    return () => { cancelled = true }
   }, [revision, liveRevision])
+
   return data
 }
 
 const useSales = (revision = 0) => {
-  const [data, setData] = useState<any[]>([])
+  const cacheKey = 'deals:sales'
   const liveRevision = useRealtimeRevision(['deals'])
+  const [data, setData] = useState<any[]>(() => {
+    const cached = getFromCache<any[]>(cacheKey)
+    return cached ? cached.map(mapSaleRow) : []
+  })
+
   useEffect(() => {
-    api.get('/deals/sales').then(res => {
-      if (res.data.success) setData((res.data.data || []).map((row: any) => {
-        const units = Number(row.total_units || 0)
-        const buyingCost = Number(row.buying_cost || 0)
-        const revenue = Number(row.revenue || 0)
-        const profit = Number(row.gross_profit || 0)
-        const quote = row.quotations || {}
-        const item = quote.quotation_items?.[0]
-        const fullName = (c: any) => c ? `${c.first_name || ''} ${c.last_name || ''}`.trim() : ''
-        // A manual sale has no quotation, so fall back to the company's contact --
-        // preferring the primary one. Without this the column was blank on every
-        // directly recorded sale even though the contact was on file.
-        const companyLinks = row.companies?.company_contacts ?? []
-        const companyContact = (companyLinks.find((l: any) => l.is_primary) ?? companyLinks[0])?.contacts
-        return {
-          id: row.id,
-          ref: `SAL-${row.id.slice(0, 8).toUpperCase()}`,
-          date: new Date(row.created_at).toLocaleDateString(),
-          createdAt: row.created_at,
-          company: row.companies?.name || '',
-          contact: fullName(quote.contacts) || fullName(companyContact),
-          category: item?.description || 'Container',
-          size: '—',
-          condition: '—',
-          qty: units,
-          buyPU: units ? buyingCost / units : 0,
-          sellPU: units ? revenue / units : 0,
-          totalBuy: buyingCost,
-          totalSell: revenue,
-          profit,
-          margin: revenue ? (profit / revenue) * 100 : 0,
-          pic: row.pics?.name || 'Unassigned',
-          status: row.status,
-        }
-      }))
-    }).catch(console.error)
+    let cancelled = false
+    fetchCached(cacheKey, () => api.get('/deals/sales').then(res => res.data.data || []), 60_000)
+      .then(raw => {
+        if (!cancelled) setData((raw || []).map(mapSaleRow))
+      })
+      .catch(console.error)
+    return () => { cancelled = true }
   }, [revision, liveRevision])
+
   return data
 }
 
 const useAnalytics = () => {
-  const [data, setData] = useState<any>(null)
+  const cacheKey = 'analytics:dashboard'
   const liveRevision = useRealtimeRevision([])
+  const [data, setData] = useState<any>(() => getFromCache(cacheKey) ?? null)
+
   useEffect(() => {
-    api.get('/analytics/dashboard').then(res => {
-      if (res.data.success) setData(res.data.data)
-    }).catch(console.error)
+    let cancelled = false
+    fetchCached(cacheKey, () => api.get('/analytics/dashboard').then(res => res.data.data), 45_000)
+      .then(fresh => {
+        if (!cancelled) setData(fresh)
+      })
+      .catch(console.error)
+    return () => { cancelled = true }
   }, [liveRevision])
+
   return data
 }
 
@@ -519,8 +584,6 @@ const useNotifications = (revision = 0) => {
   }, [refresh, revision, liveRevision])
   return { notifications: data, unread, refresh }
 }
-
-
 
 const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses', search = '', revision = 0) => {
   const [data, setData] = useState<any[]>([]);
@@ -553,41 +616,46 @@ const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses
 // `limit` keeps the dashboard's "top 5" from pulling the entire customer table
 // across the network just to discard almost all of it.
 const useCustomers = (status = 'All', search = '', revision = 0, limit?: number) => {
-  const [data, setData] = useState<any[]>([]);
-  const liveRevision = useRealtimeRevision(['deals', 'contracts']);
+  const cacheKey = `customers:${status}:${search}:${limit ?? 'all'}`
+  const liveRevision = useRealtimeRevision(['deals', 'contracts'])
+  const [data, setData] = useState<any[]>(() => {
+    const cached = getFromCache<any[]>(cacheKey)
+    return cached ? cached.map(mapCustomerRow) : []
+  })
+
   useEffect(() => {
-    api.get('/customers', { params: { status, search, ...(limit ? { limit } : {}) } }).then(res => {
-      setData((res.data.data || []).map((c: any) => ({
-        id: c.company_id,
-        co: c.company_name,
-        contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
-        phone: c.primary_contact ? (c.primary_contact.phone_1 || c.primary_contact.phone_2) : '-',
-        state: c.state || '-',
-        country: c.country || '-',
-        sales: c.sales_count,
-        units: c.total_units,
-        revenue: Number(c.total_revenue),
-        profit: Number(c.total_gross_profit),
-        last: new Date(c.last_purchase_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        pic: c.pic_name || '-',
-        status: c.status
-      })));
-    }).catch(console.error);
-  }, [status, search, revision, liveRevision, limit]);
-  return data;
+    let cancelled = false
+    fetchCached(cacheKey, () => api.get('/customers', { params: { status, search, ...(limit ? { limit } : {}) } }).then(res => res.data.data || []), 60_000)
+      .then(raw => {
+        if (!cancelled) setData((raw || []).map(mapCustomerRow))
+      })
+      .catch(console.error)
+    return () => { cancelled = true }
+  }, [status, search, revision, liveRevision, limit])
+
+  return data
 }
 
 const useProspects = (revision = 0, status: 'active' | 'converted' | 'removed' | 'all' = 'active', enabled = true) => {
-  const [prospects, setProspects] = useState<any[]>([]);
-  const liveRevision = useRealtimeRevision(['leads', 'data']);
+  const cacheKey = `leads:prospects:${status}`
+  const liveRevision = useRealtimeRevision(['leads', 'data'])
+  const [prospects, setProspects] = useState<any[]>(() => {
+    const cached = getFromCache<any[]>(cacheKey)
+    return cached ? cached.map(mapPipelineRow) : []
+  })
+
   useEffect(() => {
-    if (!enabled) return;
-    api.get('/leads/prospects', { params: { limit: 500, status } }).then(res => {
-      const data = (res.data.data || []).map(mapPipelineRow);
-      setProspects(data);
-    }).catch(e => console.error("Failed to fetch API data", e));
-  }, [revision, liveRevision, status, enabled]);
-  return prospects;
+    if (!enabled) return
+    let cancelled = false
+    fetchCached(cacheKey, () => api.get('/leads/prospects', { params: { limit: 500, status } }).then(res => res.data.data || []), 60_000)
+      .then(raw => {
+        if (!cancelled) setProspects((raw || []).map(mapPipelineRow))
+      })
+      .catch(e => console.error("Failed to fetch API data", e))
+    return () => { cancelled = true }
+  }, [revision, liveRevision, status, enabled])
+
+  return prospects
 }
 
 const useInventory = (filters: Record<string, string> = {}, revision = 0) => {
@@ -602,13 +670,20 @@ const useInventory = (filters: Record<string, string> = {}, revision = 0) => {
 }
 
 const useInventorySummary = (revision = 0) => {
-  const [data, setData] = useState<any>(null)
+  const cacheKey = 'inventory:summary'
   const liveRevision = useRealtimeRevision(['inventory', 'contracts'])
+  const [data, setData] = useState<any>(() => getFromCache(cacheKey) ?? null)
+
   useEffect(() => {
-    api.get('/inventory/summary').then(res => {
-      if (res.data.success) setData(res.data.data)
-    }).catch(console.error)
+    let cancelled = false
+    fetchCached(cacheKey, () => api.get('/inventory/summary').then(res => res.data.data), 60_000)
+      .then(fresh => {
+        if (!cancelled) setData(fresh)
+      })
+      .catch(console.error)
+    return () => { cancelled = true }
   }, [revision, liveRevision])
+
   return data
 }
 
@@ -6045,6 +6120,7 @@ export default function App() {
     api.get('/auth/me').then(res => {
       const p = res.data.data
       setCurrentProfile(p)
+      preloadAppData()
       if (p?.role === 'operations') {
         setScreen(s => s === 'dashboard' ? 'pickups' : s)
       } else if (p?.role === 'procurement') {
