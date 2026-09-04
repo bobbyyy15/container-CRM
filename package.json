@@ -9,6 +9,7 @@
     "build": "npm --prefix backend run build && npm --prefix frontend run build",
     "typecheck": "npm --prefix frontend run typecheck",
     "test": "npm --prefix backend test",
-    "check": "npm run typecheck && npm run build && npm test"
+    "check": "npm run typecheck && npm run build && npm test",
+    "sync": "node scripts/sync.mjs"
   }
 }
