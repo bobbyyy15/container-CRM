@@ -343,7 +343,39 @@ export class LeadController {
         .order('created_at', { ascending: false })
         .limit(1000);
       if (error) throw error;
-      res.json({ success: true, data, meta: { total: data?.length ?? 0 } });
+
+      // Deduplicate so each contact or company block appears exactly once
+      const companiesWithContacts = new Set<string>();
+      for (const row of (data ?? [])) {
+        if (row.contact_id && row.company_id) {
+          companiesWithContacts.add(row.company_id);
+        }
+      }
+
+      const seenContacts = new Set<string>();
+      const seenCompanies = new Set<string>();
+      const seenIdentities = new Set<string>();
+      const deduped: any[] = [];
+
+      for (const row of (data ?? [])) {
+        if (row.contact_id) {
+          if (seenContacts.has(row.contact_id)) continue;
+          seenContacts.add(row.contact_id);
+          deduped.push(row);
+        } else if (row.identity_type === 'company' && row.company_id) {
+          if (companiesWithContacts.has(row.company_id)) continue;
+          if (seenCompanies.has(row.company_id)) continue;
+          seenCompanies.add(row.company_id);
+          deduped.push(row);
+        } else {
+          const idKey = `${row.identity_type}:${row.normalized_value}`;
+          if (seenIdentities.has(idKey)) continue;
+          seenIdentities.add(idKey);
+          deduped.push(row);
+        }
+      }
+
+      res.json({ success: true, data: deduped, meta: { total: deduped.length } });
     } catch (error: any) {
       res.status(500).json({ success: false, error: { message: error.message } });
     }

@@ -250,7 +250,14 @@ export class LeadService {
         .in('id', Array.from(contactIds));
 
       for (const c of (contacts ?? [])) {
-        // Contact listing in Removed Sheet
+        // Clean up any individual email/phone suppression rows for this contact
+        await supabaseAdmin
+          .from('removed_entries')
+          .delete()
+          .eq('contact_id', c.id)
+          .in('identity_type', ['phone', 'email']);
+
+        // Insert exactly one Company Block row for this contact
         await this.insertRemovedEntrySafe({
           company_id: companyId,
           contact_id: c.id,
@@ -260,60 +267,6 @@ export class LeadService {
           source,
           created_by: actorId,
         });
-
-        // Email suppression
-        if (c.email_active) {
-          await this.insertRemovedEntrySafe({
-            company_id: companyId,
-            contact_id: c.id,
-            identity_type: 'email',
-            normalized_value: c.email_active.trim().toLowerCase(),
-            reason: reason || 'Bulk paste (Company Block)',
-            source,
-            created_by: actorId,
-          });
-        }
-        if (c.email_2) {
-          await this.insertRemovedEntrySafe({
-            company_id: companyId,
-            contact_id: c.id,
-            identity_type: 'email',
-            normalized_value: c.email_2.trim().toLowerCase(),
-            reason: reason || 'Bulk paste (Company Block)',
-            source,
-            created_by: actorId,
-          });
-        }
-
-        // Phone suppression
-        if (c.phone_direct) {
-          const normPhone = c.phone_direct.replace(/\D/g, '');
-          if (normPhone) {
-            await this.insertRemovedEntrySafe({
-              company_id: companyId,
-              contact_id: c.id,
-              identity_type: 'phone',
-              normalized_value: normPhone,
-              reason: reason || 'Bulk paste (Company Block)',
-              source,
-              created_by: actorId,
-            });
-          }
-        }
-        if (c.phone_2) {
-          const normPhone2 = c.phone_2.replace(/\D/g, '');
-          if (normPhone2) {
-            await this.insertRemovedEntrySafe({
-              company_id: companyId,
-              contact_id: c.id,
-              identity_type: 'phone',
-              normalized_value: normPhone2,
-              reason: reason || 'Bulk paste (Company Block)',
-              source,
-              created_by: actorId,
-            });
-          }
-        }
       }
     }
 
