@@ -145,6 +145,7 @@ export const UpdateLeadCellSchema = z.object({
     'territory',
     'cat',
     'sms',
+    'email',
     'pic',
     'notes',
   ]),

@@ -836,17 +836,21 @@ type BadgeStatus =
   | 'Text Only' | 'Mail Delivery Report' | 'Overdue' | 'Scheduled' | 'Confirmed'
   | 'Picked Up' | 'Accepted' | 'Rejected' | 'Under Review' | 'Awaiting Response'
   | 'Pending Validation' | 'Validation Rejected' | 'Quotation Created' | 'Quotation Rejected'
+  | 'Available' | 'Unavailable' | 'Bounced' | 'Hard Bounce' | 'Soft Bounce' | 'Unsubscribed' | 'Spam Complaint'
 
 const BADGE_MAP: Record<string, string> = {
   'Proceed': 'b-green', 'Active': 'b-green', 'Completed': 'b-green', 'Accepted': 'b-green',
-  'Converted to Sale': 'b-green', 'Converted': 'b-green', 'Picked Up': 'b-green',
+  'Converted to Sale': 'b-green', 'Converted': 'b-green', 'Picked Up': 'b-green', 'Available': 'b-green',
   'Removed': 'b-red', 'Lost': 'b-red', 'Rejected': 'b-red', 'Overdue': 'b-red', 'Cancelled': 'b-red',
-  'Validation Rejected': 'b-red', 'Quotation Rejected': 'b-red',
+  'Validation Rejected': 'b-red', 'Quotation Rejected': 'b-red', 'Bounced': 'b-red', 'Hard Bounce': 'b-red',
+  'Unsubscribed': 'b-red', 'Spam Complaint': 'b-red',
   'Pending': 'b-amber', 'Awaiting Response': 'b-amber', 'Under Review': 'b-amber', 'Pending Validation': 'b-amber',
+  'Soft Bounce': 'b-amber',
   'New Inquiry': 'b-blue', 'Draft': 'b-blue', 'Call/Text': 'b-green', 'Quotation Created': 'b-blue',
   'Calls Only': 'b-blue', 'Mail Delivery Report': 'b-blue', 'Scheduled': 'b-blue', 'Confirmed': 'b-blue', 'Sent': 'b-blue',
   'Text Only': 'b-purple', 'Negotiating': 'b-purple', 'Negotiation': 'b-purple',
   'Quotation Required': 'b-amber', 'Quotation Sent': 'b-teal',
+  'Unavailable': 'b-gray',
 }
 
 const Badge = ({ status }: { status: string }) => (
@@ -2551,6 +2555,28 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                               <option value="Call/Text">Call/Text</option>
                               <option value="Calls Only">Calls Only</option>
                               <option value="Text Only">Text Only</option>
+                            </select>
+                          ) : col.field === 'email' ? (
+                            <select
+                              autoFocus
+                              className="inp"
+                              style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 6px', fontSize: 12, background: 'transparent' }}
+                              value={editingCell.value}
+                              onChange={e => setEditingCell({ ...editingCell, value: e.target.value })}
+                              onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                if (e.key === 'Escape') setEditingCell(null)
+                              }}
+                            >
+                              <option value="Available">Available</option>
+                              <option value="Unavailable">Unavailable</option>
+                              <option value="Mail Delivery Report">Mail Delivery Report</option>
+                              <option value="Bounced">Bounced</option>
+                              <option value="Hard Bounce">Hard Bounce</option>
+                              <option value="Soft Bounce">Soft Bounce</option>
+                              <option value="Unsubscribed">Unsubscribed</option>
+                              <option value="Spam Complaint">Spam Complaint</option>
                             </select>
                           ) : col.field === 'pic' ? (
                             <select

@@ -324,6 +324,13 @@ export class LeadService {
         const { error } = await supabaseAdmin.from('prospect_clients').update({ source_data: sourceData }).eq('id', entityId);
         if (error) throw error;
       }
+    } else if (field === 'email') {
+      if (stage === 'prospect') {
+        const sourceData = (row.source_data as Record<string, any>) || {};
+        sourceData.email_deliverability = value;
+        const { error } = await supabaseAdmin.from('prospect_clients').update({ source_data: sourceData }).eq('id', entityId);
+        if (error) throw error;
+      }
     } else if (field === 'territory') {
       if (stage === 'prospect') {
         const sourceData = (row.source_data as Record<string, any>) || {};
