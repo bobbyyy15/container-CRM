@@ -1,0 +1,130 @@
+name: CI
+
+# Runs on every push and pull request touching the branches that feed
+# production (main) or that regularly get merged into it (ken, denrei).
+# Nothing here deploys anything -- it only proves the tree still builds,
+# typechecks, passes its tests, and that no migration was left unapplied.
+on:
+  push:
+    branches: [main, ken, denrei]
+  pull_request:
+    branches: [main, ken, denrei]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  backend:
+    name: Backend build & tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck / compile
+        run: npm run build
+
+      - name: Unit tests
+        # These are pure schema/logic tests -- none of them touch Supabase or the
+        # network (verified: no test file references supabaseAdmin/fetch/axios/http).
+        # env.ts still validates its shape at import time via zod, so these are
+        # placeholder values only, never real secrets, just enough to satisfy that
+        # schema. Do NOT replace these with real credentials.
+        env:
+          NODE_ENV: test
+          SUPABASE_URL: https://ci-placeholder.supabase.co
+          SUPABASE_SECRET_KEY: ci-placeholder-not-a-real-key
+        run: npm test
+
+  frontend:
+    name: Frontend typecheck & build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+  migrations:
+    name: Pending migrations check
+    runs-on: ubuntu-latest
+    # This is the check that would have caught today's problem automatically:
+    # a migration file committed to the repo but never applied to the linked
+    # database. It needs a Supabase access token and the project's DB password
+    # as repo secrets (SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD) to log in
+    # and compare. Skips cleanly, instead of failing red, until those are added
+    # -- see the "next step" note in the PR/commit that introduced this workflow.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check whether Supabase secrets are configured
+        id: has_secrets
+        run: |
+          if [ -n "${{ secrets.SUPABASE_ACCESS_TOKEN }}" ] && [ -n "${{ secrets.SUPABASE_DB_PASSWORD }}" ] && [ -n "${{ secrets.SUPABASE_PROJECT_REF }}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: supabase/setup-cli@v1
+        if: steps.has_secrets.outputs.present == 'true'
+        with:
+          version: latest
+
+      - name: Link project
+        if: steps.has_secrets.outputs.present == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}" --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
+
+      - name: Fail if any committed migration is not applied remotely
+        if: steps.has_secrets.outputs.present == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          pending=$(supabase migration list --linked -o json | node -e '
+            const data = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const rows = Array.isArray(data) ? data : data.migrations ?? [];
+            const unapplied = rows.filter(r => r.local && !r.remote).map(r => r.local);
+            console.log(unapplied.join("\n"));
+          ')
+          if [ -n "$pending" ]; then
+            echo "The following migrations are committed but not applied to the linked database:"
+            echo "$pending"
+            echo "Run: supabase db push --linked"
+            exit 1
+          fi
+          echo "All committed migrations are applied remotely."
+
+      - name: Secrets not configured -- skipped
+        if: steps.has_secrets.outputs.present != 'true'
+        run: |
+          echo "::warning::Skipping the pending-migrations check -- add SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD and SUPABASE_PROJECT_REF as repository secrets to enable it."
