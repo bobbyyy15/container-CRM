@@ -12,6 +12,7 @@ import {
   BulkRemovedEntriesSchema,
   ValidateInquiryTicketSchema,
   AddInquiryToWarmLeadsSchema,
+  UpdateLeadCellSchema,
 } from '../schemas/lead.schema';
 import { supabaseAdmin } from '../config/supabase';
 
@@ -421,6 +422,34 @@ export class LeadController {
       if (!actorPicId) return;
       const updated = await LeadService.applyInquiryAlternative(req.params.entityId as string, req.auth!.user.id, actorPicId);
       res.json({ success: true, data: updated });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async updateLeadCell(req: Request, res: Response) {
+    try {
+      const payload = UpdateLeadCellSchema.parse({
+        stage: req.params.stage,
+        entityId: req.params.entityId,
+        field: req.body.field,
+        value: req.body.value,
+      });
+
+      const isAdmin = req.auth?.profile.role === 'admin' || req.auth?.profile.role === 'operations';
+      const picId = req.auth?.profile.pic_id;
+
+      const result = await LeadService.updateLeadCell(
+        payload.stage,
+        payload.entityId,
+        payload.field,
+        payload.value,
+        req.auth!.user.id,
+        picId,
+        isAdmin,
+      );
+
+      res.json({ success: true, data: result });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });
     }

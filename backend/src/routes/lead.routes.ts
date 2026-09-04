@@ -32,5 +32,6 @@ router.post('/inquiries', requireRoles('admin', 'sales_manager'), LeadController
 
 router.post('/:stage/:entityId/remove', requireRoles('admin', 'sales_manager'), LeadController.removeEntry);
 router.patch('/:stage/:entityId/pic', requireRoles('admin', 'sales_manager'), LeadController.assignPic);
+router.patch('/:stage/:entityId/cell', requireRoles('admin', 'sales_manager'), LeadController.updateLeadCell);
 
 export default router;

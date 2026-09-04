@@ -127,6 +127,30 @@ export const ValidateInquiryTicketSchema = z.object({
   path: ['rejectionReason'],
 });
 
+export const UpdateLeadCellSchema = z.object({
+  stage: z.enum(['prospect', 'warm_lead']),
+  entityId: z.string().uuid(),
+  field: z.enum([
+    'company',
+    'contact',
+    'phone',
+    'phone2',
+    'emailAddr',
+    'email2',
+    'country',
+    'state',
+    'city',
+    'address',
+    'industry',
+    'territory',
+    'cat',
+    'sms',
+    'pic',
+    'notes',
+  ]),
+  value: z.string().nullable().optional(),
+});
+
 export type CreateInquiryPayload = z.infer<typeof CreateInquirySchema>;
 export type CreateManualWarmLeadPayload = z.infer<typeof CreateManualWarmLeadSchema>;
 export type CreateManualInquiryPayload = z.infer<typeof CreateManualInquirySchema>;
@@ -134,3 +158,4 @@ export type CreateManualProspectPayload = z.infer<typeof CreateManualProspectSch
 export type AssignPicToEntryPayload = z.infer<typeof AssignPicToEntrySchema>;
 export type BulkRemovedEntriesPayload = z.infer<typeof BulkRemovedEntriesSchema>;
 export type ValidateInquiryTicketPayload = z.infer<typeof ValidateInquiryTicketSchema>;
+export type UpdateLeadCellPayload = z.infer<typeof UpdateLeadCellSchema>;
