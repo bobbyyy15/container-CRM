@@ -847,7 +847,6 @@ const StatusSmartChip = ({
   options?: SmartChipOption[]
   disabled?: boolean
 }) => {
-  const [open, setOpen] = useState(false)
   const norm = (status || '').toLowerCase().trim()
   const current = options.find(o => o.value.toLowerCase() === norm || (norm === 'converted to sale' && o.value === 'Won') || (norm === 'lost' && o.value === 'Cancelled')) || {
     value: status || 'Pending',
@@ -858,86 +857,59 @@ const StatusSmartChip = ({
   }
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block' }}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={(e) => { e.stopPropagation(); setOpen(v => !v) }}
+    <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+      <span
         style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 5,
-          padding: '2px 8px 2px 8px',
-          borderRadius: 999,
+          position: 'absolute',
+          left: 9,
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: current.dot,
+          pointerEvents: 'none',
+          zIndex: 1,
+        }}
+      />
+      <select
+        value={current.value}
+        disabled={disabled}
+        onChange={(e) => onStatusChange(e.target.value)}
+        style={{
+          appearance: 'none',
+          WebkitAppearance: 'none',
+          MozAppearance: 'none',
           background: current.bg,
           color: current.color,
           border: '1px solid rgba(0,0,0,0.08)',
+          borderRadius: 999,
+          padding: '2.5px 22px 2.5px 21px',
           fontSize: 11.5,
           fontWeight: 600,
           cursor: disabled ? 'default' : 'pointer',
-          transition: 'all 0.15s ease',
+          outline: 'none',
           boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'right 7px center',
+          transition: 'all 0.15s ease',
         }}
         title={disabled ? undefined : 'Click to change status'}
       >
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: current.dot, flexShrink: 0 }} />
-        <span>{current.label}</span>
-        {!disabled && <span style={{ fontSize: 8, opacity: 0.7, marginLeft: 1 }}>▼</span>}
-      </button>
-
-      {open && (
-        <>
-          <div
-            style={{ position: 'fixed', inset: 0, zIndex: 999 }}
-            onClick={(e) => { e.stopPropagation(); setOpen(false) }}
-          />
-          <div
+        {options.map(opt => (
+          <option
+            key={opt.value}
+            value={opt.value}
             style={{
-              position: 'absolute',
-              top: 'calc(100% + 4px)',
-              left: 0,
-              zIndex: 1000,
               background: 'var(--ws)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              padding: 4,
-              boxShadow: '0 6px 20px rgba(0,0,0,0.15)',
-              minWidth: 120,
+              color: 'var(--t1)',
+              fontSize: 12,
+              padding: '6px',
             }}
-            onClick={e => e.stopPropagation()}
           >
-            {options.map(opt => (
-              <div
-                key={opt.value}
-                onClick={() => {
-                  setOpen(false)
-                  if (opt.value !== status) {
-                    onStatusChange(opt.value)
-                  }
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '6px 10px',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: opt.value === status ? 700 : 500,
-                  background: opt.value === status ? 'var(--s2)' : 'transparent',
-                  color: 'var(--t1)',
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'}
-                onMouseLeave={e => e.currentTarget.style.background = opt.value === status ? 'var(--s2)' : 'transparent'}
-              >
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: opt.dot }} />
-                <span>{opt.label}</span>
-                {opt.value === status && <span style={{ marginLeft: 'auto', color: 'var(--brand)', fontSize: 11 }}>✓</span>}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+            {opt.label}
+          </option>
+        ))}
+      </select>
     </div>
   )
 }
