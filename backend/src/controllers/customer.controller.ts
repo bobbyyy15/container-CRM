@@ -8,15 +8,21 @@ export class CustomerController {
       const status = req.query.status as string; // 'Active' or 'Floating' or 'All'
       const search = req.query.search as string;
 
-      // DATA SILOS ENFORCEMENT -- consistent with every other pipeline module: no PIC
-      // assigned (including every admin, by design) means nothing to see.
+      // Two different views of the same data, by design:
+      //   * a sales_manager sees only their own book -- their active clients
+      //   * operations (and admin) see the compiled roll-up of every account's
+      //     active clients, which is what the Customer Accounts screen is for
+      const actorRole = req.auth?.profile.role;
       const picId = req.auth?.profile.pic_id;
-      if (!picId) return res.json({ success: true, data: [] });
+      const seesAllAccounts = actorRole === 'admin' || actorRole === 'operations';
+
+      if (!seesAllAccounts && !picId) return res.json({ success: true, data: [] });
 
       let dbQuery = supabaseAdmin
         .from('customer_accounts_view')
-        .select('*')
-        .eq('pic_id', picId);
+        .select('*');
+
+      if (!seesAllAccounts) dbQuery = dbQuery.eq('pic_id', picId);
 
       // 2. STATUS FILTERING
       if (status && status !== 'All') {
