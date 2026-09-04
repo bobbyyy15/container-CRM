@@ -443,10 +443,23 @@ export class LeadService {
 
     const companyId = row.company_id;
     const contactId = row.contact_id;
+    const isCompany = row.identity_type === 'company' && companyId && !contactId;
 
-    if (contactId) {
+    if (isCompany) {
+      // Restoring a pure company-level entry: unblock all suppression entries for this company
+      await supabaseAdmin.from('removed_entries').delete().eq('company_id', companyId);
+      await Promise.all([
+        supabaseAdmin.from('prospect_clients').update({ lifecycle_status: 'active', removed_at: null }).eq('company_id', companyId).eq('lifecycle_status', 'removed'),
+        supabaseAdmin.from('warm_leads').update({ status: 'active', removed_at: null }).eq('company_id', companyId).eq('status', 'removed'),
+        supabaseAdmin.from('inquiries').update({ status: 'New' }).eq('company_id', companyId).eq('status', 'Removed'),
+      ]);
+    } else if (contactId) {
+      // Restoring a specific contact: unblock this contact's suppression entries
       await supabaseAdmin.from('removed_entries').delete().eq('contact_id', contactId);
       await supabaseAdmin.from('removed_entries').delete().eq('id', removedId);
+      if (row.normalized_value) {
+        await supabaseAdmin.from('removed_entries').delete().eq('normalized_value', row.normalized_value);
+      }
       if (companyId) {
         await supabaseAdmin.from('removed_entries').delete().eq('company_id', companyId).is('contact_id', null);
       }
@@ -456,15 +469,17 @@ export class LeadService {
         supabaseAdmin.from('inquiries').update({ status: 'New' }).eq('contact_id', contactId).eq('status', 'Removed'),
       ]);
     } else if (companyId) {
-      await supabaseAdmin.from('removed_entries').delete().eq('id', removedId);
-      await supabaseAdmin.from('removed_entries').delete().eq('company_id', companyId).is('contact_id', null);
+      await supabaseAdmin.from('removed_entries').delete().eq('company_id', companyId);
       await Promise.all([
-        supabaseAdmin.from('prospect_clients').update({ lifecycle_status: 'active', removed_at: null }).eq('company_id', companyId).is('contact_id', null).eq('lifecycle_status', 'removed'),
-        supabaseAdmin.from('warm_leads').update({ status: 'active', removed_at: null }).eq('company_id', companyId).is('contact_id', null).eq('status', 'removed'),
-        supabaseAdmin.from('inquiries').update({ status: 'New' }).eq('company_id', companyId).is('contact_id', null).eq('status', 'Removed'),
+        supabaseAdmin.from('prospect_clients').update({ lifecycle_status: 'active', removed_at: null }).eq('company_id', companyId).eq('lifecycle_status', 'removed'),
+        supabaseAdmin.from('warm_leads').update({ status: 'active', removed_at: null }).eq('company_id', companyId).eq('status', 'removed'),
+        supabaseAdmin.from('inquiries').update({ status: 'New' }).eq('company_id', companyId).eq('status', 'Removed'),
       ]);
     } else {
       await supabaseAdmin.from('removed_entries').delete().eq('id', removedId);
+      if (row.normalized_value) {
+        await supabaseAdmin.from('removed_entries').delete().eq('normalized_value', row.normalized_value);
+      }
     }
 
     return { success: true };

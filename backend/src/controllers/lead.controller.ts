@@ -57,7 +57,7 @@ const getCachedRemovedEntries = async () => {
   if (removedError) throw removedError;
 
   cachedRemoved = {
-    companies: new Set((removed ?? []).filter(row => row.identity_type === 'company').map(row => row.company_id).filter(Boolean)),
+    companies: new Set((removed ?? []).filter(row => row.identity_type === 'company' && !row.contact_id).map(row => row.company_id).filter(Boolean)),
     contacts: new Set((removed ?? []).map(row => row.contact_id).filter(Boolean)),
     emails: new Set((removed ?? []).filter(row => row.identity_type === 'email').map(row => row.normalized_value)),
     phones: new Set((removed ?? []).filter(row => row.identity_type === 'phone').map(row => row.normalized_value)),

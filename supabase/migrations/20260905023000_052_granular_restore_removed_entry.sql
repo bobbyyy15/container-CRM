@@ -1,7 +1,43 @@
 -- 052_granular_restore_removed_entry.sql
--- Ensure restoring a contact row only restores that specific contact,
--- preserving suppressions for other contacts from the same company.
+-- 1. Fix is_pipeline_identity_removed to only treat pure company records (contact_id IS NULL)
+--    as company-wide suppressions, and check exact normalized email/phone values.
+-- 2. Update restore_removed_entry to thoroughly remove suppressions and unblock records.
 
+-- 1. Update is_pipeline_identity_removed
+CREATE OR REPLACE FUNCTION public.is_pipeline_identity_removed(
+    p_company_id UUID,
+    p_contact_id UUID,
+    p_email_1 TEXT DEFAULT NULL,
+    p_email_2 TEXT DEFAULT NULL,
+    p_phone_1 TEXT DEFAULT NULL,
+    p_phone_2 TEXT DEFAULT NULL
+)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.removed_entries r
+        WHERE (p_company_id IS NOT NULL AND r.identity_type = 'company' AND r.company_id = p_company_id AND r.contact_id IS NULL)
+           OR (p_contact_id IS NOT NULL AND r.contact_id = p_contact_id)
+           OR (r.identity_type = 'email' AND r.normalized_value IS NOT NULL AND (
+                (p_email_1 IS NOT NULL AND NULLIF(btrim(p_email_1), '') IS NOT NULL AND r.normalized_value = public.normalize_email(p_email_1))
+             OR (p_email_2 IS NOT NULL AND NULLIF(btrim(p_email_2), '') IS NOT NULL AND r.normalized_value = public.normalize_email(p_email_2))
+           ))
+           OR (r.identity_type = 'phone' AND r.normalized_value IS NOT NULL AND (
+                (p_phone_1 IS NOT NULL AND NULLIF(btrim(p_phone_1), '') IS NOT NULL AND r.normalized_value = public.normalize_phone(p_phone_1))
+             OR (p_phone_2 IS NOT NULL AND NULLIF(btrim(p_phone_2), '') IS NOT NULL AND r.normalized_value = public.normalize_phone(p_phone_2))
+           ))
+    );
+$$;
+
+REVOKE ALL ON FUNCTION public.is_pipeline_identity_removed(UUID, UUID, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.is_pipeline_identity_removed(UUID, UUID, TEXT, TEXT, TEXT, TEXT) TO service_role;
+
+-- 2. Update restore_removed_entry
 CREATE OR REPLACE FUNCTION public.restore_removed_entry(
     p_removed_id UUID,
     p_actor_id UUID
@@ -16,6 +52,7 @@ DECLARE
     v_company_id UUID;
     v_contact_id UUID;
     v_type TEXT;
+    v_norm TEXT;
     v_restored_prospects INT := 0;
     v_restored_warm_leads INT := 0;
     v_restored_inquiries INT := 0;
@@ -28,19 +65,52 @@ BEGIN
     v_company_id := v_entry.company_id;
     v_contact_id := v_entry.contact_id;
     v_type := v_entry.identity_type;
+    v_norm := v_entry.normalized_value;
 
-    IF v_contact_id IS NOT NULL THEN
-        -- Delete suppression entries for this specific contact
+    IF v_type = 'company' AND v_company_id IS NOT NULL AND v_contact_id IS NULL THEN
+        -- Restoring a pure company-level entry: unblock all entries for this company
+        DELETE FROM public.removed_entries
+        WHERE company_id = v_company_id OR id = p_removed_id;
+
+        WITH reactivated AS (
+            UPDATE public.prospect_clients
+            SET lifecycle_status = 'active', removed_at = NULL
+            WHERE company_id = v_company_id AND lifecycle_status = 'removed'
+            RETURNING id
+        )
+        SELECT count(*) INTO v_restored_prospects FROM reactivated;
+
+        WITH reactivated AS (
+            UPDATE public.warm_leads
+            SET status = 'active', removed_at = NULL
+            WHERE company_id = v_company_id AND status = 'removed'
+            RETURNING id
+        )
+        SELECT count(*) INTO v_restored_warm_leads FROM reactivated;
+
+        WITH reactivated AS (
+            UPDATE public.inquiries
+            SET status = 'New'
+            WHERE company_id = v_company_id AND status = 'Removed'
+            RETURNING id
+        )
+        SELECT count(*) INTO v_restored_inquiries FROM reactivated;
+
+    ELSIF v_contact_id IS NOT NULL THEN
+        -- Restoring a specific contact: delete suppressions for this contact
         DELETE FROM public.removed_entries
         WHERE contact_id = v_contact_id OR id = p_removed_id;
 
-        -- Remove blanket company suppression if present so this contact is freed
+        IF v_norm IS NOT NULL THEN
+            DELETE FROM public.removed_entries WHERE normalized_value = v_norm;
+        END IF;
+
+        -- Free contact from any parent blanket company suppression
         IF v_company_id IS NOT NULL THEN
             DELETE FROM public.removed_entries
             WHERE company_id = v_company_id AND contact_id IS NULL;
         END IF;
 
-        -- Reactivate prospect clients for this contact only
         WITH reactivated AS (
             UPDATE public.prospect_clients
             SET lifecycle_status = 'active', removed_at = NULL
@@ -49,7 +119,6 @@ BEGIN
         )
         SELECT count(*) INTO v_restored_prospects FROM reactivated;
 
-        -- Reactivate warm leads for this contact only
         WITH reactivated AS (
             UPDATE public.warm_leads
             SET status = 'active', removed_at = NULL
@@ -58,7 +127,6 @@ BEGIN
         )
         SELECT count(*) INTO v_restored_warm_leads FROM reactivated;
 
-        -- Reactivate inquiries for this contact only
         WITH reactivated AS (
             UPDATE public.inquiries
             SET status = 'New'
@@ -68,14 +136,13 @@ BEGIN
         SELECT count(*) INTO v_restored_inquiries FROM reactivated;
 
     ELSIF v_company_id IS NOT NULL THEN
-        -- Delete pure company suppression entry
         DELETE FROM public.removed_entries
-        WHERE id = p_removed_id OR (company_id = v_company_id AND contact_id IS NULL);
+        WHERE company_id = v_company_id OR id = p_removed_id;
 
         WITH reactivated AS (
             UPDATE public.prospect_clients
             SET lifecycle_status = 'active', removed_at = NULL
-            WHERE company_id = v_company_id AND contact_id IS NULL AND lifecycle_status = 'removed'
+            WHERE company_id = v_company_id AND lifecycle_status = 'removed'
             RETURNING id
         )
         SELECT count(*) INTO v_restored_prospects FROM reactivated;
@@ -83,7 +150,7 @@ BEGIN
         WITH reactivated AS (
             UPDATE public.warm_leads
             SET status = 'active', removed_at = NULL
-            WHERE company_id = v_company_id AND contact_id IS NULL AND status = 'removed'
+            WHERE company_id = v_company_id AND status = 'removed'
             RETURNING id
         )
         SELECT count(*) INTO v_restored_warm_leads FROM reactivated;
@@ -91,14 +158,16 @@ BEGIN
         WITH reactivated AS (
             UPDATE public.inquiries
             SET status = 'New'
-            WHERE company_id = v_company_id AND contact_id IS NULL AND status = 'Removed'
+            WHERE company_id = v_company_id AND status = 'Removed'
             RETURNING id
         )
         SELECT count(*) INTO v_restored_inquiries FROM reactivated;
 
     ELSE
-        -- Pure identifier suppression
         DELETE FROM public.removed_entries WHERE id = p_removed_id;
+        IF v_norm IS NOT NULL THEN
+            DELETE FROM public.removed_entries WHERE normalized_value = v_norm;
+        END IF;
     END IF;
 
     INSERT INTO public.domain_events (entity_type, entity_id, event_type, actor_id, payload)
@@ -122,3 +191,5 @@ $$;
 
 REVOKE ALL ON FUNCTION public.restore_removed_entry(UUID, UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.restore_removed_entry(UUID, UUID) TO service_role;
+
+NOTIFY pgrst, 'reload schema';
