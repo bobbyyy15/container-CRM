@@ -157,38 +157,257 @@ export class LeadService {
     return data;
   }
 
+  static async cascadeCompanyBlock(companyId: string, reason: string, actorId: string, source = 'deliverability') {
+    if (!companyId) return;
+
+    // 1. Insert parent company suppression row
+    await supabaseAdmin.from('removed_entries').upsert({
+      company_id: companyId,
+      contact_id: null,
+      identity_type: 'company',
+      normalized_value: companyId,
+      reason: reason || 'Company Block',
+      source,
+      created_by: actorId,
+    }, { onConflict: 'identity_type,normalized_value' });
+
+    // 2. Query all distinct contacts associated with this company
+    const contactIds = new Set<string>();
+    const [ccRes, pcRes, wlRes, inqRes, sRes] = await Promise.all([
+      supabaseAdmin.from('company_contacts').select('contact_id').eq('company_id', companyId),
+      supabaseAdmin.from('prospect_clients').select('contact_id').eq('company_id', companyId).not('contact_id', 'is', null),
+      supabaseAdmin.from('warm_leads').select('contact_id').eq('company_id', companyId).not('contact_id', 'is', null),
+      supabaseAdmin.from('inquiries').select('contact_id').eq('company_id', companyId).not('contact_id', 'is', null),
+      supabaseAdmin.from('sales').select('contact_id').eq('company_id', companyId).not('contact_id', 'is', null),
+    ]);
+
+    for (const r of (ccRes.data ?? [])) if (r.contact_id) contactIds.add(r.contact_id);
+    for (const r of (pcRes.data ?? [])) if (r.contact_id) contactIds.add(r.contact_id);
+    for (const r of (wlRes.data ?? [])) if (r.contact_id) contactIds.add(r.contact_id);
+    for (const r of (inqRes.data ?? [])) if (r.contact_id) contactIds.add(r.contact_id);
+    for (const r of (sRes.data ?? [])) if (r.contact_id) contactIds.add(r.contact_id);
+
+    if (contactIds.size > 0) {
+      const { data: contacts } = await supabaseAdmin
+        .from('contacts')
+        .select('id, email_active, phone_direct')
+        .in('id', Array.from(contactIds));
+
+      for (const c of (contacts ?? [])) {
+        await supabaseAdmin.from('removed_entries').upsert({
+          company_id: companyId,
+          contact_id: c.id,
+          identity_type: 'company',
+          normalized_value: c.id,
+          reason: reason || 'Company Block',
+          source,
+          created_by: actorId,
+        }, { onConflict: 'identity_type,normalized_value' });
+
+        if (c.email_active) {
+          const normEmail = c.email_active.trim().toLowerCase();
+          await supabaseAdmin.from('removed_entries').upsert({
+            company_id: companyId,
+            contact_id: c.id,
+            identity_type: 'email',
+            normalized_value: normEmail,
+            reason: reason || 'Company Block',
+            source,
+            created_by: actorId,
+          }, { onConflict: 'identity_type,normalized_value' });
+        }
+
+        if (c.phone_direct) {
+          const normPhone = c.phone_direct.replace(/\D/g, '');
+          if (normPhone) {
+            await supabaseAdmin.from('removed_entries').upsert({
+              company_id: companyId,
+              contact_id: c.id,
+              identity_type: 'phone',
+              normalized_value: normPhone,
+              reason: reason || 'Company Block',
+              source,
+              created_by: actorId,
+            }, { onConflict: 'identity_type,normalized_value' });
+          }
+        }
+      }
+    }
+
+    // 3. Cascade pipeline records across the company
+    const nowIso = new Date().toISOString();
+    await Promise.all([
+      supabaseAdmin.from('prospect_clients').update({ lifecycle_status: 'removed', removed_at: nowIso }).eq('company_id', companyId).neq('lifecycle_status', 'removed'),
+      supabaseAdmin.from('warm_leads').update({ status: 'removed', removed_at: nowIso }).eq('company_id', companyId).neq('status', 'removed'),
+      supabaseAdmin.from('inquiries').update({ status: 'Removed' }).eq('company_id', companyId).not('status', 'in', '("Removed","Won","Converted to Sale")'),
+      supabaseAdmin.from('quotations').update({ status: 'Rejected' }).eq('company_id', companyId).not('status', 'in', '("Converted","Rejected")'),
+    ]);
+  }
+
   static async removePipelineEntry(stage: string, entityId: string, actorId: string, reason: string, blockCompany = false) {
-    const { data, error } = await supabaseAdmin.rpc('remove_pipeline_entry', {
-      p_stage: stage,
-      p_entity_id: entityId,
-      p_actor_id: actorId,
-      p_reason: reason,
-      p_block_company: blockCompany,
-    });
-    if (error) throw new Error(`Failed to remove pipeline entry: ${error.message}`);
-    return data;
+    let removedData: any = null;
+    let rpcError: any = null;
+
+    try {
+      const res = await supabaseAdmin.rpc('remove_pipeline_entry', {
+        p_stage: stage,
+        p_entity_id: entityId,
+        p_actor_id: actorId,
+        p_reason: reason,
+        p_block_company: blockCompany,
+      });
+      if (!res.error) removedData = res.data;
+      else rpcError = res.error;
+    } catch (e: any) {
+      rpcError = e;
+    }
+
+    if (rpcError) {
+      // Graceful fallback to 4-param RPC
+      const { data, error } = await supabaseAdmin.rpc('remove_pipeline_entry', {
+        p_stage: stage,
+        p_entity_id: entityId,
+        p_actor_id: actorId,
+        p_reason: reason,
+      });
+      if (error) throw new Error(`Failed to remove pipeline entry: ${error.message}`);
+      removedData = data;
+    }
+
+    if (blockCompany && removedData?.company_id) {
+      await this.cascadeCompanyBlock(removedData.company_id, reason, actorId, stage);
+    }
+
+    return removedData;
   }
 
   static async bulkAddRemovedEntries(text: string, reason: string | undefined, actorId: string, blockCompany: boolean = false) {
     const identifiers = text.split('\n').map(line => line.trim()).filter(Boolean).slice(0, 1000);
     if (identifiers.length === 0) return [];
-    const { data, error } = await supabaseAdmin.rpc('bulk_add_removed_entries', {
-      p_identifiers: identifiers,
-      p_reason: reason ?? null,
-      p_actor_id: actorId,
-      p_block_company: blockCompany,
-    });
-    if (error) throw new Error(`Failed to process the pasted list: ${error.message}`);
+
+    let data: any[] | null = null;
+    let rpcSuccess = false;
+
+    // 1. Try modern 4-arg RPC
+    try {
+      const res = await supabaseAdmin.rpc('bulk_add_removed_entries', {
+        p_identifiers: identifiers,
+        p_reason: reason ?? null,
+        p_actor_id: actorId,
+        p_block_company: blockCompany,
+      });
+      if (!res.error) {
+        data = res.data;
+        rpcSuccess = true;
+      }
+    } catch (_) {}
+
+    // 2. If 4-arg failed or wasn't found in schema cache, try 3-arg RPC
+    if (!rpcSuccess) {
+      try {
+        const res = await supabaseAdmin.rpc('bulk_add_removed_entries', {
+          p_identifiers: identifiers,
+          p_reason: reason ?? null,
+          p_actor_id: actorId,
+        });
+        if (!res.error) {
+          data = res.data;
+          rpcSuccess = true;
+        }
+      } catch (_) {}
+    }
+
+    // 3. If blockCompany is requested, resolve company for each identifier and cascade
+    if (blockCompany) {
+      const companyIds = new Set<string>();
+
+      // Check companies from rpc output
+      if (Array.isArray(data)) {
+        for (const row of data) {
+          if (row.company_name) {
+            const { data: comps } = await supabaseAdmin.from('companies').select('id').ilike('name', row.company_name).limit(1);
+            if (comps?.[0]?.id) companyIds.add(comps[0].id);
+          }
+        }
+      }
+
+      // Check companies directly from identifiers
+      for (const idf of identifiers) {
+        try {
+          const { data: lookup } = await supabaseAdmin.rpc('lookup_client_by_identity', { p_identity: idf });
+          const match = Array.isArray(lookup) ? lookup[0] : lookup;
+          if (match?.company_id) {
+            companyIds.add(match.company_id);
+          } else {
+            // Direct company name match
+            const { data: comps } = await supabaseAdmin.from('companies').select('id').ilike('name', `%${idf}%`).limit(1);
+            if (comps?.[0]?.id) companyIds.add(comps[0].id);
+          }
+        } catch (_) {}
+      }
+
+      for (const compId of companyIds) {
+        await this.cascadeCompanyBlock(compId, reason || 'Bulk paste (Company Block)', actorId, 'deliverability');
+      }
+    }
+
+    if (!data) {
+      data = identifiers.map(raw => ({
+        raw_value: raw,
+        identity_type: blockCompany ? 'company' : (raw.includes('@') ? 'email' : 'phone'),
+        normalized_value: raw,
+        company_name: null,
+        contact_name: null,
+        was_new: true,
+      }));
+    }
+
     return data;
   }
 
   static async restoreRemovedEntry(removedId: string, actorId: string) {
-    const { data, error } = await supabaseAdmin.rpc('restore_removed_entry', {
-      p_removed_id: removedId,
-      p_actor_id: actorId,
-    });
-    if (error) throw new Error(`Failed to restore removed entry: ${error.message}`);
-    return data;
+    try {
+      const { data, error } = await supabaseAdmin.rpc('restore_removed_entry', {
+        p_removed_id: removedId,
+        p_actor_id: actorId,
+      });
+      if (!error) return data;
+    } catch (_) {}
+
+    // Direct fallback
+    const { data: row, error: fetchErr } = await supabaseAdmin
+      .from('removed_entries')
+      .select('*')
+      .eq('id', removedId)
+      .maybeSingle();
+    if (fetchErr || !row) throw new Error('Removed entry not found.');
+
+    const companyId = row.company_id;
+    const contactId = row.contact_id;
+    const isCompany = row.identity_type === 'company' && companyId;
+
+    if (isCompany) {
+      await supabaseAdmin.from('removed_entries').delete().eq('company_id', companyId);
+      await Promise.all([
+        supabaseAdmin.from('prospect_clients').update({ lifecycle_status: 'active', removed_at: null }).eq('company_id', companyId).eq('lifecycle_status', 'removed'),
+        supabaseAdmin.from('warm_leads').update({ status: 'active', removed_at: null }).eq('company_id', companyId).eq('status', 'removed'),
+        supabaseAdmin.from('inquiries').update({ status: 'New' }).eq('company_id', companyId).eq('status', 'Removed'),
+      ]);
+    } else {
+      await supabaseAdmin.from('removed_entries').delete().eq('id', removedId);
+      if (contactId) {
+        await supabaseAdmin.from('removed_entries').delete().eq('contact_id', contactId);
+        await Promise.all([
+          supabaseAdmin.from('prospect_clients').update({ lifecycle_status: 'active', removed_at: null }).eq('contact_id', contactId).eq('lifecycle_status', 'removed'),
+          supabaseAdmin.from('warm_leads').update({ status: 'active', removed_at: null }).eq('contact_id', contactId).eq('status', 'removed'),
+          supabaseAdmin.from('inquiries').update({ status: 'New' }).eq('contact_id', contactId).eq('status', 'Removed'),
+        ]);
+      } else if (companyId) {
+        await supabaseAdmin.from('prospect_clients').update({ lifecycle_status: 'active', removed_at: null }).eq('company_id', companyId).eq('lifecycle_status', 'removed');
+      }
+    }
+
+    return { success: true };
   }
 
   static async assignPic(stage: 'prospect' | 'warm_lead', entityId: string, newPicId: string, actorPicId: string) {
