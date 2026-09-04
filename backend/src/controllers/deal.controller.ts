@@ -48,7 +48,10 @@ export class DealController {
 
       let query = supabaseAdmin
         .from('sales')
-        .select('*, companies(*), pics(name), quotations(*, contacts(*), quotation_items(*))')
+        // A manually recorded sale has no quotation, so the contact cannot come from
+        // quotations(...) alone -- it rendered blank in Sales Tracker even when the
+        // company had a contact on file. Embed the company's contacts as a fallback.
+        .select('*, companies(*, company_contacts(is_primary, contacts(*))), pics(name), quotations(*, contacts(*), quotation_items(*))')
         .order('created_at', { ascending: false });
       if (!seesAllSales) query = query.eq('pic_id', picId!);
       const { data, error } = await query;

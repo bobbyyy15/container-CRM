@@ -1,13 +1,16 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react'
 import { supabase } from './config/supabase'
 import { api } from './lib/api'
 import { useRealtimeRevision, useRealtimeStatus } from './lib/realtime'
 import { toast, askConfirm, askReason, ToastHost, ConfirmHost } from './lib/notify'
 import Login from './Login'
-import ProspectImportDialog from './features/import/ProspectImportDialog'
-import { UserProfileSettings } from './features/settings/UserProfileSettings'
-import { UserManagement } from './features/settings/UserManagement'
-import ResetPassword from './features/settings/ResetPassword'
+// Admin screens and the import dialog are reached rarely, so they load on demand
+// instead of riding along in the initial bundle. Login stays eager -- it is the
+// first thing an unauthenticated visitor sees.
+const ProspectImportDialog = lazy(() => import('./features/import/ProspectImportDialog'))
+const UserProfileSettings = lazy(() => import('./features/settings/UserProfileSettings').then(m => ({ default: m.UserProfileSettings })))
+const UserManagement = lazy(() => import('./features/settings/UserManagement').then(m => ({ default: m.UserManagement })))
+const ResetPassword = lazy(() => import('./features/settings/ResetPassword'))
 import {
   NewInquiryDialog,
   NewWarmLeadDialog,
@@ -349,14 +352,17 @@ const mapPipelineRow = (p: any) => ({
       : 'Direct Entry',
 })
 
-export const useWarmLeads = (revision = 0) => {
+// `enabled` exists because ProspectSheet renders both the Prospect and Warm Lead
+// views from one component -- without it, opening either page fetched both lists.
+export const useWarmLeads = (revision = 0, enabled = true) => {
   const [data, setData] = useState<any[]>([])
   const liveRevision = useRealtimeRevision(['leads', 'data'])
   useEffect(() => {
+    if (!enabled) return
     api.get('/leads/warm-leads', { params: { limit: 500 } }).then(res => {
       if (res.data.success) setData((res.data.data || []).map(mapPipelineRow))
     }).catch(console.error)
-  }, [revision, liveRevision])
+  }, [revision, liveRevision, enabled])
   return data
 }
 
@@ -451,13 +457,19 @@ const useSales = (revision = 0) => {
         const profit = Number(row.gross_profit || 0)
         const quote = row.quotations || {}
         const item = quote.quotation_items?.[0]
+        const fullName = (c: any) => c ? `${c.first_name || ''} ${c.last_name || ''}`.trim() : ''
+        // A manual sale has no quotation, so fall back to the company's contact --
+        // preferring the primary one. Without this the column was blank on every
+        // directly recorded sale even though the contact was on file.
+        const companyLinks = row.companies?.company_contacts ?? []
+        const companyContact = (companyLinks.find((l: any) => l.is_primary) ?? companyLinks[0])?.contacts
         return {
           id: row.id,
           ref: `SAL-${row.id.slice(0, 8).toUpperCase()}`,
           date: new Date(row.created_at).toLocaleDateString(),
           createdAt: row.created_at,
           company: row.companies?.name || '',
-          contact: quote.contacts ? `${quote.contacts.first_name || ''} ${quote.contacts.last_name || ''}`.trim() : '',
+          contact: fullName(quote.contacts) || fullName(companyContact),
           category: item?.description || 'Container',
           size: '—',
           condition: '—',
@@ -538,11 +550,13 @@ const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses
   return data;
 }
 
-const useCustomers = (status = 'All', search = '', revision = 0) => {
+// `limit` keeps the dashboard's "top 5" from pulling the entire customer table
+// across the network just to discard almost all of it.
+const useCustomers = (status = 'All', search = '', revision = 0, limit?: number) => {
   const [data, setData] = useState<any[]>([]);
   const liveRevision = useRealtimeRevision(['deals', 'contracts']);
   useEffect(() => {
-    api.get('/customers', { params: { status, search } }).then(res => {
+    api.get('/customers', { params: { status, search, ...(limit ? { limit } : {}) } }).then(res => {
       setData((res.data.data || []).map((c: any) => ({
         id: c.company_id,
         co: c.company_name,
@@ -559,19 +573,20 @@ const useCustomers = (status = 'All', search = '', revision = 0) => {
         status: c.status
       })));
     }).catch(console.error);
-  }, [status, search, revision, liveRevision]);
+  }, [status, search, revision, liveRevision, limit]);
   return data;
 }
 
-const useProspects = (revision = 0, status: 'active' | 'converted' | 'removed' | 'all' = 'active') => {
+const useProspects = (revision = 0, status: 'active' | 'converted' | 'removed' | 'all' = 'active', enabled = true) => {
   const [prospects, setProspects] = useState<any[]>([]);
   const liveRevision = useRealtimeRevision(['leads', 'data']);
   useEffect(() => {
+    if (!enabled) return;
     api.get('/leads/prospects', { params: { limit: 500, status } }).then(res => {
       const data = (res.data.data || []).map(mapPipelineRow);
       setProspects(data);
     }).catch(e => console.error("Failed to fetch API data", e));
-  }, [revision, liveRevision, status]);
+  }, [revision, liveRevision, status, enabled]);
   return prospects;
 }
 
@@ -1153,13 +1168,21 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
     const term = gsQuery.trim()
     if (term.length < 2) { setGsResults([]); return }
     setGsLoading(true)
+    // Clearing the timeout alone did not cancel requests already in flight, so a slow
+    // response for "abc" could resolve after "abcd" and overwrite the newer results --
+    // and its setGsLoading(false) cleared the spinner while the newer batch was still
+    // running. Abort the previous batch and ignore anything that still resolves.
+    const controller = new AbortController()
+    let cancelled = false
     const handle = setTimeout(() => {
+      const opts = (search: string) => ({ params: { search, limit: 5 }, signal: controller.signal })
       Promise.all([
-        api.get('/leads/prospects', { params: { search: term, limit: 5 } }).catch(() => ({ data: { data: [] } })),
-        api.get('/leads/warm-leads', { params: { search: term, limit: 5 } }).catch(() => ({ data: { data: [] } })),
-        api.get('/leads/inquiries', { params: { search: term, limit: 5 } }).catch(() => ({ data: { data: [] } })),
-        api.get('/customers', { params: { search: term, limit: 5 } }).catch(() => ({ data: { data: [] } })),
+        api.get('/leads/prospects', opts(term)).catch(() => ({ data: { data: [] } })),
+        api.get('/leads/warm-leads', opts(term)).catch(() => ({ data: { data: [] } })),
+        api.get('/leads/inquiries', opts(term)).catch(() => ({ data: { data: [] } })),
+        api.get('/customers', opts(term)).catch(() => ({ data: { data: [] } })),
       ]).then(([prospects, warmLeads, inquiries, customers]) => {
+        if (cancelled) return
         const rows: { label: string; sub: string; screen: Screen }[] = [
           ...(prospects.data.data || []).map((r: any) => ({ label: r.companies?.name || r.contacts?.first_name || 'Prospect', sub: 'Prospect Client', screen: 'prospects' as Screen })),
           ...(warmLeads.data.data || []).map((r: any) => ({ label: r.companies?.name || r.contacts?.first_name || 'Warm Lead', sub: 'Warm Lead', screen: 'warm-leads' as Screen })),
@@ -1168,9 +1191,9 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
         ]
         setGsResults(rows)
         setGsLoading(false)
-      }).catch(() => setGsLoading(false))
+      }).catch(() => { if (!cancelled) setGsLoading(false) })
     }, 300)
-    return () => clearTimeout(handle)
+    return () => { cancelled = true; controller.abort(); clearTimeout(handle) }
   }, [gsQuery])
 
   return (
@@ -1322,7 +1345,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
   const PIC_DATA: PicPerformanceRow[] = c.PIC_DATA || [];
   const LOSS_REASONS: LossReasonRow[] = c.LOSS_REASONS || [];
 
-  const topCustomers = useCustomers('All', '').slice(0, 5);
+  const topCustomers = useCustomers('All', '', 0, 5);
   const overdueContracts = useContracts('All Statuses', 'Overdue', '');
   const OVERDUE_PICKUPS = overdueContracts.map(c => {
     const targetDate = c.pickup === 'Unscheduled' ? new Date() : new Date(c.pickup);
@@ -2000,8 +2023,8 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
   const [showAssignPic, setShowAssignPic] = useState(false)
 
-  const _prospectsData = useProspects(revision, mode === 'prospect' ? status : 'active')
-  const _warmData = useWarmLeads(revision)
+  const _prospectsData = useProspects(revision, mode === 'prospect' ? status : 'active', mode === 'prospect')
+  const _warmData = useWarmLeads(revision, mode === 'warm')
   const prospectsData = mode === 'warm' ? _warmData : _prospectsData
 
   const handleConvert = async (id: string) => {
@@ -5827,7 +5850,14 @@ export default function App() {
   const handleNav = useCallback((s: Screen) => setScreen(s), [])
 
   if (authChecking) return null;
-  if (isPasswordRecovery) return <><ResetPassword onDone={() => setIsPasswordRecovery(false)} /><ToastHost /></>;
+  if (isPasswordRecovery) return (
+    <>
+      <Suspense fallback={<div className="loading-row"><span className="spinner" />Loading…</div>}>
+        <ResetPassword onDone={() => setIsPasswordRecovery(false)} />
+      </Suspense>
+      <ToastHost />
+    </>
+  );
   if (!session) return <><Login onLogin={() => {}} /><ToastHost /></>;
 
   const renderScreen = () => {
@@ -5898,7 +5928,11 @@ export default function App() {
       <div className="workspace" style={{ flex: 1, minWidth: 0, zIndex: 1 }}>
         <div className="ws-card">
           <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} session={session} onNav={handleNav} role={currentProfile?.role} />
-          <div key={screen} className="screen-transition">{renderScreen()}</div>
+          <div key={screen} className="screen-transition">
+            <Suspense fallback={<div className="loading-row"><span className="spinner" />Loading…</div>}>
+              {renderScreen()}
+            </Suspense>
+          </div>
         </div>
       </div>
       <ToastHost />
