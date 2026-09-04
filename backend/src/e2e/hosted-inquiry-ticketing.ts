@@ -107,6 +107,14 @@ const run = async () => {
   });
   if (queueForbidden.ok) throw new Error('Sales manager was able to access the Procurement validation queue');
 
+  const procurementBackfillForbidden = await fetch(`${apiBase}/leads/inquiries/${ids.inquiryA}/add-to-warm-leads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${procToken}` },
+  });
+  if (procurementBackfillForbidden.status !== 403) {
+    throw new Error(`Procurement was able to add an Inquiry to Warm Leads: HTTP ${procurementBackfillForbidden.status}`);
+  }
+
   // Notification fired to the Procurement user on ticket creation.
   const procNotifs = await request(procToken, '/notifications');
   const createdNotif = procNotifs.data.find((n: any) => n.entity_id === ids.inquiryA && n.type === 'inquiry_pending_validation');

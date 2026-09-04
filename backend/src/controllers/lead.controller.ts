@@ -11,6 +11,7 @@ import {
   AssignPicToEntrySchema,
   BulkRemovedEntriesSchema,
   ValidateInquiryTicketSchema,
+  AddInquiryToWarmLeadsSchema,
 } from '../schemas/lead.schema';
 import { supabaseAdmin } from '../config/supabase';
 
@@ -43,7 +44,8 @@ const listActiveLeads = async (
   const select = table === 'inquiries'
     ? '*, companies(*), contacts(*), pics(name), '
       + 'container_sizes!container_size_id(id, name), container_conditions!container_condition_id(id, name), '
-      + 'alt_size:container_sizes!alt_container_size_id(id, name), alt_condition:container_conditions!alt_container_condition_id(id, name)'
+      + 'alt_size:container_sizes!alt_container_size_id(id, name), alt_condition:container_conditions!alt_container_condition_id(id, name), '
+      + 'backfilled_warm_leads:warm_leads!source_inquiry_id(id)'
     : '*, companies(*), contacts(*), pics(name)';
   let dbQuery = supabaseAdmin
     .from(table)
@@ -249,6 +251,27 @@ export class LeadController {
         success: false,
         error: { message: error.message }
       });
+    }
+  }
+
+  static async addInquiryToWarmLeads(req: Request, res: Response) {
+    try {
+      const { inquiryId } = AddInquiryToWarmLeadsSchema.parse({ inquiryId: req.params.entityId });
+      const picId = requirePicId(req, res);
+      if (!picId) return;
+
+      const warmLead = await LeadService.addInquiryToWarmLeads(
+        inquiryId,
+        req.auth!.user.id,
+        picId,
+      );
+      res.status(201).json({
+        success: true,
+        data: warmLead,
+        message: 'Inquiry added to Warm Leads',
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
     }
   }
 

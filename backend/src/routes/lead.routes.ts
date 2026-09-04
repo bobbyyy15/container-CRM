@@ -17,6 +17,7 @@ router.post('/removed/bulk', requireRoles('admin', 'sales_manager'), LeadControl
 // Inquiry ticket validation (Procurement approves/rejects before it's quotable)
 router.post('/inquiries/:entityId/validate', requireRoles('admin', 'procurement'), LeadController.validateTicket);
 router.post('/inquiries/:entityId/apply-alternative', requireRoles('admin', 'sales_manager'), LeadController.applyAlternative);
+router.post('/inquiries/:entityId/add-to-warm-leads', requireRoles('admin', 'sales_manager'), LeadController.addInquiryToWarmLeads);
 
 // Prospect -> Warm Lead
 router.post('/prospects/:prospectId/convert-to-warm-lead', requireRoles('admin', 'sales_manager'), LeadController.convertProspect);
