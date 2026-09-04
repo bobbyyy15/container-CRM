@@ -106,24 +106,51 @@ const listActiveLeads = async (
     applySuppressionFilter ? getCachedRemovedEntries() : Promise.resolve(null),
     needsDownstreamFilter
       ? Promise.all([
-          supabaseAdmin.from('warm_leads').select('company_id').eq('pic_id', picId).eq('status', 'active'),
-          supabaseAdmin.from('inquiries').select('company_id').eq('pic_id', picId),
-          supabaseAdmin.from('sales').select('company_id').eq('pic_id', picId),
+          supabaseAdmin.from('warm_leads').select('company_id, contact_id, companies(name), contacts(email_active, email_2, phone_direct, phone_2)').eq('pic_id', picId).eq('status', 'active'),
+          supabaseAdmin.from('inquiries').select('company_id, contact_id, companies(name), contacts(email_active, email_2, phone_direct, phone_2)').eq('pic_id', picId).not('status', 'in', '(Removed,Lost)'),
+          supabaseAdmin.from('sales').select('company_id, companies(name)').eq('pic_id', picId).eq('status', 'Won'),
         ])
       : Promise.resolve(null),
   ]);
   if (error) throw error;
 
-  const downstreamCompanies = new Set(
-    (downstream ?? []).flatMap(result => (result.data ?? []).map((row: any) => row.company_id)).filter(Boolean)
-  );
+  const downstreamCompanyIds = new Set<string>();
+  const downstreamContactIds = new Set<string>();
+  const downstreamCompanyNames = new Set<string>();
+  const downstreamEmails = new Set<string>();
+  const downstreamPhones = new Set<string>();
+
+  if (downstream) {
+    for (const res of downstream) {
+      for (const row of (res.data ?? []) as any[]) {
+        if (row.company_id) downstreamCompanyIds.add(row.company_id);
+        if (row.contact_id) downstreamContactIds.add(row.contact_id);
+        if (row.companies?.name) downstreamCompanyNames.add(text(row.companies.name));
+        const c = row.contacts;
+        if (c) {
+          if (c.email_active) downstreamEmails.add(text(c.email_active));
+          if (c.email_2) downstreamEmails.add(text(c.email_2));
+          if (c.phone_direct) downstreamPhones.add(digits(c.phone_direct));
+          if (c.phone_2) downstreamPhones.add(digits(c.phone_2));
+        }
+      }
+    }
+  }
 
   const eligible = (data ?? []).filter((row: any) => {
     const company = row.companies ?? {};
     const contact = row.contacts ?? {};
 
-    // Already a warm lead / inquiry / customer -- it belongs to that stage now.
-    if (needsDownstreamFilter && downstreamCompanies.has(row.company_id)) return false;
+    // Already a warm lead / inquiry / active client / customer -- it belongs to that stage now.
+    if (needsDownstreamFilter) {
+      if (row.company_id && downstreamCompanyIds.has(row.company_id)) return false;
+      if (row.contact_id && downstreamContactIds.has(row.contact_id)) return false;
+      if (company.name && downstreamCompanyNames.has(text(company.name))) return false;
+      const emails = [contact.email_active, contact.email_2].map(text).filter(Boolean);
+      const phones = [contact.phone_direct, contact.phone_2].map(digits).filter(Boolean);
+      if (emails.some((e: string) => downstreamEmails.has(e))) return false;
+      if (phones.some((p: string) => downstreamPhones.has(p))) return false;
+    }
 
     if (applySuppressionFilter && removedSet) {
       if (removedSet.companies.has(row.company_id) || removedSet.contacts.has(row.contact_id)) return false;

@@ -46,6 +46,13 @@ export class DealService {
       })
       .single();
     if (error) throw new Error(`Failed to create sale: ${error.message}`);
+    if (sale?.company_id) {
+      await supabaseAdmin
+        .from('prospect_clients')
+        .update({ lifecycle_status: 'converted', converted_at: new Date().toISOString() })
+        .eq('company_id', sale.company_id)
+        .eq('lifecycle_status', 'active');
+    }
     return sale;
   }
 
@@ -60,6 +67,13 @@ export class DealService {
       })
       .single();
     if (error) throw new Error(`Failed to record sale: ${error.message}`);
+    if (sale?.company_id) {
+      await supabaseAdmin
+        .from('prospect_clients')
+        .update({ lifecycle_status: 'converted', converted_at: new Date().toISOString() })
+        .eq('company_id', sale.company_id)
+        .eq('lifecycle_status', 'active');
+    }
     return sale;
   }
 

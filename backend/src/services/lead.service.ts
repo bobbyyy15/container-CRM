@@ -36,6 +36,13 @@ export class LeadService {
       .single();
 
     if (error) throw new Error(`Failed to create inquiry: ${error.message}`);
+    if (data?.company_id) {
+      await supabaseAdmin
+        .from('prospect_clients')
+        .update({ lifecycle_status: 'converted', converted_at: new Date().toISOString() })
+        .eq('company_id', data.company_id)
+        .eq('lifecycle_status', 'active');
+    }
     return data;
   }
 
@@ -83,6 +90,13 @@ export class LeadService {
       .single();
 
     if (error) throw new Error(`Failed to create warm lead: ${error.message}`);
+    if (data?.company_id) {
+      await supabaseAdmin
+        .from('prospect_clients')
+        .update({ lifecycle_status: 'converted', converted_at: new Date().toISOString() })
+        .eq('company_id', data.company_id)
+        .eq('lifecycle_status', 'active');
+    }
     return data;
   }
 
@@ -111,6 +125,13 @@ export class LeadService {
       .single();
 
     if (error) throw new Error(`Failed to create inquiry: ${error.message}`);
+    if (data?.company_id) {
+      await supabaseAdmin
+        .from('prospect_clients')
+        .update({ lifecycle_status: 'converted', converted_at: new Date().toISOString() })
+        .eq('company_id', data.company_id)
+        .eq('lifecycle_status', 'active');
+    }
     return data;
   }
 
