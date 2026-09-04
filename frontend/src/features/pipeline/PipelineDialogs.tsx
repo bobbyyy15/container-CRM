@@ -63,9 +63,10 @@ const FieldLabel = ({ label, required, optional, style }: { label: string; requi
   </label>
 )
 
-export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
+export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClose, onSaved }: {
   warmLeads: WarmLeadOption[]
   initialId?: string
+  initialIdentity?: string
   onClose: () => void
   onSaved: () => void
 }) => {
@@ -76,7 +77,7 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   // inquiry with no Warm Lead in between at all.
   const [source, setSource] = useState<'warmLead' | 'manual'>(initialId ? 'warmLead' : 'manual')
   const [warmLeadId, setWarmLeadId] = useState(initialId ?? warmLeads[0]?.id ?? '')
-  const [identity, setIdentity] = useState('')
+  const [identity, setIdentity] = useState(initialIdentity ?? '')
   const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'found' | 'notfound'>('idle')
   const [matchedStage, setMatchedStage] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
@@ -101,10 +102,10 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   useEffect(() => { if (!containerSizeId && sizes.length) setContainerSizeId(sizes[0].id) }, [sizes, containerSizeId])
   useEffect(() => { if (!containerConditionId && conditions.length) setContainerConditionId(conditions[0].id) }, [conditions, containerConditionId])
 
-  // Resolve the typed email/phone to an existing client and fill the rest of the form.
+  // Resolve typed email/phone/name to an existing client and auto-fill the rest of the form.
   useEffect(() => {
     const value = identity.trim()
-    if (source !== 'manual' || value.length < 4) { setLookupState('idle'); setMatchedStage(null); return }
+    if (source !== 'manual' || value.length < 3) { setLookupState('idle'); setMatchedStage(null); return }
 
     setLookupState('searching')
     let cancelled = false
@@ -127,10 +128,23 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
           if (match.pic_id) setPicId(match.pic_id)
         })
         .catch(() => { if (!cancelled) setLookupState('notfound') })
-    }, 400)
+    }, 350)
 
     return () => { cancelled = true; clearTimeout(handle) }
   }, [identity, source])
+
+  const clearLookup = () => {
+    setIdentity('')
+    setLookupState('idle')
+    setMatchedStage(null)
+    setCompanyName('')
+    setContactPerson('')
+    setPhone('')
+    setEmail('')
+    setStateProvince('')
+    setCountry('')
+    setPicId('')
+  }
 
   // Either an identity that resolved to a client, or a company typed in by hand.
   const canSubmit = containerSizeId && containerConditionId
@@ -183,12 +197,12 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   }
 
   return (
-    <Modal title="Create inquiry" description="Start from a Warm Lead or record a direct customer inquiry." onClose={onClose}>
+    <Modal title="Create inquiry" description="Start from a Warm Lead or record a direct customer inquiry with automatic client lookup." onClose={onClose}>
       <form onSubmit={submit}>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="tabs" style={{ gridColumn: '1 / -1', padding: 0 }}>
             <button type="button" className={`tab${source === 'warmLead' ? ' active' : ''}`} onClick={() => setSource('warmLead')}>From Warm Lead</button>
-            <button type="button" className={`tab${source === 'manual' ? ' active' : ''}`} onClick={() => setSource('manual')}>Direct Inquiry</button>
+            <button type="button" className={`tab${source === 'manual' ? ' active' : ''}`} onClick={() => setSource('manual')}>Direct Inquiry (Fast Lookup)</button>
           </div>
 
           {source === 'warmLead' ? (
@@ -208,34 +222,94 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
             )
           ) : (
             <>
-              {/* An email or phone is enough -- everything below is pulled from the
-                  existing client record so the same company isn't retyped (and
-                  mistyped) into a parallel record. */}
-              <div style={{ gridColumn: '1 / -1' }}>
-                <FieldLabel label="Client email or phone" optional />
+              {/* Quick Client Lookup Card */}
+              <div style={{
+                gridColumn: '1 / -1',
+                padding: '12px 14px',
+                borderRadius: 8,
+                border: '1px solid var(--border-s, #E5E7EB)',
+                background: 'var(--surface-subtle, rgba(0,0,0,0.02))',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span>⚡ Quick Client Auto-Lookup</span>
+                  </div>
+                  {identity && (
+                    <button
+                      type="button"
+                      onClick={clearLookup}
+                      style={{ fontSize: 11, background: 'none', border: 'none', color: 'var(--t4)', cursor: 'pointer', textDecoration: 'underline' }}
+                    >
+                      Clear & Search Again
+                    </button>
+                  )}
+                </div>
                 <input
                   className="inp"
                   value={identity}
                   onChange={event => setIdentity(event.target.value)}
-                  placeholder="e.g. buyer@company.com or (385) 707-9484"
+                  placeholder="Enter client email, phone number, or company name…"
+                  autoFocus
                 />
-                <div style={{ fontSize: 11, marginTop: 5, color: lookupState === 'notfound' ? 'var(--amber)' : 'var(--t4)' }}>
-                  {lookupState === 'searching' && 'Looking up client…'}
-                  {lookupState === 'found' && matchedStage && `Matched an existing ${matchedStage.replace('_', ' ')} — details filled in below.`}
-                  {lookupState === 'notfound' && 'No existing client with that email or phone. Fill in the company below to create one.'}
-                  {lookupState === 'idle' && 'Enter an email or phone and the rest fills in automatically.'}
+                <div style={{ fontSize: 11.5, marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {lookupState === 'searching' && (
+                    <span style={{ color: 'var(--brand, #2563EB)' }}>🔍 Searching records across CRM…</span>
+                  )}
+                  {lookupState === 'found' && (
+                    <span style={{ color: 'var(--green, #16A34A)', fontWeight: 600 }}>
+                      ✓ Existing client record found ({matchedStage?.replace('_', ' ')}). Details auto-filled below!
+                    </span>
+                  )}
+                  {lookupState === 'notfound' && (
+                    <span style={{ color: 'var(--amber, #D97706)' }}>
+                      ℹ️ No existing record found. Fill in Company Name below to create a new client.
+                    </span>
+                  )}
+                  {lookupState === 'idle' && (
+                    <span style={{ color: 'var(--t4)' }}>
+                      💡 Enter an email or phone to auto-pull all customer & PIC details without re-typing.
+                    </span>
+                  )}
                 </div>
               </div>
+
               <div style={{ gridColumn: '1 / -1' }}>
                 <FieldLabel label="Company" required />
-                <input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder="Company Name" required />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    className="inp"
+                    value={companyName}
+                    onChange={event => setCompanyName(event.target.value)}
+                    placeholder="Company Name"
+                    required
+                  />
+                  {lookupState === 'found' && companyName && (
+                    <span style={{
+                      position: 'absolute',
+                      right: 10,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: 'var(--green, #16A34A)',
+                      background: 'rgba(22, 163, 74, 0.1)',
+                      padding: '2px 6px',
+                      borderRadius: 4
+                    }}>
+                      Auto-filled
+                    </span>
+                  )}
+                </div>
               </div>
               <div>
                 <FieldLabel label="Contact person" optional />
                 <input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} placeholder="Full Name" />
               </div>
               <div>
-                <FieldLabel label="PIC" optional />
+                <FieldLabel label="PIC (Account Owner)" optional />
                 <select className="inp" value={picId} onChange={event => setPicId(event.target.value)}>
                   <option value="">Unassigned</option>
                   {pics.map(pic => <option key={pic.id} value={pic.id}>{pic.name}</option>)}
@@ -313,11 +387,15 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   )
 }
 
-export const NewWarmLeadDialog = ({ onClose, onSaved }: {
+export const NewWarmLeadDialog = ({ initialIdentity, onClose, onSaved }: {
+  initialIdentity?: string
   onClose: () => void
   onSaved: () => void
 }) => {
   const pics = usePics()
+  const [identity, setIdentity] = useState(initialIdentity ?? '')
+  const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'found' | 'notfound'>('idle')
+  const [matchedStage, setMatchedStage] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
   const [contactPerson, setContactPerson] = useState('')
   const [phone, setPhone] = useState('')
@@ -332,6 +410,49 @@ export const NewWarmLeadDialog = ({ onClose, onSaved }: {
   const [followUpNotes, setFollowUpNotes] = useState('')
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
+
+  // Resolve typed email/phone/name to an existing client and auto-fill the form
+  useEffect(() => {
+    const value = identity.trim()
+    if (value.length < 3) { setLookupState('idle'); setMatchedStage(null); return }
+
+    setLookupState('searching')
+    let cancelled = false
+    const handle = setTimeout(() => {
+      api.get('/leads/client-lookup', { params: { identity: value } })
+        .then(response => {
+          if (cancelled) return
+          const match = response.data.data
+          if (!match) { setLookupState('notfound'); setMatchedStage(null); return }
+
+          setLookupState('found')
+          setMatchedStage(match.stage ?? null)
+          setCompanyName(match.company_name ?? '')
+          setContactPerson(match.contact_person ?? '')
+          setEmail(match.email ?? '')
+          setPhone(match.phone ?? '')
+          setStateProvince(match.state_province ?? '')
+          setCountry(match.country ?? '')
+          if (match.pic_id) setPicId(match.pic_id)
+        })
+        .catch(() => { if (!cancelled) setLookupState('notfound') })
+    }, 350)
+
+    return () => { cancelled = true; clearTimeout(handle) }
+  }, [identity])
+
+  const clearLookup = () => {
+    setIdentity('')
+    setLookupState('idle')
+    setMatchedStage(null)
+    setCompanyName('')
+    setContactPerson('')
+    setPhone('')
+    setEmail('')
+    setStateProvince('')
+    setCountry('')
+    setPicId('')
+  }
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -363,12 +484,90 @@ export const NewWarmLeadDialog = ({ onClose, onSaved }: {
   }
 
   return (
-    <Modal title="New warm lead" description="For contacts already known to be interested, with or without a Prospect record on file." onClose={onClose}>
+    <Modal title="New warm lead" description="Record a warm lead with optional automatic client lookup." onClose={onClose}>
       <form onSubmit={submit}>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {/* Quick Client Lookup Card */}
+          <div style={{
+            gridColumn: '1 / -1',
+            padding: '12px 14px',
+            borderRadius: 8,
+            border: '1px solid var(--border-s, #E5E7EB)',
+            background: 'var(--surface-subtle, rgba(0,0,0,0.02))',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span>⚡ Quick Client Auto-Lookup</span>
+              </div>
+              {identity && (
+                <button
+                  type="button"
+                  onClick={clearLookup}
+                  style={{ fontSize: 11, background: 'none', border: 'none', color: 'var(--t4)', cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  Clear & Search Again
+                </button>
+              )}
+            </div>
+            <input
+              className="inp"
+              value={identity}
+              onChange={event => setIdentity(event.target.value)}
+              placeholder="Enter client email, phone number, or company name…"
+              autoFocus
+            />
+            <div style={{ fontSize: 11.5, marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {lookupState === 'searching' && (
+                <span style={{ color: 'var(--brand, #2563EB)' }}>🔍 Searching records across CRM…</span>
+              )}
+              {lookupState === 'found' && (
+                <span style={{ color: 'var(--green, #16A34A)', fontWeight: 600 }}>
+                  ✓ Existing client record found ({matchedStage?.replace('_', ' ')}). Details auto-filled below!
+                </span>
+              )}
+              {lookupState === 'notfound' && (
+                <span style={{ color: 'var(--amber, #D97706)' }}>
+                  ℹ️ No existing record found. Fill in Company Name below to create a new client.
+                </span>
+              )}
+              {lookupState === 'idle' && (
+                <span style={{ color: 'var(--t4)' }}>
+                  💡 Enter an email or phone to auto-pull all customer & PIC details without re-typing.
+                </span>
+              )}
+            </div>
+          </div>
+
           <div style={{ gridColumn: '1 / -1' }}>
             <FieldLabel label="Company" required />
-            <input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder="Company Name" required />
+            <div style={{ position: 'relative' }}>
+              <input
+                className="inp"
+                value={companyName}
+                onChange={event => setCompanyName(event.target.value)}
+                placeholder="Company Name"
+                required
+              />
+              {lookupState === 'found' && companyName && (
+                <span style={{
+                  position: 'absolute',
+                  right: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: 'var(--green, #16A34A)',
+                  background: 'rgba(22, 163, 74, 0.1)',
+                  padding: '2px 6px',
+                  borderRadius: 4
+                }}>
+                  Auto-filled
+                </span>
+              )}
+            </div>
           </div>
           <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--t4)', marginTop: -6 }}>Add at least a contact person, phone, or email so this lead can be identified without a Prospect record.</div>
           <div>
@@ -376,7 +575,7 @@ export const NewWarmLeadDialog = ({ onClose, onSaved }: {
             <input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} placeholder="Full Name" />
           </div>
           <div>
-            <FieldLabel label="PIC" optional />
+            <FieldLabel label="PIC (Account Owner)" optional />
             <select className="inp" value={picId} onChange={event => setPicId(event.target.value)}>
               <option value="">Unassigned</option>
               {pics.map(pic => <option key={pic.id} value={pic.id}>{pic.name}</option>)}
