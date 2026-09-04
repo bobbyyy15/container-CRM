@@ -360,6 +360,20 @@ export class LeadController {
     }
   }
 
+  static async restoreRemoved(req: Request, res: Response) {
+    try {
+      const removedId = String(req.params.removedId ?? '').trim();
+      if (!removedId) {
+        return res.status(400).json({ success: false, error: { message: 'A removed entry ID is required.' } });
+      }
+      const result = await LeadService.restoreRemovedEntry(removedId, req.auth!.user.id);
+      invalidateRemovedCache();
+      res.json({ success: true, data: result, message: 'Record restored successfully' });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
   // GET /leads/client-lookup?identity=<email or phone>
   // Resolves an existing client from a single identity so an inquiry only needs the
   // email or phone plus the order details -- everything else is already on record.

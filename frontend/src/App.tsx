@@ -4344,6 +4344,25 @@ const RemovedSheet = () => {
     }
   }
 
+  const handleRestore = async (row: any) => {
+    const label = row.contact ? `${row.contact} (${row.co || 'Company'})` : (row.co || row.email || row.phone || 'this entry')
+    const confirmed = await notify.confirm({
+      title: 'Restore Removed Record',
+      message: `Are you sure you want to restore ${label}? They will be unblocked and restored back to their active pipeline stage.`,
+      confirmLabel: 'Restore Record',
+      variant: 'primary',
+    })
+    if (!confirmed) return
+
+    try {
+      await api.post(`/leads/removed/${row.id}/restore`)
+      toast(`${label} has been restored back to active pipeline.`, 'success')
+      setRevision(r => r + 1)
+    } catch (err: any) {
+      toast(err.response?.data?.error?.message ?? 'Could not restore record.', 'error')
+    }
+  }
+
   useEffect(() => {
     api.get('/leads/removed').then(response => {
       if (response.data.success) setData((response.data.data || []).map((row: any) => ({
@@ -4396,6 +4415,7 @@ const RemovedSheet = () => {
             <th>Date</th><th>Removal Type</th><th>Phone</th><th>Email</th>
             <th>Company</th><th>Contact</th><th>Reason</th><th>Channel</th>
             <th>Prev Status</th><th>Curr Status</th><th>Added By</th>
+            <th style={{ width: 90, textAlign: 'center' }}>Action</th>
           </tr></thead>
           <tbody>
             {filtered.map((r, i) => (
@@ -4411,6 +4431,11 @@ const RemovedSheet = () => {
                 <td><Badge status={r.prevStatus as BadgeStatus} /></td>
                 <td><Badge status={r.currStatus as BadgeStatus} /></td>
                 <td style={{ fontSize: 12, color: 'var(--t3)' }}>{r.by}</td>
+                <td style={{ textAlign: 'center' }}>
+                  <Btn variant="ghost" sm onClick={() => handleRestore(r)} title="Restore back to active pipeline">
+                    <Ic n={I.sync} size={13} /> Restore
+                  </Btn>
+                </td>
               </tr>
             ))}
           </tbody>

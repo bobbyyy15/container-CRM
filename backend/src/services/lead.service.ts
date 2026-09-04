@@ -182,6 +182,15 @@ export class LeadService {
     return data;
   }
 
+  static async restoreRemovedEntry(removedId: string, actorId: string) {
+    const { data, error } = await supabaseAdmin.rpc('restore_removed_entry', {
+      p_removed_id: removedId,
+      p_actor_id: actorId,
+    });
+    if (error) throw new Error(`Failed to restore removed entry: ${error.message}`);
+    return data;
+  }
+
   static async assignPic(stage: 'prospect' | 'warm_lead', entityId: string, newPicId: string, actorPicId: string) {
     const table = stage === 'prospect' ? 'prospect_clients' : 'warm_leads';
 
