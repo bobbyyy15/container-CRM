@@ -41,6 +41,9 @@ const cleanup = async () => {
   await supabaseAdmin.from('quotation_items').delete().in('quotation_id', [ids.quotation].filter(Boolean) as string[]);
   await supabaseAdmin.from('quotations').delete().in('id', [ids.quotation].filter(Boolean) as string[]);
   await supabaseAdmin.from('inquiries').delete().in('id', [ids.inquiry].filter(Boolean) as string[]);
+  // warm_leads was missing here, so every run left one behind -- 19 had accumulated
+  // in the real Warm Leads list before this was noticed.
+  await supabaseAdmin.from('warm_leads').delete().in('id', [ids.warmLead].filter(Boolean) as string[]);
   await supabaseAdmin.from('prospect_clients').delete().in('id', [ids.prospect].filter(Boolean) as string[]);
   if (ids.company && ids.contact) {
     await supabaseAdmin.from('company_contacts').delete().eq('company_id', ids.company).eq('contact_id', ids.contact);
