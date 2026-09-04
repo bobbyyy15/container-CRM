@@ -4315,6 +4315,7 @@ const RemovedSheet = () => {
   const [revision, setRevision] = useState(0)
   const [data, setData] = useState<any[]>([])
   const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
 
   const detectedCount = pasteText.split('\n').map(line => line.trim()).filter(Boolean).length
 
@@ -4356,9 +4357,37 @@ const RemovedSheet = () => {
     try {
       await api.post(`/leads/removed/${row.id}/restore`)
       toast(`${label} has been restored back to active pipeline.`, 'success')
+      setSelected(prev => prev.filter(id => id !== row.id))
       setRevision(r => r + 1)
     } catch (err: any) {
       toast(err.response?.data?.error?.message ?? 'Could not restore record.', 'error')
+    }
+  }
+
+  const handleBulkRestore = async () => {
+    if (!selected.length) return
+    const count = selected.length
+    const { confirmed } = await askConfirm({
+      title: 'Restore Selected Records',
+      message: `Are you sure you want to restore ${count} selected record${count === 1 ? '' : 's'}? They will be unblocked and restored back to their active pipeline stage.`,
+      confirmLabel: `Restore ${count} Record${count === 1 ? '' : 's'}`,
+    })
+    if (!confirmed) return
+
+    try {
+      const results = await Promise.allSettled(
+        selected.map(id => api.post(`/leads/removed/${id}/restore`))
+      )
+      const failed = results.filter(r => r.status === 'rejected').length
+      if (failed > 0) {
+        toast(`${count - failed} records restored, ${failed} failed.`, 'error')
+      } else {
+        toast(`${count} record${count === 1 ? '' : 's'} restored back to active pipeline.`, 'success')
+      }
+      setSelected([])
+      setRevision(r => r + 1)
+    } catch (err: any) {
+      toast(err.response?.data?.error?.message ?? 'Could not restore records.', 'error')
     }
   }
 
@@ -4388,6 +4417,8 @@ const RemovedSheet = () => {
       .some(value => String(value || '').toLowerCase().includes(term))
     return typeMatch && searchMatch
   })
+  const allFilteredSelected = filtered.length > 0 && filtered.every(r => selected.includes(r.id))
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ padding: '10px 20px', background: '#FFF1F2', borderBottom: '1px solid #FECDD3', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
@@ -4403,6 +4434,17 @@ const RemovedSheet = () => {
           <option value="phone">Phone Only</option>
           <option value="email">Email Only</option>
         </select>
+        {selected.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', background: 'var(--brand-bg)', borderRadius: 7, fontSize: 12, fontWeight: 600, color: 'var(--brand)' }}>
+            <span>{selected.length} selected</span>
+            <Btn variant="ghost" sm onClick={handleBulkRestore} title="Restore selected records back to active pipeline">
+              <Ic n={I.sync} size={13} /> Restore Selected
+            </Btn>
+            <Btn variant="ghost" sm onClick={() => setSelected([])}>
+              Clear
+            </Btn>
+          </div>
+        )}
         <div className="toolbar-right">
           <Btn variant="danger" sm onClick={() => setShowPaste(true)}><Ic n={I.plus} size={13} /> Paste Opted-Out / Bounced</Btn>
           <ExportMenu data={data} filename="removed" />
@@ -4411,6 +4453,21 @@ const RemovedSheet = () => {
       <div className="table-wrap">
         <table className="crm">
           <thead><tr>
+            <th style={{ width: 44, textAlign: 'center' }}>
+              <input
+                type="checkbox"
+                className="cb"
+                checked={allFilteredSelected}
+                onChange={e => {
+                  if (e.target.checked) {
+                    setSelected(Array.from(new Set([...selected, ...filtered.map(r => r.id)])))
+                  } else {
+                    const filteredIds = new Set(filtered.map(r => r.id))
+                    setSelected(selected.filter(id => !filteredIds.has(id)))
+                  }
+                }}
+              />
+            </th>
             <th>Date</th><th>Removal Type</th><th>Phone</th><th>Email</th>
             <th>Company</th><th>Contact</th><th>Reason</th><th>Channel</th>
             <th>Prev Status</th><th>Curr Status</th><th>Added By</th>
@@ -4419,6 +4476,20 @@ const RemovedSheet = () => {
           <tbody>
             {filtered.map((r, i) => (
               <tr key={r.id || i} style={{ background: 'var(--red-bg)' }}>
+                <td style={{ textAlign: 'center', width: 44 }}>
+                  <input
+                    type="checkbox"
+                    className="cb"
+                    checked={selected.includes(r.id)}
+                    onChange={e => {
+                      if (e.target.checked) {
+                        setSelected(prev => [...prev, r.id])
+                      } else {
+                        setSelected(prev => prev.filter(id => id !== r.id))
+                      }
+                    }}
+                  />
+                </td>
                 <td className="mono" style={{ fontSize: 12 }}>{r.date}</td>
                 <td><span className={r.type === 'company' ? 'badge b-amber' : 'badge b-red'}>{r.type === 'company' ? 'Company Block' : r.type === 'contact' ? 'Contact' : r.type}</span></td>
                 <td className="mono" style={{ fontSize: 12, color: r.phone ? 'var(--t2)' : 'var(--t4)' }}>{r.phone || '—'}</td>
