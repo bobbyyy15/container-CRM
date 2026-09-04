@@ -1,7 +1,15 @@
 node_modules
 dist
-.env
-.env.local
+
+# Secrets. .env* is deliberately broad -- it catches .env.production and
+# friends, not just the two names that happened to exist. The example file
+# is the one intentional exception, since it carries key names and no values.
+.env*
+!.env.example
+
+# Vercel CLI project links (contain project/org ids, and are machine-local).
+.vercel
+
 .DS_Store
 supabase/.temp
 supabase/.branches
