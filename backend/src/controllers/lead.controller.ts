@@ -276,6 +276,26 @@ export class LeadController {
     }
   }
 
+  // GET /leads/client-lookup?identity=<email or phone>
+  // Resolves an existing client from a single identity so an inquiry only needs the
+  // email or phone plus the order details -- everything else is already on record.
+  static async lookupClient(req: Request, res: Response) {
+    try {
+      const identity = String(req.query.identity ?? '').trim();
+      if (!identity) {
+        return res.status(400).json({ success: false, error: { message: 'An email or phone number is required.' } });
+      }
+
+      const { data, error } = await supabaseAdmin.rpc('lookup_client_by_identity', { p_identity: identity });
+      if (error) throw error;
+
+      const match = Array.isArray(data) ? data[0] : data;
+      res.json({ success: true, data: match ?? null });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: { message: error.message } });
+    }
+  }
+
   static async removeEntry(req: Request, res: Response) {
     try {
       const payload = RemovePipelineEntrySchema.parse({
