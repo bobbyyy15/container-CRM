@@ -4,6 +4,32 @@ import { api } from './lib/api'
 import { useRealtimeRevision, useRealtimeStatus } from './lib/realtime'
 import { toast, askConfirm, askReason, ToastHost, ConfirmHost } from './lib/notify'
 import Login from './Login'
+import { Ic, I } from './components/ui/icons'
+import Btn from './components/ui/Button'
+import { Badge, Trend, Prog, Divider, EligDot, ChipPIC } from './components/ui/primitives'
+import ExportMenu from './components/ui/ExportMenu'
+import AssignPicModal from './components/ui/AssignPicModal'
+import RecordDetailModal from './components/ui/RecordDetailModal'
+import { NAV, SCREEN_LABELS } from './app/navigation'
+import type {
+  Screen, BadgeStatus, DetailField,
+  ProfitChartPoint, ChartSlice, PicPerformanceRow, OverduePickupRow, LossReasonRow,
+  AlternativeOffer, Territory, GoogleConnectionStatus, RemovedMatchRow, DensityOption,
+} from './app/types'
+import { exportToCSV, downloadPdfDocument, titleCase, readDensity, writeDensity } from './lib/exporters'
+import { mapPipelineRow } from './hooks/mapPipelineRow'
+import { useWarmLeads } from './hooks/useWarmLeads'
+import { useProspects } from './hooks/useProspects'
+import { useInquiries } from './hooks/useInquiries'
+import { useQuotations } from './hooks/useQuotations'
+import { useSales } from './hooks/useSales'
+import { useAnalytics } from './hooks/useAnalytics'
+import { useNotifications } from './hooks/useNotifications'
+import { useContracts } from './hooks/useContracts'
+import { useCustomers } from './hooks/useCustomers'
+import { useInventory, useInventorySummary } from './hooks/useInventory'
+import { useCatalogList } from './hooks/useCatalogList'
+import { useInquiryBoard } from './hooks/useInquiryBoard'
 // Admin screens and the import dialog are reached rarely, so they load on demand
 // instead of riding along in the initial bundle. Login stays eager -- it is the
 // first thing an unauthenticated visitor sees.
@@ -34,936 +60,50 @@ import {
 
 // xlsx is ~490KB, so it's loaded on demand rather than bundled into the initial
 // payload -- same pattern the Excel importers already use.
-const exportToExcel = async (data: any[], filename: string) => {
-  if (!data || !data.length) return toast('There is nothing to export.', 'error')
-  try {
-    const XLSX = await import('xlsx')
-    const ws = XLSX.utils.json_to_sheet(data)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Export')
-    XLSX.writeFile(wb, `${filename}.xlsx`)
-  } catch {
-    toast('Could not build the Excel file.', 'error')
-  }
-}
-
-const exportToGoogleSheet = async (data: any[], filename: string) => {
-  if (!data || !data.length) return toast('There is nothing to export.', 'error')
-  toast('Creating your Google Sheet…', 'info')
-  try {
-    const res = await api.post('/export/google-sheet', { title: filename, rows: data })
-    const url = res.data.data?.url
-    if (url) {
-      window.open(url, '_blank', 'noopener')
-      toast(`Sheet created with ${res.data.data.rowCount} rows.`, 'success')
-    }
-  } catch (e: any) {
-    toast(e.response?.data?.error?.message ?? 'Google Sheets export failed.', 'error')
-  }
-}
 
 // ─── PDF reporting ────────────────────────────────────────────────────────────
 // Every "PDF" action builds a real tabular document -- masthead, metadata line,
 // then one bordered table per section -- and prints only that. Printing the live
 // screen instead just photographs the dashboard onto paper, which is not a report.
 
-const COMPANY_NAME = 'WaveContainers'
-
 // Brand palette, as RGB triples because jsPDF takes numeric channels.
-const PDF_NAVY: [number, number, number] = [22, 38, 92]
-const PDF_TEAL: [number, number, number] = [42, 168, 168]
-const PDF_BLUE: [number, number, number] = [37, 99, 201]
-const PDF_STRIPE: [number, number, number] = [239, 244, 251]
-const PDF_GREY: [number, number, number] = [107, 114, 128]
-const PDF_BORDER: [number, number, number] = [217, 225, 236]
-
-export type PdfSection = { title?: string; rows: Record<string, any>[] }
 
 // Row objects use terse internal keys (co, buyPU, neededBy...). Left alone they
 // produce unreadable column headings, so map the worst offenders and split
 // camelCase for the rest.
-const PDF_LABELS: Record<string, string> = {
-  co: 'Company', ref: 'Reference', pic: 'PIC', qty: 'Qty',
-  buyPU: 'Buy / Unit', sellPU: 'Sell / Unit',
-  totalBuy: 'Total Buy', totalSell: 'Total Sell',
-  emailAddr: 'Email', neededBy: 'Needed By', prevStatus: 'Previous Status',
-  currStatus: 'Current Status', altSize: 'Alt. Size', altCondition: 'Alt. Condition',
-  altQuantity: 'Alt. Quantity', altAskingPrice: 'Alt. Asking Price', altNotes: 'Alt. Notes',
-  rejectionReason: 'Rejection Reason', contactMissing: 'Contact Missing',
-}
-
-const humanizeKey = (key: string) => PDF_LABELS[key] ?? key
-  .replace(/[-_]/g, ' ')
-  .replace(/([a-z\d])([A-Z])/g, '$1 $2')
-  .replace(/\b\w/g, c => c.toUpperCase())
 
 // Internal identifiers are meaningless in a printed report (they stay in the CSV
 // and Excel exports, where data fidelity matters more than readability).
-const isInternalKey = (key: string) => key === 'id' || /Id$/.test(key)
 
-const downloadPdfDocument = async (opts: {
-  title: string; scope?: string; filename: string; sections: PdfSection[];
-}) => {
-  const sections = opts.sections.filter(s => s.rows.length > 0)
-  if (!sections.length) return toast('There is nothing to export.', 'error')
-
-  try {
-    const [{ jsPDF }, autoTableMod] = await Promise.all([
-      import('jspdf'),
-      import('jspdf-autotable'),
-    ])
-    // The plugin ships both a default and a named export; which one survives
-    // bundling varies, so accept either and fail loudly rather than calling
-    // undefined further down where the stack would be meaningless.
-    const autoTable = (autoTableMod as any).default ?? (autoTableMod as any).autoTable
-    if (typeof autoTable !== 'function') {
-      throw new Error('the autoTable plugin did not load')
-    }
-
-    const widest = Math.max(...sections.map(s => Object.keys(s.rows[0]).filter(k => !isInternalKey(k)).length))
-    // Wide tables are unreadable squeezed into portrait width.
-    const doc = new jsPDF({ orientation: widest > 6 ? 'landscape' : 'portrait', unit: 'pt', format: 'a4' })
-
-    const pageW = doc.internal.pageSize.getWidth()
-    const pageH = doc.internal.pageSize.getHeight()
-    const margin = 36
-    const headerH = 92
-
-    const totalRecords = sections.reduce((n, s) => n + s.rows.length, 0)
-    const generated = new Date().toLocaleString(undefined, {
-      year: 'numeric', month: 'short', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    })
-
-    const drawPageFurniture = () => {
-      // Masthead
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(...PDF_NAVY)
-      doc.text(opts.title, margin, margin + 14)
-
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...PDF_BLUE)
-      doc.text(`${COMPANY_NAME}${opts.scope ? ` | ${opts.scope}` : ''}`, margin, margin + 30)
-
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...PDF_GREY)
-      doc.text(`Generated: ${generated}  |  Records: ${totalRecords}`, margin, margin + 44)
-
-      // Wordmark, right-aligned (no logo asset is bundled)
-      doc.setFontSize(13); doc.setFont('helvetica', 'bold')
-      const rest = 'Containers'
-      const restW = doc.getTextWidth(rest)
-      doc.setTextColor(...PDF_NAVY); doc.text(rest, pageW - margin - restW, margin + 14)
-      doc.setTextColor(...PDF_TEAL); doc.text('Wave', pageW - margin - restW - doc.getTextWidth('Wave'), margin + 14)
-
-      doc.setDrawColor(...PDF_TEAL); doc.setLineWidth(1.4)
-      doc.line(margin, margin + 54, pageW - margin, margin + 54)
-
-      // Footer
-      const page = doc.getNumberOfPages()
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GREY)
-      doc.text(`${COMPANY_NAME} · Container CRM`, margin, pageH - 20)
-      const pageLabel = `Page ${page}`
-      doc.text(pageLabel, pageW - margin - doc.getTextWidth(pageLabel), pageH - 20)
-    }
-
-    let cursorY = headerH
-
-    sections.forEach((section, index) => {
-      const headers = Object.keys(section.rows[0]).filter(k => !isInternalKey(k))
-
-      if (section.title) {
-        // Keep a heading with its table rather than stranded at a page foot.
-        if (cursorY > pageH - 120) { doc.addPage(); cursorY = headerH }
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...PDF_NAVY)
-        doc.text(section.title, margin, cursorY)
-        cursorY += 10
-      } else if (index > 0) {
-        cursorY += 6
-      }
-
-      autoTable(doc, {
-        startY: cursorY,
-        margin: { left: margin, right: margin, top: headerH, bottom: 34 },
-        head: [headers.map(humanizeKey)],
-        body: section.rows.map(row => headers.map(h => {
-          const v = row[h]
-          return v === null || v === undefined || v === '' ? '—' : String(v)
-        })),
-        theme: 'grid',
-        styles: {
-          font: 'helvetica', fontSize: 7.5, cellPadding: 5,
-          lineColor: PDF_BORDER, lineWidth: 0.5,
-          textColor: [17, 24, 39], overflow: 'linebreak', valign: 'middle',
-        },
-        headStyles: {
-          fillColor: PDF_NAVY, textColor: [255, 255, 255],
-          fontStyle: 'bold', fontSize: 7.5, cellPadding: 6,
-        },
-        alternateRowStyles: { fillColor: PDF_STRIPE },
-        // Redrawn per page so the masthead and footer repeat.
-        didDrawPage: drawPageFurniture,
-      })
-
-      cursorY = (doc as any).lastAutoTable.finalY + 18
-    })
-
-    doc.save(`${opts.filename}.pdf`)
-  } catch (err: any) {
-    // Swallowing the cause here made a real failure undiagnosable -- surface it
-    // in the toast and keep the full stack in the console.
-    console.error('[PDF export] failed:', err)
-    toast(`Could not build the PDF: ${err?.message ?? 'unknown error'}`, 'error')
-  }
-}
-
-const titleCase = (s: string) => s.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 
 // ─── Persisted UI preferences ─────────────────────────────────────────────────
 // localStorage throws rather than no-ops in some contexts (Safari private mode,
 // blocked third-party storage), so every access is guarded -- a preference is
 // never worth crashing a screen over.
-type DensityOption = 'Compact' | 'Standard' | 'Comfortable'
-const DENSITY_KEY = 'sheetDensity'
 
-const readDensity = (): DensityOption => {
-  try {
-    const stored = localStorage.getItem(DENSITY_KEY)
-    return stored === 'Compact' || stored === 'Comfortable' || stored === 'Standard'
-      ? stored
-      : 'Standard'
-  } catch {
-    return 'Standard'
-  }
-}
 
-const writeDensity = (value: DensityOption) => {
-  try { localStorage.setItem(DENSITY_KEY, value) } catch { /* preference is best-effort */ }
-}
 
-const exportToPDF = (data: any[], filename: string) => {
-  if (!data || !data.length) return toast('There is nothing to export.', 'error')
-  void downloadPdfDocument({
-    title: `${titleCase(filename)} Report`.toUpperCase(),
-    scope: 'Container CRM',
-    filename,
-    sections: [{ rows: data }],
-  })
-}
 
-const ExportMenu = ({ data, filename, sm = true }: { data: any[]; filename: string; sm?: boolean }) => {
-  const [open, setOpen] = useState(false)
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
-  const btnRef = useRef<HTMLDivElement>(null)
 
-  const options = [
-    { label: 'PDF',           icon: I.export, run: () => exportToPDF(data, filename) },
-    { label: 'CSV file',      icon: I.export, run: () => exportToCSV(data, filename) },
-    { label: 'Excel (.xlsx)', icon: I.export, run: () => exportToExcel(data, filename) },
-    { label: 'Google Sheet',  icon: I.link,   run: () => exportToGoogleSheet(data, filename) },
-  ]
-
-  // Positioned fixed against the button's viewport rect rather than absolutely inside
-  // it -- toolbars and table wrappers clip an absolutely positioned menu.
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect()
-      setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) })
-    }
-    setOpen(o => !o)
-  }
-
-  return (
-    <div ref={btnRef} style={{ position: 'relative' }}>
-      <Btn variant="ghost" sm={sm} onClick={toggle}>
-        <Ic n={I.export} size={13} /> Export <Ic n={I.chevDown} size={11} />
-      </Btn>
-      {open && pos && (
-        <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 1999 }} onClick={() => setOpen(false)} />
-          <div style={{ position: 'fixed', top: pos.top, right: pos.right, width: 180, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, zIndex: 2000, boxShadow: 'var(--shadow-drop)' }}>
-            {options.map(o => (
-              <div
-                key={o.label}
-                onClick={() => { setOpen(false); o.run() }}
-                style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 9, borderRadius: 6, cursor: 'pointer', fontSize: 12.5, color: 'var(--t2)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--s2)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-              >
-                <Ic n={o.icon} size={13} style={{ color: 'var(--t4)' }} />
-                {o.label}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-const exportToCSV = (data: any[], filename: string) => {
-  if (!data || !data.length) return;
-  const headers = Object.keys(data[0]);
-  const csvRows = [];
-  csvRows.push(headers.join(','));
-  for (const row of data) {
-    const values = headers.map(header => {
-      const val = row[header];
-      const escaped = ('' + (val || '')).replace(/"/g, '""');
-      return `"${escaped}"`;
-    });
-    csvRows.push(values.join(','));
-  }
-  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.setAttribute('hidden', '');
-  a.setAttribute('href', url);
-  a.setAttribute('download', `${filename}.csv`);
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-};
-
-const mapPipelineRow = (p: any) => ({
-  id: p.id,
-  added: new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-  pic: p.pics?.name || 'Unassigned',
-  cat: p.category || (p.status === 'active' ? 'Proceed' : p.status) || 'Proceed',
-  sms: p.source_data?.sms_deliverability || 'Call/Text',
-  email: p.source_data?.email_deliverability || (p.contacts?.email_active ? 'Available' : 'Unavailable'),
-  industry: p.companies?.industry || '',
-  territory: p.source_data?.service_locations || '',
-  country: p.companies?.address_country || '',
-  state: p.companies?.address_state || '',
-  city: p.companies?.address_city || '',
-  company: p.companies?.name || '',
-  contact: p.contacts ? `${p.contacts.first_name || ''} ${p.contacts.last_name || ''}`.trim() : '',
-  contactMissing: !p.contact_id,
-  phone: p.contacts?.phone_direct || '',
-  phone2: p.contacts?.phone_2 || '',
-  emailAddr: p.contacts?.email_active || '',
-  email2: p.contacts?.email_2 || '',
-  address: p.companies?.address_street || '',
-  lifecycleStatus: p.lifecycle_status || 'active',
-  conversionReason: p.conversion_reason || '',
-  conversionChannel: p.conversion_channel || '',
-  entryPath: p.entry_origin === 'inquiry_backfill'
-    ? 'From Inquiry'
-    : p.entry_origin === 'prospect_conversion'
-      ? 'From Prospect'
-      : 'Direct Entry',
-})
 
 // `enabled` exists because ProspectSheet renders both the Prospect and Warm Lead
 // views from one component -- without it, opening either page fetched both lists.
-export const useWarmLeads = (revision = 0, enabled = true) => {
-  const [data, setData] = useState<any[]>([])
-  const liveRevision = useRealtimeRevision(['leads', 'data'])
-  useEffect(() => {
-    if (!enabled) return
-    api.get('/leads/warm-leads', { params: { limit: 500 } }).then(res => {
-      if (res.data.success) setData((res.data.data || []).map(mapPipelineRow))
-    }).catch(console.error)
-  }, [revision, liveRevision, enabled])
-  return data
-}
-
-const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') => {
-  const [data, setData] = useState<any[]>([])
-  const liveRevision = useRealtimeRevision(['leads', 'deals'])
-  useEffect(() => {
-    api.get('/leads/inquiries', { params: { limit: 500, status } }).then(res => {
-      if (res.data.success) setData((res.data.data || []).map((row: any) => {
-        const created = new Date(row.created_at)
-        return {
-          id: row.id,
-          companyId: row.company_id,
-          contactId: row.contact_id,
-          ref: `INQ-${row.id.slice(0, 8).toUpperCase()}`,
-          date: created.toLocaleDateString(),
-          time: created.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          channel: row.requirements?.match(/email/i) ? 'Email' : 'Direct',
-          company: row.companies?.name || '',
-          contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
-          // Carried so the Quick Contact Lookup bar can actually match on phone/email,
-          // which is what its placeholder promises.
-          phone: row.contacts?.phone_direct || row.contacts?.phone_2 || '',
-          email: row.contacts?.email_active || row.contacts?.email_2 || '',
-          category: row.requirements || 'To be qualified',
-          size: row.container_sizes?.name || '—',
-          condition: row.container_conditions?.name || '—',
-          qty: row.quantity ?? '—',
-          neededBy: row.needed_by_date ? new Date(row.needed_by_date).toLocaleDateString() : '—',
-          status: row.status || 'Under Review',
-          pic: row.pics?.name || 'Unassigned',
-          sourceWarmLeadId: row.source_warm_lead_id || null,
-          backfilledWarmLeadId: Array.isArray(row.backfilled_warm_leads)
-            ? row.backfilled_warm_leads[0]?.id || null
-            : row.backfilled_warm_leads?.id || null,
-          entryOrigin: row.entry_origin || (row.source_warm_lead_id ? 'warm_lead_conversion' : 'direct'),
-          rejectionReason: row.rejection_reason || '',
-          altSize: row.alt_size?.name || '',
-          altCondition: row.alt_condition?.name || '',
-          altQuantity: row.alt_quantity ?? null,
-          altAskingPrice: row.alt_asking_price != null ? Number(row.alt_asking_price) : null,
-          altNotes: row.alt_notes || '',
-          hasAlternative: !!(row.alt_size || row.alt_condition || row.alt_quantity != null || row.alt_asking_price != null),
-        }
-      }))
-    }).catch(console.error)
-  }, [revision, liveRevision, status])
-  return data
-}
-
-const useQuotations = (revision = 0) => {
-  const [data, setData] = useState<any[]>([])
-  const liveRevision = useRealtimeRevision(['deals', 'leads'])
-  useEffect(() => {
-    api.get('/deals/quotations').then(res => {
-      if (res.data.success) setData((res.data.data || []).map((row: any) => {
-        const items = row.quotation_items || []
-        const quantity = items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0)
-        const total = Number(row.total_amount || 0)
-        return {
-          id: row.id,
-          inquiryId: row.inquiry_id,
-          ref: `QUO-${row.id.slice(0, 8).toUpperCase()}`,
-          date: new Date(row.created_at).toLocaleDateString(),
-          co: row.companies?.name || '',
-          contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
-          category: items[0]?.description || 'Container',
-          size: '—',
-          qty: quantity,
-          sellTotal: total,
-          profit: 0,
-          margin: 0,
-          status: row.status,
-          source: row.inquiry_id ? `INQ-${row.inquiry_id.slice(0, 8).toUpperCase()}` : 'Direct',
-          pic: row.pics?.name || 'Unassigned',
-        }
-      }))
-    }).catch(console.error)
-  }, [revision, liveRevision])
-  return data
-}
-
-const useSales = (revision = 0) => {
-  const [data, setData] = useState<any[]>([])
-  const liveRevision = useRealtimeRevision(['deals'])
-  useEffect(() => {
-    api.get('/deals/sales').then(res => {
-      if (res.data.success) setData((res.data.data || []).map((row: any) => {
-        const units = Number(row.total_units || 0)
-        const buyingCost = Number(row.buying_cost || 0)
-        const revenue = Number(row.revenue || 0)
-        const profit = Number(row.gross_profit || 0)
-        const quote = row.quotations || {}
-        const item = quote.quotation_items?.[0]
-        const fullName = (c: any) => c ? `${c.first_name || ''} ${c.last_name || ''}`.trim() : ''
-        // A manual sale has no quotation, so fall back to the company's contact --
-        // preferring the primary one. Without this the column was blank on every
-        // directly recorded sale even though the contact was on file.
-        const companyLinks = row.companies?.company_contacts ?? []
-        const companyContact = (companyLinks.find((l: any) => l.is_primary) ?? companyLinks[0])?.contacts
-        return {
-          id: row.id,
-          ref: `SAL-${row.id.slice(0, 8).toUpperCase()}`,
-          date: new Date(row.created_at).toLocaleDateString(),
-          createdAt: row.created_at,
-          company: row.companies?.name || '',
-          contact: fullName(quote.contacts) || fullName(companyContact),
-          category: item?.description || 'Container',
-          size: '—',
-          condition: '—',
-          qty: units,
-          buyPU: units ? buyingCost / units : 0,
-          sellPU: units ? revenue / units : 0,
-          totalBuy: buyingCost,
-          totalSell: revenue,
-          profit,
-          margin: revenue ? (profit / revenue) * 100 : 0,
-          pic: row.pics?.name || 'Unassigned',
-          status: row.status,
-        }
-      }))
-    }).catch(console.error)
-  }, [revision, liveRevision])
-  return data
-}
-
-const useAnalytics = () => {
-  const [data, setData] = useState<any>(null)
-  const liveRevision = useRealtimeRevision([])
-  useEffect(() => {
-    api.get('/analytics/dashboard').then(res => {
-      if (res.data.success) setData(res.data.data)
-    }).catch(console.error)
-  }, [liveRevision])
-  return data
-}
-
-const useNotifications = (revision = 0) => {
-  const [data, setData] = useState<any[]>([])
-  const [unread, setUnread] = useState(0)
-  const liveRevision = useRealtimeRevision(['notifications', 'leads'])
-  const refresh = useCallback(() => {
-    api.get('/notifications').then(res => {
-      if (res.data.success) {
-        setData(res.data.data || [])
-        setUnread(res.data.meta?.unread ?? 0)
-      }
-    }).catch(console.error)
-  }, [])
-  useEffect(() => {
-    refresh()
-    const interval = setInterval(refresh, 30000)
-    return () => clearInterval(interval)
-  }, [refresh, revision, liveRevision])
-  return { notifications: data, unread, refresh }
-}
 
 
 
-const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses', search = '', revision = 0) => {
-  const [data, setData] = useState<any[]>([]);
-  const liveRevision = useRealtimeRevision(['contracts', 'deals']);
-  useEffect(() => {
-    api.get('/contracts', { params: { status, pickStatus, search } }).then(res => {
-      setData((res.data.data || []).map((c: any) => ({
-        id: c.id,
-        ref: c.contract_number,
-        co: c.company_name,
-        contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
-        category: c.items && c.items.length > 0 ? c.items[0].description.split(' ')[0] : '-',
-        size: c.items && c.items.length > 0 ? c.items[0].description : '-',
-        qty: c.allocated_quantity ?? c.total_units,
-        value: Number(c.revenue),
-        pickup: c.pickup_date ? new Date(c.pickup_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Unscheduled',
-        pickupDateRaw: c.pickup_date ? String(c.pickup_date).slice(0, 10) : '',
-        pickStatus: c.pickup_status,
-        storedPickStatus: c.stored_pickup_status || c.pickup_status,
-        status: c.contract_status,
-        pic: c.pic_name || '-',
-        sale: c.sale_number,
-        inventory: c.inventory_label || 'Legacy contract — no stock allocation',
-      })));
-    }).catch(console.error);
-  }, [status, pickStatus, search, revision, liveRevision]);
-  return data;
-}
+
+
+
+
 
 // `limit` keeps the dashboard's "top 5" from pulling the entire customer table
 // across the network just to discard almost all of it.
-const useCustomers = (status = 'All', search = '', revision = 0, limit?: number) => {
-  const [data, setData] = useState<any[]>([]);
-  const liveRevision = useRealtimeRevision(['deals', 'contracts']);
-  useEffect(() => {
-    api.get('/customers', { params: { status, search, ...(limit ? { limit } : {}) } }).then(res => {
-      setData((res.data.data || []).map((c: any) => ({
-        id: c.company_id,
-        co: c.company_name,
-        contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
-        phone: c.primary_contact ? (c.primary_contact.phone_1 || c.primary_contact.phone_2) : '-',
-        state: c.state || '-',
-        country: c.country || '-',
-        sales: c.sales_count,
-        units: c.total_units,
-        revenue: Number(c.total_revenue),
-        profit: Number(c.total_gross_profit),
-        last: new Date(c.last_purchase_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        pic: c.pic_name || '-',
-        status: c.status
-      })));
-    }).catch(console.error);
-  }, [status, search, revision, liveRevision, limit]);
-  return data;
-}
-
-const useProspects = (revision = 0, status: 'active' | 'converted' | 'removed' | 'all' = 'active', enabled = true) => {
-  const [prospects, setProspects] = useState<any[]>([]);
-  const liveRevision = useRealtimeRevision(['leads', 'data']);
-  useEffect(() => {
-    if (!enabled) return;
-    api.get('/leads/prospects', { params: { limit: 500, status } }).then(res => {
-      const data = (res.data.data || []).map(mapPipelineRow);
-      setProspects(data);
-    }).catch(e => console.error("Failed to fetch API data", e));
-  }, [revision, liveRevision, status, enabled]);
-  return prospects;
-}
-
-const useInventory = (filters: Record<string, string> = {}, revision = 0) => {
-  const [data, setData] = useState<any[]>([])
-  const liveRevision = useRealtimeRevision(['inventory', 'contracts'])
-  useEffect(() => {
-    api.get('/inventory', { params: filters }).then(res => {
-      if (res.data.success) setData(res.data.data || [])
-    }).catch(console.error)
-  }, [JSON.stringify(filters), revision, liveRevision])
-  return data
-}
-
-const useInventorySummary = (revision = 0) => {
-  const [data, setData] = useState<any>(null)
-  const liveRevision = useRealtimeRevision(['inventory', 'contracts'])
-  useEffect(() => {
-    api.get('/inventory/summary').then(res => {
-      if (res.data.success) setData(res.data.data)
-    }).catch(console.error)
-  }, [revision, liveRevision])
-  return data
-}
-
-// ─── Icon primitives ─────────────────────────────────────────────────────────
-
-type IconProps = { size?: number; className?: string; style?: React.CSSProperties }
-
-const Icon = ({ path, size = 16, className = '', style }: IconProps & { path: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" strokeWidth={1.8} strokeLinecap="round"
-    strokeLinejoin="round" className={className} style={style}>
-    <path d={path} />
-  </svg>
-)
-
-const I = {
-  dashboard:   'M3 3h7v7H3zm11 0h7v7h-7zM3 14h7v7H3zm11 3a4 4 0 1 0 8 0 4 4 0 0 0-8 0',
-  prospect:    'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm14 10v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
-  lead:        'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
-  inquiry:     'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
-  quote:       'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm-3 13H8m5-4H8m8-4H8M14 2v6h6',
-  sales:       'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
-  customer:    'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
-  contract:    'M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z',
-  pickup:      'M1 3h15v13H1zM16 8h4l3 3v5h-7V8zM5.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM18.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5',
-  tasks:       'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
-  removed:     'M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16',
-  deliverabil: 'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.15 12 19.79 19.79 0 0 1 1.08 3.4 2 2 0 0 1 3.06 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 8.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z',
-  container:   'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z',
-  analytics:   'M18 20V10M12 20V4M6 20v-6',
-  config:      'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
-  search:      'M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0',
-  bell:        'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
-  moon:        'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z',
-  sun:         'M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42M12 5a7 7 0 1 0 0 14A7 7 0 0 0 12 5z',
-  sync:        'M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15',
-  plus:        'M12 5v14M5 12h14',
-  x:           'M18 6L6 18M6 6l12 12',
-  chevDown:    'M6 9l6 6 6-6',
-  chevRight:   'M9 18l6-6-6-6',
-  chevLeft:    'M15 18l-6-6 6-6',
-  arrowRight:  'M5 12h14M12 5l7 7-7 7',
-  trending:    'M23 6l-9.5 9.5-5-5L1 18',
-  trendDown:   'M23 18l-9.5-9.5-5 5L1 6',
-  filter:      'M22 3H2l8 9.46V19l4 2v-8.54L22 3',
-  export:      'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
-  edit:        'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z',
-  more:        'M12 5h.01M12 12h.01M12 19h.01',
-  mail:        'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm18 2l-8 7-8-7',
-  phone:       'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.15 12 19.79 19.79 0 0 1 1.08 3.4 2 2 0 0 1 3.06 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 8.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z',
-  check:       'M20 6L9 17l-5-5',
-  warning:     'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
-  calendar:    'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z',
-  map:         'M3 11l19-9-9 19-2-8-8-2z',
-  flag:        'M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7',
-  target:      'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4',
-  upload:      'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
-  menu:        'M3 12h18M3 6h18M3 18h18',
-  sidebar:     'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm5 0v16',
-  copy:        'M20 9h-9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 0 2 2v1',
-  outreach:    'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm18 2l-8 7-8-7',
-  profit:      'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
-  link:        'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
-}
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-type Screen =
-  | 'dashboard' | 'outreach-dashboard' | 'inquiry-dashboard'
-  | 'prospects' | 'warm-leads' | 'inquiries' | 'quotations' | 'sales-tracker'
-  | 'customers' | 'contact-outreach' | 'contracts' | 'pickups'
-  | 'daily-tasks' | 'removed' | 'deliverability'
-  | 'container-catalog'
-  | 'pic-performance' | 'best-clients' | 'profit-analytics' | 'inquiry-funnel'
-  | 'service-territories' | 'daily-targets' | 'system-settings' | 'profile-settings'
-  | 'user-management' | 'inquiry-validation' | 'inventory-management' | 'monthly-report'
-
-// ─── Navigation ──────────────────────────────────────────────────────────────
-
-type NavItem = { id: Screen; label: string; icon: string; roles?: string[] }
-type NavGroup = { label: string; items: NavItem[] }
-
-const NAV: NavGroup[] = [
-  {
-    label: 'Overview',
-    items: [
-      { id: 'dashboard', label: 'Executive Overview', icon: I.dashboard, roles: ['admin', 'sales_manager'] },
-      { id: 'outreach-dashboard', label: 'Outreach Dashboard', icon: I.target, roles: ['admin', 'sales_manager'] },
-      { id: 'inquiry-dashboard', label: 'Inquiry Dashboard', icon: I.inquiry, roles: ['admin', 'sales_manager', 'procurement'] },
-    ],
-  },
-  {
-    label: 'Sales Core',
-    items: [
-      { id: 'prospects', label: 'Prospect Clients', icon: I.prospect, roles: ['admin', 'sales_manager'] },
-      { id: 'warm-leads', label: 'Warm Leads', icon: I.lead, roles: ['admin', 'sales_manager'] },
-      { id: 'inquiries', label: 'Inquiries', icon: I.inquiry, roles: ['admin', 'sales_manager'] },
-      { id: 'quotations', label: 'Quotations', icon: I.quote, roles: ['admin', 'sales_manager'] },
-      { id: 'sales-tracker', label: 'Sales Tracker', icon: I.sales, roles: ['admin', 'sales_manager'] },
-    ],
-  },
-  {
-    label: 'Procurement Core',
-    items: [
-      { id: 'inquiry-validation', label: 'Inquiry Validation', icon: I.check, roles: ['admin', 'procurement'] },
-    ],
-  },
-  {
-    label: 'Operations Core',
-    items: [
-      { id: 'pickups', label: 'Pickup Tracking', icon: I.pickup, roles: ['admin', 'operations', 'sales_manager'] },
-      { id: 'contracts', label: 'Customer Contracts', icon: I.contract, roles: ['admin', 'operations', 'sales_manager'] },
-      { id: 'customers', label: 'Customer Accounts', icon: I.customer, roles: ['admin', 'operations', 'sales_manager'] },
-    ],
-  },
-  {
-    label: 'Catalog & Stock',
-    items: [
-      { id: 'inventory-management', label: 'Inventory Management', icon: I.upload, roles: ['admin', 'operations', 'procurement', 'sales_manager'] },
-      { id: 'container-catalog', label: 'Container Catalog', icon: I.container, roles: ['admin', 'operations', 'procurement', 'sales_manager'] },
-    ],
-  },
-  {
-    label: 'Outreach & Data',
-    items: [
-      { id: 'contact-outreach', label: 'Contact Outreach', icon: I.outreach, roles: ['admin', 'sales_manager'] },
-      { id: 'daily-tasks', label: 'Daily Tasks', icon: I.tasks, roles: ['admin', 'sales_manager'] },
-      { id: 'removed', label: 'Removed Sheet', icon: I.removed, roles: ['admin', 'sales_manager'] },
-      { id: 'deliverability', label: 'Deliverability', icon: I.deliverabil, roles: ['admin', 'sales_manager'] },
-    ],
-  },
-  {
-    label: 'Analytics',
-    items: [
-      { id: 'pic-performance', label: 'PIC Performance', icon: I.analytics, roles: ['admin', 'sales_manager'] },
-      { id: 'best-clients', label: 'Best Clients', icon: I.flag, roles: ['admin', 'sales_manager'] },
-      { id: 'profit-analytics', label: 'Profit Analytics', icon: I.profit, roles: ['admin', 'sales_manager'] },
-      { id: 'inquiry-funnel', label: 'Inquiry Funnel', icon: I.inquiry, roles: ['admin', 'sales_manager'] },
-      { id: 'monthly-report', label: 'Monthly Report', icon: I.calendar, roles: ['admin', 'sales_manager'] },
-    ],
-  },
-  {
-    label: 'Configuration',
-    items: [
-      { id: 'service-territories', label: 'Service Territories', icon: I.map, roles: ['admin'] },
-      { id: 'daily-targets', label: 'Daily Targets', icon: I.target, roles: ['admin'] },
-      { id: 'system-settings', label: 'System Settings', icon: I.config, roles: ['admin'] },
-    ],
-  },
-  {
-    label: 'Administration',
-    items: [
-      { id: 'user-management', label: 'User Management', icon: I.customer, roles: ['admin'] },
-    ],
-  },
-]
 
 
-const SCREEN_LABELS: Record<Screen, string> = {
-  'dashboard': 'Executive Overview',
-  'outreach-dashboard': 'Outreach Dashboard',
-  'inquiry-dashboard': 'Inquiry Dashboard',
-  'prospects': 'Prospect Clients',
-  'warm-leads': 'Warm Leads',
-  'inquiries': 'Inquiries',
-  'quotations': 'Quotations',
-  'sales-tracker': 'Sales Tracker',
-  'customers': 'Customer Accounts',
-  'contact-outreach': 'Contact Outreach Sheet',
-  'contracts': 'Customer Contracts',
-  'pickups': 'Pickup Tracking',
-  'daily-tasks': 'Daily Completed Tasks',
-  'removed': 'Removed Sheet',
-  'deliverability': 'Deliverability Management',
-  'container-catalog': 'Container Catalog',
-  'pic-performance': 'PIC Performance',
-  'best-clients': 'Best Clients',
-  'profit-analytics': 'Profit Analytics',
-  'inquiry-funnel': 'Inquiry Funnel',
-  'monthly-report': 'Monthly Report',
-  'service-territories': 'Service Territories',
-  'daily-targets': 'Daily Targets',
-  'system-settings': 'System Settings',
-  'profile-settings': 'Profile Settings',
-  'user-management': 'User Management',
-  'inquiry-validation': 'Inquiry Validation',
-  'inventory-management': 'Inventory Management',
-}
-
-// ─── Sample Data ──────────────────────────────────────────────────────────────
-
-type ProfitChartPoint = { m: string; profit: number; revenue: number; cost: number }
-type ChartSlice = { name: string; value: number; color: string }
-type PicPerformanceRow = {
-  name: string
-  initials: string
-  profit: number
-  sales: number
-  units: number
-  calls: number
-  emails: number
-  texts: number
-  leads: number
-  inquiries: number
-  quotes: number
-  revenue: number
-}
-
-type OverduePickupRow = { contract: string; co: string; days: number; qty: number; size: string }
-type LossReasonRow = { reason: string; color: string; count: number }
-
-
-
-
-// ─── Utility components ───────────────────────────────────────────────────────
-
-const Ic = ({ n, size = 14, style }: { n: string; size?: number; style?: React.CSSProperties }) => (
-  <Icon path={n} size={size} style={style} />
-)
-
-type BadgeStatus =
-  | 'Proceed' | 'Removed' | 'Active' | 'Completed' | 'Lost' | 'Draft' | 'Sent'
-  | 'New Inquiry' | 'Quotation Required' | 'Quotation Sent' | 'Negotiating' | 'Negotiation'
-  | 'Converted to Sale' | 'Converted' | 'Pending' | 'Cancelled' | 'Call/Text' | 'Calls Only'
-  | 'Text Only' | 'Mail Delivery Report' | 'Overdue' | 'Scheduled' | 'Confirmed'
-  | 'Picked Up' | 'Accepted' | 'Rejected' | 'Under Review' | 'Awaiting Response'
-  | 'Pending Validation' | 'Validation Rejected' | 'Quotation Created' | 'Quotation Rejected'
-
-const BADGE_MAP: Record<string, string> = {
-  'Proceed': 'b-green', 'Active': 'b-green', 'Completed': 'b-green', 'Accepted': 'b-green',
-  'Converted to Sale': 'b-green', 'Converted': 'b-green', 'Picked Up': 'b-green',
-  'Removed': 'b-red', 'Lost': 'b-red', 'Rejected': 'b-red', 'Overdue': 'b-red', 'Cancelled': 'b-red',
-  'Validation Rejected': 'b-red', 'Quotation Rejected': 'b-red',
-  'Pending': 'b-amber', 'Awaiting Response': 'b-amber', 'Under Review': 'b-amber', 'Pending Validation': 'b-amber',
-  'New Inquiry': 'b-blue', 'Draft': 'b-blue', 'Call/Text': 'b-green', 'Quotation Created': 'b-blue',
-  'Calls Only': 'b-blue', 'Mail Delivery Report': 'b-blue', 'Scheduled': 'b-blue', 'Confirmed': 'b-blue', 'Sent': 'b-blue',
-  'Text Only': 'b-purple', 'Negotiating': 'b-purple', 'Negotiation': 'b-purple',
-  'Quotation Required': 'b-amber', 'Quotation Sent': 'b-teal',
-}
-
-const Badge = ({ status }: { status: string }) => (
-  <span className={`badge ${BADGE_MAP[status] || 'b-gray'}`}>{status}</span>
-)
-
-const Trend = ({ val, up, white }: { val: string | number; up?: boolean; white?: boolean }) => {
-  const strVal = String(val)
-  const isZero = strVal === '0' || strVal === '0%'
-  const numericVal = parseFloat(strVal.replace(/[^0-9.-]+/g, "") || "0")
-  const isUp = up !== undefined ? up : numericVal > 0
-  const isDown = !isUp && numericVal < 0
-
-  if (isZero) {
-    return (
-      <span className={`trend ${white ? 'trend-up-white' : 'trend-neutral'}`}>
-        - {strVal}
-      </span>
-    )
-  }
-
-  return (
-    <span className={`trend ${white ? 'trend-up-white' : isUp ? 'trend-up' : 'trend-down'}`}>
-      {isUp ? '↑' : '↓'} {strVal}
-    </span>
-  )
-}
-
-const Prog = ({ pct, color = '#315EF6', tall }: { pct: number; color?: string; tall?: boolean }) => {
-  const safePct = isNaN(pct) ? 0 : Math.max(0, Math.min(100, pct))
-  return (
-    <div className={`prog${tall ? ' tall' : ''}`}>
-      <div className="prog-fill" style={{ width: `${safePct}%`, background: color }} />
-    </div>
-  )
-}
-
-const Divider = () => <div className="divider" />
-
-const Btn = ({ children, variant = 'secondary', sm, className = '', onClick, style, disabled, title, ariaLabel }: {
-  children: React.ReactNode; variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
-  sm?: boolean; className?: string; onClick?: React.MouseEventHandler<HTMLButtonElement>; style?: React.CSSProperties
-  disabled?: boolean; title?: string; ariaLabel?: string
-}) => (
-  <button
-    className={`btn btn-${variant}${sm ? ' btn-sm' : ''} ${className}`}
-    onClick={onClick} style={style} disabled={disabled} title={title}
-    // Icon-only buttons have no text node, so without this a screen reader announces
-    // just "button". Falls back to title so a tooltip doubles as the accessible name.
-    aria-label={ariaLabel ?? title}
-  >{children}</button>
-)
-
-const EligDot = ({ on }: { on: boolean }) => (
-  <div className="elig-dot" style={{ background: on ? '#059669' : '#E5E7EB' }} />
-)
-
-const ChipPIC = ({ label }: { label: string }) => (
-  <span style={{ background: 'var(--brand-bg)', color: 'var(--brand)', padding: '2px 7px', borderRadius: 5, fontSize: 11, fontWeight: 700 }}>{label}</span>
-)
-
-const AssignPicModal = ({ count, onClose, onAssign }: { count: number; onClose: () => void; onAssign: (picId: string) => void }) => {
-  const pics = usePics()
-  const [picId, setPicId] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 400 }} onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-title">Assign PIC</div>
-          <Btn variant="ghost" sm onClick={onClose} ariaLabel="Close"><Ic n={I.x} size={16} /></Btn>
-        </div>
-        <div className="modal-body">
-          <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 12 }}>Reassign {count} selected record{count === 1 ? '' : 's'} to:</p>
-          <select className="inp" value={picId} onChange={e => setPicId(e.target.value)}>
-            <option value="">-- Select a PIC --</option>
-            {pics.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </div>
-        <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
-          <button className="btn btn-primary" disabled={!picId || submitting} onClick={async () => { setSubmitting(true); await onAssign(picId) }}>
-            {submitting ? 'Assigning…' : 'Assign'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // A read-only detail view for a single row of an already-loaded list (Inquiries, Quotations,
 // Sales, Contracts, Customers, etc). No extra API call needed -- the row already has every
 // field the table shows, this just lays them out full-size instead of squeezed into a table cell.
-type DetailField = { label: string; value: React.ReactNode }
-const RecordDetailModal = ({ title, fields, onClose, footerExtra }: { title: string; fields: DetailField[]; onClose: () => void; footerExtra?: React.ReactNode }) => (
-  <div className="overlay" onClick={onClose}>
-    <div className="modal" style={{ width: 480 }} onClick={e => e.stopPropagation()}>
-      <div className="modal-header">
-        <div className="modal-title">{title}</div>
-        <Btn variant="ghost" sm onClick={onClose} ariaLabel="Close"><Ic n={I.x} size={16} /></Btn>
-      </div>
-      <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        {fields.map(f => (
-          <div key={f.label} style={{ gridColumn: f.label.length > 24 ? '1 / -1' : undefined }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 3 }}>{f.label}</div>
-            <div style={{ fontSize: 13, color: 'var(--t1)', fontWeight: 500 }}>{f.value ?? <span style={{ color: 'var(--t4)' }}>—</span>}</div>
-          </div>
-        ))}
-      </div>
-      <div className="modal-footer">
-        <Btn variant="ghost" onClick={onClose}>Close</Btn>
-        {footerExtra}
-      </div>
-    </div>
-  </div>
-)
-
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 const Sidebar = ({ active, onNav, expanded, pinned, onTogglePin, role }: {
@@ -3710,14 +2850,6 @@ const RemovedSheet = () => {
 
 // ─── Deliverability ───────────────────────────────────────────────────────────
 
-type RemovedMatchRow = {
-  raw_value: string
-  identity_type: 'email' | 'phone'
-  normalized_value: string
-  company_name: string | null
-  contact_name: string | null
-  was_new: boolean
-}
 
 const Deliverability = () => {
   const [tab, setTab] = useState('Email')
@@ -3859,13 +2991,6 @@ const Deliverability = () => {
 
 // ─── Container Catalog ────────────────────────────────────────────────────────
 
-const useCatalogList = (path: string) => {
-  const [data, setData] = useState<{ id: string; name: string }[]>([])
-  useEffect(() => {
-    api.get(path).then(res => { if (res.data.success) setData(res.data.data || []) }).catch(console.error)
-  }, [path])
-  return data
-}
 
 const ContainerCatalog = () => {
   const sizes = useCatalogList('/catalog/sizes')
@@ -4167,53 +3292,7 @@ const InquiryFunnel = () => {
 
 // ─── Inquiry Validation (Procurement) ──────────────────────────────────────────
 
-const useInquiryBoard = (revision = 0) => {
-  const [data, setData] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
-  const liveRevision = useRealtimeRevision(['leads', 'deals'])
-  useEffect(() => {
-    setLoading(true)
-    setLoadError('')
-    api.get('/leads/inquiries/board').then(res => {
-      if (res.data.success) setData((res.data.data || []).map((row: any) => ({
-        id: row.id,
-        ref: `INQ-${row.id.slice(0, 8).toUpperCase()}`,
-        date: new Date(row.created_at).toLocaleDateString(),
-        createdAt: row.created_at,
-        neededBy: row.needed_by_date ? new Date(row.needed_by_date).toLocaleDateString() : '—',
-        status: row.status,
-        company: row.companies?.name || '',
-        contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
-        pic: row.pics?.name || 'Unassigned',
-        description: row.requirements || '—',
-        size: row.container_sizes?.name || '—',
-        condition: row.container_conditions?.name || '—',
-        location: [row.state_province, row.country].filter(Boolean).join(', ') || '—',
-        quantity: row.quantity ?? '—',
-        price: row.asking_price != null ? Number(row.asking_price) : null,
-        rejectionReason: row.rejection_reason || '',
-        altSize: row.alt_size?.name || '',
-        altCondition: row.alt_condition?.name || '',
-        altQuantity: row.alt_quantity ?? null,
-        altAskingPrice: row.alt_asking_price != null ? Number(row.alt_asking_price) : null,
-        altNotes: row.alt_notes || '',
-      })));
-    }).catch((error: any) => {
-      console.error(error)
-      setLoadError(error.response?.data?.error?.message ?? 'Could not load the validation queue.')
-    }).finally(() => setLoading(false))
-  }, [revision, liveRevision])
-  return { data, loading, loadError }
-}
 
-type AlternativeOffer = {
-  containerSizeId?: string
-  containerConditionId?: string
-  quantity?: number
-  askingPrice?: number
-  notes?: string
-}
 
 const RejectTicketModal = ({ ticketRef, onClose, onReject }: {
   ticketRef: string
@@ -5411,7 +4490,6 @@ const DailyTargets = () => {
   )
 }
 
-type Territory = { id: string; region: string; name: string; enabled: boolean }
 
 const ServiceTerritories = () => {
   const [rows, setRows] = useState<Territory[]>([])
@@ -5500,11 +4578,6 @@ const ServiceTerritories = () => {
   )
 }
 
-type GoogleConnectionStatus = {
-  configured: boolean
-  connected: boolean
-  email: string | null
-}
 
 const SystemSettings = ({ onNav }: { onNav?: (s: Screen) => void }) => {
   const analytics = useAnalytics()
