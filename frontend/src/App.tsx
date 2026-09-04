@@ -349,14 +349,17 @@ const mapPipelineRow = (p: any) => ({
       : 'Direct Entry',
 })
 
-export const useWarmLeads = (revision = 0) => {
+// `enabled` exists because ProspectSheet renders both the Prospect and Warm Lead
+// views from one component -- without it, opening either page fetched both lists.
+export const useWarmLeads = (revision = 0, enabled = true) => {
   const [data, setData] = useState<any[]>([])
   const liveRevision = useRealtimeRevision(['leads', 'data'])
   useEffect(() => {
+    if (!enabled) return
     api.get('/leads/warm-leads', { params: { limit: 500 } }).then(res => {
       if (res.data.success) setData((res.data.data || []).map(mapPipelineRow))
     }).catch(console.error)
-  }, [revision, liveRevision])
+  }, [revision, liveRevision, enabled])
   return data
 }
 
@@ -451,13 +454,19 @@ const useSales = (revision = 0) => {
         const profit = Number(row.gross_profit || 0)
         const quote = row.quotations || {}
         const item = quote.quotation_items?.[0]
+        const fullName = (c: any) => c ? `${c.first_name || ''} ${c.last_name || ''}`.trim() : ''
+        // A manual sale has no quotation, so fall back to the company's contact --
+        // preferring the primary one. Without this the column was blank on every
+        // directly recorded sale even though the contact was on file.
+        const companyLinks = row.companies?.company_contacts ?? []
+        const companyContact = (companyLinks.find((l: any) => l.is_primary) ?? companyLinks[0])?.contacts
         return {
           id: row.id,
           ref: `SAL-${row.id.slice(0, 8).toUpperCase()}`,
           date: new Date(row.created_at).toLocaleDateString(),
           createdAt: row.created_at,
           company: row.companies?.name || '',
-          contact: quote.contacts ? `${quote.contacts.first_name || ''} ${quote.contacts.last_name || ''}`.trim() : '',
+          contact: fullName(quote.contacts) || fullName(companyContact),
           category: item?.description || 'Container',
           size: '—',
           condition: '—',
@@ -538,11 +547,13 @@ const useContracts = (status = 'All Statuses', pickStatus = 'All Pickup Statuses
   return data;
 }
 
-const useCustomers = (status = 'All', search = '', revision = 0) => {
+// `limit` keeps the dashboard's "top 5" from pulling the entire customer table
+// across the network just to discard almost all of it.
+const useCustomers = (status = 'All', search = '', revision = 0, limit?: number) => {
   const [data, setData] = useState<any[]>([]);
   const liveRevision = useRealtimeRevision(['deals', 'contracts']);
   useEffect(() => {
-    api.get('/customers', { params: { status, search } }).then(res => {
+    api.get('/customers', { params: { status, search, ...(limit ? { limit } : {}) } }).then(res => {
       setData((res.data.data || []).map((c: any) => ({
         id: c.company_id,
         co: c.company_name,
@@ -559,19 +570,20 @@ const useCustomers = (status = 'All', search = '', revision = 0) => {
         status: c.status
       })));
     }).catch(console.error);
-  }, [status, search, revision, liveRevision]);
+  }, [status, search, revision, liveRevision, limit]);
   return data;
 }
 
-const useProspects = (revision = 0, status: 'active' | 'converted' | 'removed' | 'all' = 'active') => {
+const useProspects = (revision = 0, status: 'active' | 'converted' | 'removed' | 'all' = 'active', enabled = true) => {
   const [prospects, setProspects] = useState<any[]>([]);
   const liveRevision = useRealtimeRevision(['leads', 'data']);
   useEffect(() => {
+    if (!enabled) return;
     api.get('/leads/prospects', { params: { limit: 500, status } }).then(res => {
       const data = (res.data.data || []).map(mapPipelineRow);
       setProspects(data);
     }).catch(e => console.error("Failed to fetch API data", e));
-  }, [revision, liveRevision, status]);
+  }, [revision, liveRevision, status, enabled]);
   return prospects;
 }
 
@@ -1236,7 +1248,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
   const PIC_DATA: PicPerformanceRow[] = c.PIC_DATA || [];
   const LOSS_REASONS: LossReasonRow[] = c.LOSS_REASONS || [];
 
-  const topCustomers = useCustomers('All', '').slice(0, 5);
+  const topCustomers = useCustomers('All', '', 0, 5);
   const overdueContracts = useContracts('All Statuses', 'Overdue', '');
   const OVERDUE_PICKUPS = overdueContracts.map(c => {
     const targetDate = c.pickup === 'Unscheduled' ? new Date() : new Date(c.pickup);
@@ -1914,8 +1926,8 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
   const [showAssignPic, setShowAssignPic] = useState(false)
 
-  const _prospectsData = useProspects(revision, mode === 'prospect' ? status : 'active')
-  const _warmData = useWarmLeads(revision)
+  const _prospectsData = useProspects(revision, mode === 'prospect' ? status : 'active', mode === 'prospect')
+  const _warmData = useWarmLeads(revision, mode === 'warm')
   const prospectsData = mode === 'warm' ? _warmData : _prospectsData
 
   const handleConvert = async (id: string) => {

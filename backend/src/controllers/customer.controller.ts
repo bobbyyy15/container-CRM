@@ -7,6 +7,12 @@ export class CustomerController {
     try {
       const status = req.query.status as string; // 'Active' or 'Floating' or 'All'
       const search = req.query.search as string;
+      // The dashboard only renders a handful; without this it pulled the whole table
+      // over the network and discarded almost all of it.
+      const requestedLimit = Number(req.query.limit);
+      const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, 1000)
+        : 1000;
 
       // Two different views of the same data, by design:
       //   * a sales_manager sees only their own book -- their active clients
@@ -34,7 +40,7 @@ export class CustomerController {
         dbQuery = dbQuery.ilike('company_name', `%${search}%`);
       }
 
-      const { data, error } = await dbQuery.order('total_revenue', { ascending: false }).limit(1000);
+      const { data, error } = await dbQuery.order('total_revenue', { ascending: false }).limit(limit);
 
       if (error) throw error;
       res.json({ success: true, data });
