@@ -157,19 +157,75 @@ export class LeadService {
     return data;
   }
 
+  static async insertRemovedEntrySafe(entry: {
+    company_id?: string | null;
+    contact_id?: string | null;
+    identity_type: string;
+    normalized_value?: string | null;
+    reason: string;
+    source: string;
+    created_by?: string | null;
+  }) {
+    try {
+      if (entry.normalized_value) {
+        const { data: existing } = await supabaseAdmin
+          .from('removed_entries')
+          .select('id')
+          .eq('identity_type', entry.identity_type)
+          .eq('normalized_value', entry.normalized_value)
+          .maybeSingle();
+
+        if (existing?.id) {
+          await supabaseAdmin
+            .from('removed_entries')
+            .update({
+              company_id: entry.company_id ?? undefined,
+              contact_id: entry.contact_id ?? undefined,
+              reason: entry.reason,
+              source: entry.source,
+            })
+            .eq('id', existing.id);
+          return;
+        }
+      } else if (entry.company_id && entry.contact_id) {
+        const { data: existing } = await supabaseAdmin
+          .from('removed_entries')
+          .select('id')
+          .eq('company_id', entry.company_id)
+          .eq('contact_id', entry.contact_id)
+          .maybeSingle();
+
+        if (existing?.id) {
+          await supabaseAdmin
+            .from('removed_entries')
+            .update({
+              reason: entry.reason,
+              source: entry.source,
+            })
+            .eq('id', existing.id);
+          return;
+        }
+      }
+
+      await supabaseAdmin.from('removed_entries').insert(entry);
+    } catch (err) {
+      console.error('insertRemovedEntrySafe error:', err);
+    }
+  }
+
   static async cascadeCompanyBlock(companyId: string, reason: string, actorId: string, source = 'deliverability') {
     if (!companyId) return;
 
     // 1. Insert parent company suppression row
-    await supabaseAdmin.from('removed_entries').upsert({
+    await this.insertRemovedEntrySafe({
       company_id: companyId,
       contact_id: null,
       identity_type: 'company',
       normalized_value: companyId,
-      reason: reason || 'Company Block',
+      reason: reason || 'Bulk paste (Company Block)',
       source,
       created_by: actorId,
-    }, { onConflict: 'identity_type,normalized_value' });
+    });
 
     // 2. Query all distinct contacts associated with this company
     const contactIds = new Set<string>();
@@ -190,45 +246,72 @@ export class LeadService {
     if (contactIds.size > 0) {
       const { data: contacts } = await supabaseAdmin
         .from('contacts')
-        .select('id, email_active, phone_direct')
+        .select('id, first_name, last_name, email_active, email_2, phone_direct, phone_2')
         .in('id', Array.from(contactIds));
 
       for (const c of (contacts ?? [])) {
-        await supabaseAdmin.from('removed_entries').upsert({
+        // Contact listing in Removed Sheet
+        await this.insertRemovedEntrySafe({
           company_id: companyId,
           contact_id: c.id,
           identity_type: 'company',
           normalized_value: c.id,
-          reason: reason || 'Company Block',
+          reason: reason || 'Bulk paste (Company Block)',
           source,
           created_by: actorId,
-        }, { onConflict: 'identity_type,normalized_value' });
+        });
 
+        // Email suppression
         if (c.email_active) {
-          const normEmail = c.email_active.trim().toLowerCase();
-          await supabaseAdmin.from('removed_entries').upsert({
+          await this.insertRemovedEntrySafe({
             company_id: companyId,
             contact_id: c.id,
             identity_type: 'email',
-            normalized_value: normEmail,
-            reason: reason || 'Company Block',
+            normalized_value: c.email_active.trim().toLowerCase(),
+            reason: reason || 'Bulk paste (Company Block)',
             source,
             created_by: actorId,
-          }, { onConflict: 'identity_type,normalized_value' });
+          });
+        }
+        if (c.email_2) {
+          await this.insertRemovedEntrySafe({
+            company_id: companyId,
+            contact_id: c.id,
+            identity_type: 'email',
+            normalized_value: c.email_2.trim().toLowerCase(),
+            reason: reason || 'Bulk paste (Company Block)',
+            source,
+            created_by: actorId,
+          });
         }
 
+        // Phone suppression
         if (c.phone_direct) {
           const normPhone = c.phone_direct.replace(/\D/g, '');
           if (normPhone) {
-            await supabaseAdmin.from('removed_entries').upsert({
+            await this.insertRemovedEntrySafe({
               company_id: companyId,
               contact_id: c.id,
               identity_type: 'phone',
               normalized_value: normPhone,
-              reason: reason || 'Company Block',
+              reason: reason || 'Bulk paste (Company Block)',
               source,
               created_by: actorId,
-            }, { onConflict: 'identity_type,normalized_value' });
+            });
+          }
+        }
+        if (c.phone_2) {
+          const normPhone2 = c.phone_2.replace(/\D/g, '');
+          if (normPhone2) {
+            await this.insertRemovedEntrySafe({
+              company_id: companyId,
+              contact_id: c.id,
+              identity_type: 'phone',
+              normalized_value: normPhone2,
+              reason: reason || 'Bulk paste (Company Block)',
+              source,
+              created_by: actorId,
+            });
           }
         }
       }
@@ -338,12 +421,35 @@ export class LeadService {
           const match = Array.isArray(lookup) ? lookup[0] : lookup;
           if (match?.company_id) {
             companyIds.add(match.company_id);
-          } else {
-            // Direct company name match
-            const { data: comps } = await supabaseAdmin.from('companies').select('id').ilike('name', `%${idf}%`).limit(1);
-            if (comps?.[0]?.id) companyIds.add(comps[0].id);
           }
         } catch (_) {}
+
+        // Contacts email search
+        if (idf.includes('@')) {
+          const { data: conts } = await supabaseAdmin
+            .from('contacts')
+            .select('id, company_contacts(company_id)')
+            .or(`email_active.ilike.${idf},email_2.ilike.${idf},email_active_normalized.eq.${idf.toLowerCase()}`);
+          for (const c of (conts ?? [])) {
+            for (const cc of ((c as any).company_contacts ?? [])) if (cc.company_id) companyIds.add(cc.company_id);
+          }
+        } else {
+          // Phone digits search
+          const digits = idf.replace(/\D/g, '');
+          if (digits.length >= 7) {
+            const { data: conts } = await supabaseAdmin
+              .from('contacts')
+              .select('id, company_contacts(company_id)')
+              .or(`phone_direct.ilike.%${digits}%,phone_2.ilike.%${digits}%,phone_direct_normalized.ilike.%${digits}%`);
+            for (const c of (conts ?? [])) {
+              for (const cc of ((c as any).company_contacts ?? [])) if (cc.company_id) companyIds.add(cc.company_id);
+            }
+          }
+        }
+
+        // Direct company name match
+        const { data: comps } = await supabaseAdmin.from('companies').select('id').ilike('name', `%${idf}%`).limit(5);
+        for (const c of (comps ?? [])) if (c.id) companyIds.add(c.id);
       }
 
       for (const compId of companyIds) {
