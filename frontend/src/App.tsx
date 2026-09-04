@@ -2197,11 +2197,25 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
             <div style={{ width: 44, minWidth: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--border)', background: 'var(--s2)', position: 'sticky', left: 0, zIndex: 6 }}>
               <input type="checkbox" className="cb" onChange={e => setSelected(e.target.checked ? filtered.map(r => r.id) : [])} />
             </div>
-            {visibleCols.map(col => (
+            {visibleCols.map((col, ci) => (
               <div
                 key={col.key}
-                style={{ minWidth: col.w, width: col.w, padding: '7px 12px', borderRight: '1px solid var(--border)', cursor: 'context-menu', userSelect: 'none', display: 'flex', alignItems: 'center' }}
-                title={`Right-click to copy all ${col.label}`}
+                style={{
+                  minWidth: col.w, width: col.w, padding: '7px 12px',
+                  borderRight: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none',
+                  display: 'flex', alignItems: 'center',
+                  // Highlight the header when its whole column is the active selection.
+                  background: bounds && bounds.c1 === ci && bounds.c2 === ci && bounds.r1 === 0 && bounds.r2 === filtered.length - 1
+                    ? 'rgba(49,94,246,0.14)' : undefined,
+                }}
+                title={`Click to select all ${col.label} · Ctrl+C to copy`}
+                // One click selects the entire column -- copying "all the numbers"
+                // shouldn't mean dragging through every row.
+                onClick={() => {
+                  if (!filtered.length) return
+                  setAnchor({ r: 0, c: ci })
+                  setFocusCell({ r: filtered.length - 1, c: ci })
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
@@ -2237,7 +2251,13 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                     onChange={() => setSelected(current => current.includes(row.id) ? current.filter(id => id !== row.id) : [...current, row.id])}
                     onClick={e => e.stopPropagation()}
                   />
-                  <span style={{ fontSize: 10, color: 'var(--t4)', fontFamily: 'var(--mono)' }}>{ri + 1}</span>
+                  {/* Row number selects the whole row's cells, mirroring the header
+                      selecting a whole column. */}
+                  <span
+                    style={{ fontSize: 10, color: 'var(--t4)', fontFamily: 'var(--mono)', cursor: 'pointer', userSelect: 'none' }}
+                    title="Click to select this row · Ctrl+C to copy"
+                    onClick={() => { setAnchor({ r: ri, c: 0 }); setFocusCell({ r: ri, c: visibleCols.length - 1 }) }}
+                  >{ri + 1}</span>
                 </div>
                 {visibleCols.map((col, ci) => {
                   const val = getVal(row, col.field)
