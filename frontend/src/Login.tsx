@@ -2,6 +2,60 @@ import React, { useState } from 'react';
 import { supabase } from './config/supabase';
 import { api } from './lib/api';
 import { toast } from './lib/notify';
+import ContainerYard from './features/auth/ContainerYard';
+import './styles/auth.css';
+
+const IconMail = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-10 6L2 7" />
+  </svg>
+);
+const IconLock = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+const IconUser = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+  </svg>
+);
+const IconEye = ({ off }: { off?: boolean }) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    {off ? (
+      <><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19M6.61 6.61A18.15 18.15 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.39-1.61" /><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" /><path d="m2 2 20 20" /></>
+    ) : (
+      <><path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8-10-8-10-8Z" /><circle cx="12" cy="12" r="3" /></>
+    )}
+  </svg>
+);
+const IconArrow = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M5 12h14M13 6l6 6-6 6" />
+  </svg>
+);
+const IconCheck = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" /><path d="m8.5 12 2.5 2.5 4.5-5" />
+  </svg>
+);
+const IconShield = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" />
+  </svg>
+);
+const IconAlert = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16.5v.01" />
+  </svg>
+);
+
+const HERO_POINTS = [
+  'Live container inventory',
+  'One record per client',
+  'Quotation to delivery in one flow',
+  'Secure, role-based access',
+];
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [isRegistering, setIsRegistering] = useState(false);
@@ -17,6 +71,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   // resetPasswordForEmail() needs a real email -- reuse the same username-or-email
   // resolution as sign-in, since the "Forgot password?" field also accepts either.
@@ -112,123 +167,276 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
     }
   };
 
+  const handleGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        scopes: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email',
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        },
+        redirectTo: window.location.origin
+      }
+    });
+    if (error) setError(error.message);
+  };
+
+  const heading = showForgot ? 'Reset your password' : isRegistering ? 'Create your account' : 'Sign in to continue';
+  const lead = showForgot
+    ? 'We will email you a link to set a new password.'
+    : isRegistering
+      ? 'Register with your company details to get access.'
+      : 'Use your authorized company account.';
+
   return (
-    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
-      <div className="card" style={{ width: 400, padding: 32 }}>
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{ width: 48, height: 48, background: 'var(--brand)', borderRadius: 12, margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 800, fontSize: 24 }}>C</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--t1)' }}>Container CRM</div>
-          <div style={{ fontSize: 13, color: 'var(--t4)', marginTop: 4 }}>
-            {showForgot ? 'Reset your password' : isRegistering ? 'Create your account' : 'Sign in to your account'}
+    <div className="auth-page">
+      <header className="auth-topbar">
+        <div className="auth-brand">
+          <div className="auth-logo">C</div>
+          <div className="auth-brand-name">
+            Container CRM
+            <span>Sales &amp; Fleet Operations</span>
           </div>
         </div>
+        <div className="auth-topbar-note">Authorized access only</div>
+      </header>
 
-        {error && (
-          <div style={{ padding: 12, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 13, borderRadius: 8, marginBottom: 16 }}>
-            {error}
-          </div>
-        )}
-
-        {showForgot ? (
-          resetSent ? (
-            <div>
-              <div style={{ padding: 12, background: 'var(--brand-bg)', color: 'var(--t1)', fontSize: 13, borderRadius: 8, marginBottom: 16 }}>
-                If an account matches that email or username, a password reset link has been sent. Check your inbox.
-              </div>
-              <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--t4)' }}>
-                <span style={{ color: 'var(--brand)', fontWeight: 600, cursor: 'pointer' }} onClick={() => { setShowForgot(false); setResetSent(false); setError(''); }}>Back to sign in</span>
-              </div>
+      <section className="auth-hero">
+        <div className="auth-eyebrow">Connected container operations</div>
+        <h1 className="auth-title">
+          Every container.
+          <em>Clearly tracked.</em>
+        </h1>
+        <p className="auth-sub">
+          Quote, dispatch, monitor, and report from one reliable workspace
+          built for modern container sales teams.
+        </p>
+        <div className="auth-points">
+          {HERO_POINTS.map(point => (
+            <div className="auth-point" key={point}>
+              <IconCheck />
+              {point}
             </div>
-          ) : (
-            <form onSubmit={handleForgotPassword} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Email or Username</label>
-                <input type="text" value={identifier} onChange={e => setIdentifier(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--t1)', boxSizing: 'border-box' }} required />
-              </div>
-              <button type="submit" disabled={loading} style={{ width: '100%', padding: '10px', background: 'var(--brand)', color: 'white', border: 'none', borderRadius: 8, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer' }}>
-                {loading ? 'Sending…' : 'Send reset link'}
-              </button>
-              <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--t4)' }}>
-                <span style={{ color: 'var(--brand)', fontWeight: 600, cursor: 'pointer' }} onClick={() => { setShowForgot(false); setError(''); }}>Back to sign in</span>
-              </div>
-            </form>
-          )
-        ) : (
-        <>
-        <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {isRegistering ? (
-            <>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Email</label>
-                <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--t1)', boxSizing: 'border-box' }} required />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Username</label>
-                <input type="text" value={username} onChange={e => setUsername(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--t1)', boxSizing: 'border-box' }} required />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Full Name (Optional)</label>
-                <input type="text" value={fullName} onChange={e => setFullName(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--t1)', boxSizing: 'border-box' }} />
-              </div>
-            </>
-          ) : (
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Email or Username</label>
-              <input type="text" value={identifier} onChange={e => setIdentifier(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--t1)', boxSizing: 'border-box' }} required />
+          ))}
+        </div>
+
+        <ContainerYard />
+      </section>
+
+      <section className="auth-panel">
+        <div className="auth-card">
+          <div className="auth-chip">Encrypted session</div>
+          <div className="auth-kicker">Container CRM</div>
+          <h2 className="auth-h1">{heading}</h2>
+          <p className="auth-lead">{lead}</p>
+
+          {error && (
+            <div className="auth-alert err" role="alert">
+              <IconAlert />
+              <span>{error}</span>
             </div>
           )}
 
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t3)', marginBottom: 6 }}>Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--t1)', boxSizing: 'border-box' }} required />
-            {!isRegistering && (
-              <div style={{ textAlign: 'right', marginTop: 6 }}>
-                <span style={{ fontSize: 12, color: 'var(--brand)', fontWeight: 600, cursor: 'pointer' }} onClick={() => { setShowForgot(true); setError(''); }}>Forgot password?</span>
+          {showForgot ? (
+            resetSent ? (
+              <>
+                <div className="auth-alert ok">
+                  <IconCheck />
+                  <span>
+                    If an account matches that email or username, a password reset link has
+                    been sent. Check your inbox.
+                  </span>
+                </div>
+                <div className="auth-foot">
+                  <button
+                    type="button"
+                    className="auth-link"
+                    onClick={() => { setShowForgot(false); setResetSent(false); setError(''); }}
+                  >
+                    Back to sign in
+                  </button>
+                </div>
+              </>
+            ) : (
+              <form onSubmit={handleForgotPassword} className="auth-form">
+                <div className="auth-field">
+                  <label htmlFor="auth-reset-id">Email or username</label>
+                  <div className="auth-input-wrap">
+                    <IconMail />
+                    <input
+                      id="auth-reset-id"
+                      className="auth-input"
+                      type="text"
+                      autoComplete="username"
+                      placeholder="you@company.com"
+                      value={identifier}
+                      onChange={e => setIdentifier(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+                <button type="submit" className="auth-submit" disabled={loading}>
+                  {loading ? 'Sending…' : 'Send reset link'}
+                  {!loading && <IconArrow />}
+                </button>
+                <div className="auth-foot">
+                  <button
+                    type="button"
+                    className="auth-link"
+                    onClick={() => { setShowForgot(false); setError(''); }}
+                  >
+                    Back to sign in
+                  </button>
+                </div>
+              </form>
+            )
+          ) : (
+            <>
+              <form onSubmit={handleAuth} className="auth-form">
+                {isRegistering ? (
+                  <>
+                    <div className="auth-field">
+                      <label htmlFor="auth-email">Email address</label>
+                      <div className="auth-input-wrap">
+                        <IconMail />
+                        <input
+                          id="auth-email"
+                          className="auth-input"
+                          type="email"
+                          autoComplete="email"
+                          placeholder="you@company.com"
+                          value={email}
+                          onChange={e => setEmail(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="auth-field">
+                      <label htmlFor="auth-username">Username</label>
+                      <div className="auth-input-wrap">
+                        <IconUser />
+                        <input
+                          id="auth-username"
+                          className="auth-input"
+                          type="text"
+                          autoComplete="username"
+                          placeholder="jdelacruz"
+                          value={username}
+                          onChange={e => setUsername(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="auth-field">
+                      <label htmlFor="auth-fullname">
+                        Full name <span>Optional</span>
+                      </label>
+                      <div className="auth-input-wrap">
+                        <IconUser />
+                        <input
+                          id="auth-fullname"
+                          className="auth-input"
+                          type="text"
+                          autoComplete="name"
+                          placeholder="Juan Dela Cruz"
+                          value={fullName}
+                          onChange={e => setFullName(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="auth-field">
+                    <label htmlFor="auth-identifier">Email or username</label>
+                    <div className="auth-input-wrap">
+                      <IconMail />
+                      <input
+                        id="auth-identifier"
+                        className="auth-input"
+                        type="text"
+                        autoComplete="username"
+                        placeholder="you@company.com"
+                        value={identifier}
+                        onChange={e => setIdentifier(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="auth-field">
+                  <label htmlFor="auth-password">
+                    Password <span>Case-sensitive</span>
+                  </label>
+                  <div className="auth-input-wrap">
+                    <IconLock />
+                    <input
+                      id="auth-password"
+                      className="auth-input"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete={isRegistering ? 'new-password' : 'current-password'}
+                      placeholder="Enter your password"
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="auth-peek"
+                      onClick={() => setShowPassword(v => !v)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      <IconEye off={showPassword} />
+                    </button>
+                  </div>
+                </div>
+
+                {!isRegistering && (
+                  <div className="auth-row">
+                    <button
+                      type="button"
+                      className="auth-link"
+                      onClick={() => { setShowForgot(true); setError(''); }}
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
+
+                <button type="submit" className="auth-submit" disabled={loading}>
+                  {loading ? 'Processing…' : isRegistering ? 'Create account' : 'Sign in securely'}
+                  {!loading && <IconArrow />}
+                </button>
+              </form>
+
+              <div className="auth-divider"><span>OR</span></div>
+
+              <button type="button" className="auth-google" onClick={handleGoogle}>
+                <img
+                  src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                  alt=""
+                  width={18}
+                  height={18}
+                />
+                Continue with Google
+              </button>
+
+              <div className="auth-foot">
+                {isRegistering ? 'Already have an account? ' : "Don't have an account? "}
+                <button type="button" className="auth-link" onClick={() => setIsRegistering(!isRegistering)}>
+                  {isRegistering ? 'Sign in' : 'Register'}
+                </button>
               </div>
-            )}
+            </>
+          )}
+
+          <div className="auth-secure">
+            <IconShield />
+            Your session is encrypted and access controlled.
           </div>
-
-          <button type="submit" disabled={loading} style={{ width: '100%', padding: '10px', background: 'var(--brand)', color: 'white', border: 'none', borderRadius: 8, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer', marginTop: 8 }}>
-            {loading ? 'Processing...' : (isRegistering ? 'Create Account' : 'Sign In')}
-          </button>
-        </form>
-
-        <div style={{ display: 'flex', alignItems: 'center', margin: '20px 0' }}>
-          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-          <span style={{ padding: '0 12px', fontSize: 12, color: 'var(--t4)', fontWeight: 600 }}>OR</span>
-          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
         </div>
-
-        <button 
-          onClick={async () => {
-            const { error } = await supabase.auth.signInWithOAuth({
-              provider: 'google',
-              options: {
-                scopes: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email',
-                queryParams: {
-                  access_type: 'offline',
-                  prompt: 'consent',
-                },
-                redirectTo: window.location.origin
-              }
-            });
-            if (error) setError(error.message);
-          }}
-          style={{ width: '100%', padding: '10px', background: 'white', color: '#333', border: '1px solid #ccc', borderRadius: 8, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-        >
-          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" style={{ width: 18, height: 18 }} />
-          Sign in with Google
-        </button>
-
-        <div style={{ textAlign: 'center', marginTop: 24, fontSize: 13, color: 'var(--t4)' }}>
-          {isRegistering ? 'Already have an account? ' : "Don't have an account? "}
-          <span style={{ color: 'var(--brand)', fontWeight: 600, cursor: 'pointer' }} onClick={() => setIsRegistering(!isRegistering)}>
-            {isRegistering ? 'Sign In' : 'Register'}
-          </span>
-        </div>
-        </>
-        )}
-      </div>
+      </section>
     </div>
   );
 }
