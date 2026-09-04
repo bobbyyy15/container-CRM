@@ -774,23 +774,32 @@ export const NewProspectDialog = ({ onClose, onSaved }: {
   )
 }
 
-export const NewManualSaleDialog = ({ onClose, onSaved }: {
+export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
+  initialData?: {
+    companyName?: string
+    contactPerson?: string
+    phone?: string
+    email?: string
+    stateProvince?: string
+    country?: string
+    picId?: string
+  }
   onClose: () => void
   onSaved: () => void
 }) => {
   const pics = usePics()
-  const [companyName, setCompanyName] = useState('')
-  const [contactPerson, setContactPerson] = useState('')
-  const [phone, setPhone] = useState('')
-  const [email, setEmail] = useState('')
-  const [picId, setPicId] = useState('')
+  const [companyName, setCompanyName] = useState(initialData?.companyName ?? '')
+  const [contactPerson, setContactPerson] = useState(initialData?.contactPerson ?? '')
+  const [phone, setPhone] = useState(initialData?.phone ?? '')
+  const [email, setEmail] = useState(initialData?.email ?? '')
+  const [picId, setPicId] = useState(initialData?.picId ?? '')
   const [totalUnits, setTotalUnits] = useState(1)
   // Entered per unit; the totals below are derived, never typed. Revenue is what the
   // sale generates in full, profit is the per-unit margin across those units.
   const [buyPerUnit, setBuyPerUnit] = useState(0)
   const [sellPerUnit, setSellPerUnit] = useState(0)
-  const [stateProvince, setStateProvince] = useState('')
-  const [country, setCountry] = useState('')
+  const [stateProvince, setStateProvince] = useState(initialData?.stateProvince ?? '')
+  const [country, setCountry] = useState(initialData?.country ?? '')
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
 

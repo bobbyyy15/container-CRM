@@ -14,21 +14,22 @@ export class CustomerController {
         ? Math.min(requestedLimit, 1000)
         : 1000;
 
-      // Two different views of the same data, by design:
-      //   * a sales_manager sees only their own book -- their active clients
-      //   * operations (and admin) see the compiled roll-up of every account's
-      //     active clients, which is what the Customer Accounts screen is for
       const actorRole = req.auth?.profile.role;
       const picId = req.auth?.profile.pic_id;
-      const seesAllAccounts = actorRole === 'admin' || actorRole === 'operations';
-
-      if (!seesAllAccounts && !picId) return res.json({ success: true, data: [] });
+      const scope = req.query.scope as string; // 'personal' | 'master' | undefined
+      const targetPicId = req.query.pic_id as string;
+      const isSalesManager = actorRole === 'sales_manager';
+      const effectivePicId = targetPicId || (isSalesManager ? picId : (scope === 'personal' ? picId : undefined));
 
       let dbQuery = supabaseAdmin
         .from('customer_accounts_view')
         .select('*');
 
-      if (!seesAllAccounts) dbQuery = dbQuery.eq('pic_id', picId);
+      if (effectivePicId) {
+        dbQuery = dbQuery.eq('pic_id', effectivePicId);
+      } else if (isSalesManager && !picId) {
+        return res.json({ success: true, data: [] });
+      }
 
       // 2. STATUS FILTERING
       if (status && status !== 'All') {
