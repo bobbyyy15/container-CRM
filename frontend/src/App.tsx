@@ -2266,7 +2266,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                     <div
                       key={col.key}
                       onMouseDown={event => { event.preventDefault(); beginSelect(ri, ci, event.shiftKey) }}
-                      onMouseEnter={() => { if (draggingRef.current) setFocusCell({ r: ri, c: ci }) }}
+                      onMouseEnter={event => { if (draggingRef.current && anchor) setFocusCell({ r: ri, c: event.shiftKey ? ci : anchor.c }) }}
                       style={{
                         minWidth: col.w, width: col.w, padding: '0 12px', height: rowHeight,
                         display: 'flex', alignItems: 'center', overflow: 'hidden',
