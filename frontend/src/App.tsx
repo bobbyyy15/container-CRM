@@ -828,6 +828,120 @@ const Badge = ({ status }: { status: string }) => (
   <span className={`badge ${BADGE_MAP[status] || 'b-gray'}`}>{status}</span>
 )
 
+type SmartChipOption = { value: string; label: string; bg: string; color: string; dot: string }
+
+const DEFAULT_SMART_STATUS_OPTIONS: SmartChipOption[] = [
+  { value: 'Pending', label: 'Pending', bg: 'var(--amber-bg, #FEF3C7)', color: 'var(--amber, #92400E)', dot: '#D97706' },
+  { value: 'Won', label: 'Won', bg: 'var(--green-bg, #D1FAE5)', color: 'var(--green, #065F46)', dot: '#059669' },
+  { value: 'Cancelled', label: 'Cancelled', bg: 'var(--red-bg, #FEE2E2)', color: 'var(--red, #991B1B)', dot: '#DC2626' },
+]
+
+const StatusSmartChip = ({
+  status,
+  onStatusChange,
+  options = DEFAULT_SMART_STATUS_OPTIONS,
+  disabled = false,
+}: {
+  status: string
+  onStatusChange: (newStatus: string) => void
+  options?: SmartChipOption[]
+  disabled?: boolean
+}) => {
+  const [open, setOpen] = useState(false)
+  const norm = (status || '').toLowerCase().trim()
+  const current = options.find(o => o.value.toLowerCase() === norm || (norm === 'converted to sale' && o.value === 'Won') || (norm === 'lost' && o.value === 'Cancelled')) || {
+    value: status || 'Pending',
+    label: status || 'Pending',
+    bg: 'var(--s3)',
+    color: 'var(--t2)',
+    dot: 'var(--t4)'
+  }
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v) }}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          padding: '2px 8px 2px 8px',
+          borderRadius: 999,
+          background: current.bg,
+          color: current.color,
+          border: '1px solid rgba(0,0,0,0.08)',
+          fontSize: 11.5,
+          fontWeight: 600,
+          cursor: disabled ? 'default' : 'pointer',
+          transition: 'all 0.15s ease',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+        }}
+        title={disabled ? undefined : 'Click to change status'}
+      >
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: current.dot, flexShrink: 0 }} />
+        <span>{current.label}</span>
+        {!disabled && <span style={{ fontSize: 8, opacity: 0.7, marginLeft: 1 }}>▼</span>}
+      </button>
+
+      {open && (
+        <>
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 999 }}
+            onClick={(e) => { e.stopPropagation(); setOpen(false) }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 4px)',
+              left: 0,
+              zIndex: 1000,
+              background: 'var(--ws)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              padding: 4,
+              boxShadow: '0 6px 20px rgba(0,0,0,0.15)',
+              minWidth: 120,
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {options.map(opt => (
+              <div
+                key={opt.value}
+                onClick={() => {
+                  setOpen(false)
+                  if (opt.value !== status) {
+                    onStatusChange(opt.value)
+                  }
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '6px 10px',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontWeight: opt.value === status ? 700 : 500,
+                  background: opt.value === status ? 'var(--s2)' : 'transparent',
+                  color: 'var(--t1)',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'}
+                onMouseLeave={e => e.currentTarget.style.background = opt.value === status ? 'var(--s2)' : 'transparent'}
+              >
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: opt.dot }} />
+                <span>{opt.label}</span>
+                {opt.value === status && <span style={{ marginLeft: 'auto', color: 'var(--brand)', fontSize: 11 }}>✓</span>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 const Trend = ({ val, up, white }: { val: string | number; up?: boolean; white?: boolean }) => {
   const strVal = String(val)
   const isZero = strVal === '0' || strVal === '0%'
@@ -2815,6 +2929,33 @@ const SalesTracker = () => {
   const totalProfit = filteredSales.reduce((s, r) => s + r.profit, 0)
   const totalUnits = filteredSales.reduce((s, r) => s + r.qty, 0)
 
+  const handleUpdateSaleStatus = async (id: string, ref: string, newStatus: string) => {
+    try {
+      await api.patch(`/deals/sales/${id}/status`, { status: newStatus })
+      toast(`Sale ${ref} status updated to ${newStatus}.`, 'success')
+      setRevision(value => value + 1)
+    } catch (err: any) {
+      toast(err.response?.data?.error?.message || 'Failed to update status.', 'error')
+    }
+  }
+
+  const handleDeleteSale = async (id: string, ref: string) => {
+    const confirmed = await askConfirm({
+      title: `Delete Sale ${ref}`,
+      message: `Are you sure you want to delete this sale record? This action cannot be undone.`,
+      confirmLabel: 'Delete Sale',
+      danger: true,
+    })
+    if (!confirmed) return
+    try {
+      await api.delete(`/deals/sales/${id}`)
+      toast(`Sale ${ref} deleted successfully.`, 'success')
+      setRevision(value => value + 1)
+    } catch (err: any) {
+      toast(err.response?.data?.error?.message || 'Failed to delete sale.', 'error')
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {showSale && (
@@ -2887,9 +3028,25 @@ const SalesTracker = () => {
                 <td className="r profit-cell">${s.profit.toLocaleString()}</td>
                 <td className="r mono" style={{ fontWeight: 700, color: s.margin >= 30 ? 'var(--green)' : 'var(--amber)' }}>{s.margin.toFixed(1)}%</td>
                 <td><ChipPIC label={s.pic} /></td>
-                <td><Badge status={s.status as BadgeStatus} /></td>
+                <td>
+                  <StatusSmartChip
+                    status={s.status}
+                    onStatusChange={newStatus => handleUpdateSaleStatus(s.id, s.ref, newStatus)}
+                  />
+                </td>
                 <td className="col-actions">
-                  <div className="row-actions"><Btn variant="ghost" sm onClick={() => setViewRow(s)}>View</Btn></div>
+                  <div className="row-actions">
+                    <Btn variant="ghost" sm onClick={() => setViewRow(s)}>View</Btn>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ color: 'var(--red)', padding: '0 6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                      title={`Delete ${s.ref}`}
+                      onClick={() => handleDeleteSale(s.id, s.ref)}
+                    >
+                      <Ic n={I.removed} size={13} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

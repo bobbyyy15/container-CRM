@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { DealService } from '../services/deal.service';
-import { CreateQuotationSchema, UpdateQuotationStatusSchema, ConvertToSaleSchema, CreateManualSaleSchema } from '../schemas/deal.schema';
+import { CreateQuotationSchema, UpdateQuotationStatusSchema, ConvertToSaleSchema, CreateManualSaleSchema, UpdateSaleStatusSchema } from '../schemas/deal.schema';
 
 // A record created with no PIC stamped on it is invisible under the pic_id-based data
 // silos (NULL never equals NULL for row-ownership checks), so it becomes unreachable the
@@ -112,4 +112,43 @@ export class DealController {
       res.status(400).json({ success: false, error: { message: error.message } });
     }
   }
+
+  static async updateSaleStatus(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const { status } = UpdateSaleStatusSchema.parse(req.body);
+
+      const { data, error } = await supabaseAdmin
+        .from('sales')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select('*, companies(*), pics(name)')
+        .single();
+
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  static async deleteSale(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+
+      // Clean up linked contracts first if any exist
+      await supabaseAdmin.from('contracts').delete().eq('sale_id', id);
+
+      const { error } = await supabaseAdmin
+        .from('sales')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      res.json({ success: true, message: 'Sale deleted successfully.' });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
 }
+

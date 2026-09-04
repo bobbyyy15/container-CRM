@@ -13,5 +13,8 @@ router.post('/quotations/:id/convert-to-sale', requireRoles('admin', 'sales_mana
 // Sales
 router.get('/sales', DealController.getSales);
 router.post('/sales', requireRoles('admin', 'sales_manager'), DealController.createManualSale);
+router.patch('/sales/:id/status', requireRoles('admin', 'sales_manager', 'operations'), DealController.updateSaleStatus);
+router.delete('/sales/:id', requireRoles('admin', 'sales_manager'), DealController.deleteSale);
 
 export default router;
+
