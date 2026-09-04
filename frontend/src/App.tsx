@@ -1,13 +1,16 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react'
 import { supabase } from './config/supabase'
 import { api } from './lib/api'
 import { useRealtimeRevision, useRealtimeStatus } from './lib/realtime'
 import { toast, askConfirm, askReason, ToastHost, ConfirmHost } from './lib/notify'
 import Login from './Login'
-import ProspectImportDialog from './features/import/ProspectImportDialog'
-import { UserProfileSettings } from './features/settings/UserProfileSettings'
-import { UserManagement } from './features/settings/UserManagement'
-import ResetPassword from './features/settings/ResetPassword'
+// Admin screens and the import dialog are reached rarely, so they load on demand
+// instead of riding along in the initial bundle. Login stays eager -- it is the
+// first thing an unauthenticated visitor sees.
+const ProspectImportDialog = lazy(() => import('./features/import/ProspectImportDialog'))
+const UserProfileSettings = lazy(() => import('./features/settings/UserProfileSettings').then(m => ({ default: m.UserProfileSettings })))
+const UserManagement = lazy(() => import('./features/settings/UserManagement').then(m => ({ default: m.UserManagement })))
+const ResetPassword = lazy(() => import('./features/settings/ResetPassword'))
 import {
   NewInquiryDialog,
   NewWarmLeadDialog,
@@ -1079,13 +1082,21 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
     const term = gsQuery.trim()
     if (term.length < 2) { setGsResults([]); return }
     setGsLoading(true)
+    // Clearing the timeout alone did not cancel requests already in flight, so a slow
+    // response for "abc" could resolve after "abcd" and overwrite the newer results --
+    // and its setGsLoading(false) cleared the spinner while the newer batch was still
+    // running. Abort the previous batch and ignore anything that still resolves.
+    const controller = new AbortController()
+    let cancelled = false
     const handle = setTimeout(() => {
+      const opts = (search: string) => ({ params: { search, limit: 5 }, signal: controller.signal })
       Promise.all([
-        api.get('/leads/prospects', { params: { search: term, limit: 5 } }).catch(() => ({ data: { data: [] } })),
-        api.get('/leads/warm-leads', { params: { search: term, limit: 5 } }).catch(() => ({ data: { data: [] } })),
-        api.get('/leads/inquiries', { params: { search: term, limit: 5 } }).catch(() => ({ data: { data: [] } })),
-        api.get('/customers', { params: { search: term, limit: 5 } }).catch(() => ({ data: { data: [] } })),
+        api.get('/leads/prospects', opts(term)).catch(() => ({ data: { data: [] } })),
+        api.get('/leads/warm-leads', opts(term)).catch(() => ({ data: { data: [] } })),
+        api.get('/leads/inquiries', opts(term)).catch(() => ({ data: { data: [] } })),
+        api.get('/customers', opts(term)).catch(() => ({ data: { data: [] } })),
       ]).then(([prospects, warmLeads, inquiries, customers]) => {
+        if (cancelled) return
         const rows: { label: string; sub: string; screen: Screen }[] = [
           ...(prospects.data.data || []).map((r: any) => ({ label: r.companies?.name || r.contacts?.first_name || 'Prospect', sub: 'Prospect Client', screen: 'prospects' as Screen })),
           ...(warmLeads.data.data || []).map((r: any) => ({ label: r.companies?.name || r.contacts?.first_name || 'Warm Lead', sub: 'Warm Lead', screen: 'warm-leads' as Screen })),
@@ -1094,9 +1105,9 @@ const TopBar = ({ isDark, onToggleDark, session, onNav, role }: { isDark: boolea
         ]
         setGsResults(rows)
         setGsLoading(false)
-      }).catch(() => setGsLoading(false))
+      }).catch(() => { if (!cancelled) setGsLoading(false) })
     }, 300)
-    return () => clearTimeout(handle)
+    return () => { cancelled = true; controller.abort(); clearTimeout(handle) }
   }, [gsQuery])
 
   return (
@@ -5710,7 +5721,14 @@ export default function App() {
   const handleNav = useCallback((s: Screen) => setScreen(s), [])
 
   if (authChecking) return null;
-  if (isPasswordRecovery) return <><ResetPassword onDone={() => setIsPasswordRecovery(false)} /><ToastHost /></>;
+  if (isPasswordRecovery) return (
+    <>
+      <Suspense fallback={<div className="loading-row"><span className="spinner" />Loading…</div>}>
+        <ResetPassword onDone={() => setIsPasswordRecovery(false)} />
+      </Suspense>
+      <ToastHost />
+    </>
+  );
   if (!session) return <><Login onLogin={() => {}} /><ToastHost /></>;
 
   const renderScreen = () => {
@@ -5781,7 +5799,11 @@ export default function App() {
       <div className="workspace" style={{ flex: 1, minWidth: 0, zIndex: 1 }}>
         <div className="ws-card">
           <TopBar isDark={isDark} onToggleDark={() => setIsDark(d => !d)} session={session} onNav={handleNav} role={currentProfile?.role} />
-          <div key={screen} className="screen-transition">{renderScreen()}</div>
+          <div key={screen} className="screen-transition">
+            <Suspense fallback={<div className="loading-row"><span className="spinner" />Loading…</div>}>
+              {renderScreen()}
+            </Suspense>
+          </div>
         </div>
       </div>
       <ToastHost />
