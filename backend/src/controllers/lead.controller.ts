@@ -65,12 +65,30 @@ const listActiveLeads = async (
   if (table === 'warm_leads' && query.status !== 'all') dbQuery = dbQuery.eq('status', 'active');
   if (table === 'inquiries' && query.status !== 'all') dbQuery = dbQuery.not('status', 'in', '(Removed,Lost,Quotation Created,Converted to Sale)');
 
-  const [{ data, error }, { data: removed, error: removedError }] = await Promise.all([
+  // A prospect that has already moved down the pipeline must not still be sitting in the
+  // Prospect Clients list. lifecycle_status only covers the explicit "convert" action --
+  // a warm lead, inquiry or sale raised manually for the same company leaves the original
+  // prospect row untouched and it keeps showing up. Exclude by company instead, which is
+  // self-correcting for rows already in that state.
+  const needsDownstreamFilter = table === 'prospect_clients' && query.status === 'active';
+
+  const [{ data, error }, { data: removed, error: removedError }, downstream] = await Promise.all([
     dbQuery,
     supabaseAdmin.from('removed_entries').select('company_id, contact_id, identity_type, normalized_value'),
+    needsDownstreamFilter
+      ? Promise.all([
+          supabaseAdmin.from('warm_leads').select('company_id').eq('status', 'active'),
+          supabaseAdmin.from('inquiries').select('company_id'),
+          supabaseAdmin.from('sales').select('company_id'),
+        ])
+      : Promise.resolve(null),
   ]);
   if (error) throw error;
   if (removedError) throw removedError;
+
+  const downstreamCompanies = new Set(
+    (downstream ?? []).flatMap(result => (result.data ?? []).map((row: any) => row.company_id)).filter(Boolean)
+  );
 
   const removedCompanies = new Set((removed ?? []).map(row => row.company_id).filter(Boolean));
   const removedContacts = new Set((removed ?? []).map(row => row.contact_id).filter(Boolean));
@@ -85,6 +103,10 @@ const listActiveLeads = async (
   const eligible = (data ?? []).filter((row: any) => {
     const company = row.companies ?? {};
     const contact = row.contacts ?? {};
+
+    // Already a warm lead / inquiry / customer -- it belongs to that stage now.
+    if (needsDownstreamFilter && downstreamCompanies.has(row.company_id)) return false;
+
     if (applySuppressionFilter) {
       if (removedCompanies.has(row.company_id) || removedContacts.has(row.contact_id)) return false;
       if ([contact.email_active, contact.email_2].some(value => removedEmails.has(text(value)))) return false;
@@ -251,6 +273,26 @@ export class LeadController {
       res.json({ success: true, data: results });
     } catch (error: any) {
       res.status(400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
+  // GET /leads/client-lookup?identity=<email or phone>
+  // Resolves an existing client from a single identity so an inquiry only needs the
+  // email or phone plus the order details -- everything else is already on record.
+  static async lookupClient(req: Request, res: Response) {
+    try {
+      const identity = String(req.query.identity ?? '').trim();
+      if (!identity) {
+        return res.status(400).json({ success: false, error: { message: 'An email or phone number is required.' } });
+      }
+
+      const { data, error } = await supabaseAdmin.rpc('lookup_client_by_identity', { p_identity: identity });
+      if (error) throw error;
+
+      const match = Array.isArray(data) ? data[0] : data;
+      res.json({ success: true, data: match ?? null });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: { message: error.message } });
     }
   }
 

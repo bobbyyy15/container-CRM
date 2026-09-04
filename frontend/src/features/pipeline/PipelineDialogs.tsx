@@ -68,6 +68,9 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   // inquiry with no Warm Lead in between at all.
   const [source, setSource] = useState<'warmLead' | 'manual'>('warmLead')
   const [warmLeadId, setWarmLeadId] = useState(initialId ?? warmLeads[0]?.id ?? '')
+  const [identity, setIdentity] = useState('')
+  const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'found' | 'notfound'>('idle')
+  const [matchedStage, setMatchedStage] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
   const [contactPerson, setContactPerson] = useState('')
   const [phone, setPhone] = useState('')
@@ -90,8 +93,42 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   useEffect(() => { if (!containerSizeId && sizes.length) setContainerSizeId(sizes[0].id) }, [sizes, containerSizeId])
   useEffect(() => { if (!containerConditionId && conditions.length) setContainerConditionId(conditions[0].id) }, [conditions, containerConditionId])
 
+  // Resolve the typed email/phone to an existing client and fill the rest of the form.
+  useEffect(() => {
+    const value = identity.trim()
+    if (source !== 'manual' || value.length < 4) { setLookupState('idle'); setMatchedStage(null); return }
+
+    setLookupState('searching')
+    let cancelled = false
+    const handle = setTimeout(() => {
+      api.get('/leads/client-lookup', { params: { identity: value } })
+        .then(response => {
+          if (cancelled) return
+          const match = response.data.data
+          if (!match) { setLookupState('notfound'); setMatchedStage(null); return }
+
+          setLookupState('found')
+          setMatchedStage(match.stage ?? null)
+          setCompanyName(match.company_name ?? '')
+          setContactPerson(match.contact_person ?? '')
+          setEmail(match.email ?? '')
+          setPhone(match.phone ?? '')
+          setStateProvince(match.state_province ?? '')
+          setCountry(match.country ?? '')
+          // Keep the inquiry with whoever already owns the relationship.
+          if (match.pic_id) setPicId(match.pic_id)
+        })
+        .catch(() => { if (!cancelled) setLookupState('notfound') })
+    }, 400)
+
+    return () => { cancelled = true; clearTimeout(handle) }
+  }, [identity, source])
+
+  // Either an identity that resolved to a client, or a company typed in by hand.
   const canSubmit = containerSizeId && containerConditionId
-    && (source === 'warmLead' ? Boolean(warmLeadId) : Boolean(companyName.trim()))
+    && (source === 'warmLead'
+      ? Boolean(warmLeadId)
+      : Boolean(companyName.trim()) || (lookupState === 'found' && Boolean(identity.trim())))
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -161,6 +198,26 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
             )
           ) : (
             <>
+              {/* An email or phone is enough -- everything below is pulled from the
+                  existing client record so the same company isn't retyped (and
+                  mistyped) into a parallel record. */}
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                  Client email or phone
+                </label>
+                <input
+                  className="inp"
+                  value={identity}
+                  onChange={event => setIdentity(event.target.value)}
+                  placeholder="e.g. buyer@company.com or (385) 707-9484"
+                />
+                <div style={{ fontSize: 11, marginTop: 5, color: lookupState === 'notfound' ? 'var(--amber)' : 'var(--t4)' }}>
+                  {lookupState === 'searching' && 'Looking up client…'}
+                  {lookupState === 'found' && matchedStage && `Matched an existing ${matchedStage.replace('_', ' ')} — details filled in below.`}
+                  {lookupState === 'notfound' && 'No existing client with that email or phone. Fill in the company below to create one.'}
+                  {lookupState === 'idle' && 'Enter an email or phone and the rest fills in automatically.'}
+                </div>
+              </div>
               <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Company</label><input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} required /></div>
               <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Contact person</label><input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} /></div>
               <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>PIC</label>
@@ -435,12 +492,19 @@ export const NewManualSaleDialog = ({ onClose, onSaved }: {
   const [email, setEmail] = useState('')
   const [picId, setPicId] = useState('')
   const [totalUnits, setTotalUnits] = useState(1)
-  const [buyingCost, setBuyingCost] = useState(0)
-  const [revenue, setRevenue] = useState(0)
+  // Entered per unit; the totals below are derived, never typed. Revenue is what the
+  // sale generates in full, profit is the per-unit margin across those units.
+  const [buyPerUnit, setBuyPerUnit] = useState(0)
+  const [sellPerUnit, setSellPerUnit] = useState(0)
   const [stateProvince, setStateProvince] = useState('')
   const [country, setCountry] = useState('')
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
+
+  const units = Number(totalUnits) || 0
+  const buyingCost = (Number(buyPerUnit) || 0) * units
+  const revenue = (Number(sellPerUnit) || 0) * units
+  const grossProfit = revenue - buyingCost
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -486,9 +550,22 @@ export const NewManualSaleDialog = ({ onClose, onSaved }: {
           <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>State/Province</label><input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} /></div>
           <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Country</label><input className="inp" value={country} onChange={event => setCountry(event.target.value)} /></div>
           <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Units</label><input className="inp" type="number" min="1" value={totalUnits} onChange={event => setTotalUnits(Number(event.target.value))} required /></div>
-          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Buying cost total</label><input className="inp" type="number" min="0" step="1" value={buyingCost || ''} onChange={event => setBuyingCost(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required /></div>
-          <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Revenue total</label><input className="inp" type="number" min="0" step="1" value={revenue || ''} onChange={event => setRevenue(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required /></div>
-          <div style={{ gridColumn: '1 / -1', padding: 10, borderRadius: 8, background: 'var(--s2)', color: revenue - buyingCost >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>Gross profit: ${(revenue - buyingCost).toLocaleString()}</div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Buying cost / unit</label><input className="inp" type="number" min="0" step="1" value={buyPerUnit || ''} onChange={event => setBuyPerUnit(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required /></div>
+          <div><label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Selling cost / unit</label><input className="inp" type="number" min="0" step="1" value={sellPerUnit || ''} onChange={event => setSellPerUnit(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required /></div>
+          <div style={{ gridColumn: '1 / -1', padding: 12, borderRadius: 8, background: 'var(--s2)', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 2 }}>Total buying cost</div>
+              <div style={{ fontWeight: 700, fontFamily: 'var(--mono)' }}>${buyingCost.toLocaleString()}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 2 }}>Revenue</div>
+              <div style={{ fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--brand)' }}>${revenue.toLocaleString()}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 2 }}>Gross profit</div>
+              <div style={{ fontWeight: 800, fontFamily: 'var(--mono)', color: grossProfit >= 0 ? 'var(--green)' : 'var(--red)' }}>${grossProfit.toLocaleString()}</div>
+            </div>
+          </div>
           <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
         </div>
         <div className="modal-footer">

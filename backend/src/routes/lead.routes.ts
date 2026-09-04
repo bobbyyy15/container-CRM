@@ -7,6 +7,7 @@ const router = Router();
 // GET queries
 router.get('/prospects', LeadController.getProspects);
 router.get('/warm-leads', LeadController.getWarmLeads);
+router.get('/client-lookup', LeadController.lookupClient);
 router.get('/inquiries', LeadController.getInquiries);
 router.get('/inquiries/pending-validation', requireRoles('admin', 'procurement'), LeadController.getPendingValidationTickets);
 router.get('/inquiries/board', requireRoles('admin', 'procurement'), LeadController.getInquiryBoard);

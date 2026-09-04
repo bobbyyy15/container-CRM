@@ -126,7 +126,35 @@ export class GoogleOAuthService {
     if (error) throw new Error(`Unable to disconnect Google account: ${error.message}`);
   }
 
-  static async syncProviderToken(userId: string, googleEmail: string, refreshToken: string) {
+  /**
+   * Stores the refresh token Supabase hands back from its own Google sign-in.
+   *
+   * The token arrives from the browser, so nothing about it can be taken on trust.
+   * It is redeemed against our own OAuth client first: Google rejects a refresh
+   * token that was issued to a different client, which proves the token is both
+   * valid and ours, and the account identity is then read from Google's response
+   * rather than from the request body. Previously the caller-supplied email was
+   * written straight to the credential row, which let a user store an arbitrary
+   * address -- and that address is what MailService uses as the outreach `from`
+   * and what System Settings displays as the connected account.
+   */
+  static async syncProviderToken(userId: string, refreshToken: string) {
+    const oauthClient = createOAuthClient();
+    oauthClient.setCredentials({ refresh_token: refreshToken });
+
+    let googleEmail: string | null | undefined;
+    try {
+      // Forces a refresh round-trip; throws if the token is invalid or foreign.
+      await oauthClient.getAccessToken();
+      const oauth2 = google.oauth2({ version: 'v2', auth: oauthClient });
+      const userInfo = await oauth2.userinfo.get();
+      googleEmail = userInfo.data.email;
+    } catch (error: any) {
+      throw new Error(`Google rejected that refresh token: ${error.message}`);
+    }
+
+    if (!googleEmail) throw new Error('Google did not return an email address for that token.');
+
     const { error } = await supabaseAdmin
       .from('google_oauth_credentials')
       .upsert({
