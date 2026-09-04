@@ -14,6 +14,8 @@ const companyName = `CRM E2E ${stamp}`;
 const noContactEmail = `crm-e2e-nocontact-${stamp}@example.test`;
 const noContactCompanyName = `CRM E2E No Contact ${stamp}`;
 const password = `E2e-${randomBytes(18).toString('base64url')}!`;
+const strangerEmail = `crm-e2e-stranger-${stamp}@example.test`;
+const strangerPassword = `E2e-Stranger-${randomBytes(18).toString('base64url')}!`;
 const batchIds = [randomUUID(), randomUUID()];
 const ids: Record<string, string | undefined> = {};
 const manualWarmLeadCompany = `CRM E2E Manual WL ${stamp}`;
@@ -50,10 +52,14 @@ const cleanup = async () => {
   await deleteWhereIn('domain_events', 'entity_id', [
     ids.prospect, ids.warmLead, ids.inquiry, ids.rejectedQuotation, ids.quotation, ids.sale,
     ids.manualWarmLead, ids.manualInquiry, ids.standaloneInquiry,
+    ids.backfilledWarmLead,
   ]);
   await deleteWhereIn('sales', 'id', [ids.sale]);
   await deleteWhereIn('quotation_items', 'quotation_id', [ids.rejectedQuotation, ids.quotation]);
   await deleteWhereIn('quotations', 'id', [ids.rejectedQuotation, ids.quotation]);
+  // A backfilled Warm Lead points to its source Inquiry, while ordinary Inquiries point
+  // to their source Warm Lead, so clean the two directions in dependency order.
+  await deleteWhereIn('warm_leads', 'id', [ids.backfilledWarmLead]);
   await deleteWhereIn('inquiries', 'id', [ids.inquiry, ids.manualInquiry, ids.standaloneInquiry]);
   await deleteWhereIn('warm_leads', 'id', [ids.warmLead, ids.manualWarmLead]);
   await deleteWhereIn('prospect_clients', 'id', [ids.prospect, ids.noContactProspect]);
@@ -67,7 +73,11 @@ const cleanup = async () => {
   }
   await deleteWhereIn('contacts', 'id', [ids.contact, ids.manualWarmLeadContact, ids.standaloneContact]);
   await deleteWhereIn('companies', 'id', [ids.company, ids.noContactCompany, ids.manualWarmLeadCompanyId, ids.standaloneCompanyId]);
-  await deleteWhereIn('pics', 'id', [ids.pic]);
+  await deleteWhereIn('pics', 'id', [ids.pic, ids.strangerPic]);
+  if (ids.strangerUser) {
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(ids.strangerUser);
+    if (error) throw new Error(`Cleanup stranger auth user: ${error.message}`);
+  }
   if (ids.user) {
     const { error } = await supabaseAdmin.auth.admin.deleteUser(ids.user);
     if (error) throw new Error(`Cleanup auth user: ${error.message}`);
@@ -200,7 +210,7 @@ const run = async () => {
   ids.manualWarmLead = manualWarm.data.id;
   ids.manualWarmLeadCompanyId = manualWarm.data.company_id;
   ids.manualWarmLeadContact = manualWarm.data.contact_id;
-  if (manualWarm.data.state_province !== 'CO' || manualWarm.data.source !== 'Referral' || manualWarm.data.previous_inquiry_indicator !== true) {
+  if (manualWarm.data.state_province !== 'CO' || manualWarm.data.source !== 'Referral' || manualWarm.data.previous_inquiry_indicator !== true || manualWarm.data.entry_origin !== 'direct') {
     throw new Error(`Manual warm lead did not persist expected fields: ${JSON.stringify(manualWarm.data)}`);
   }
 
@@ -227,6 +237,7 @@ const run = async () => {
   ids.manualInquiry = manualInquiry.data.id;
   if (
     manualInquiry.data.source_warm_lead_id !== ids.manualWarmLead
+    || manualInquiry.data.entry_origin !== 'warm_lead_conversion'
     || Number(manualInquiry.data.asking_price) !== 4200
     || manualInquiry.data.special_requirements !== 'Needs liftgate delivery'
     || manualInquiry.data.state_province !== 'CO'
@@ -252,9 +263,82 @@ const run = async () => {
   ids.standaloneInquiry = standaloneInquiry.data.id;
   ids.standaloneCompanyId = standaloneInquiry.data.company_id;
   ids.standaloneContact = standaloneInquiry.data.contact_id;
-  if (standaloneInquiry.data.source_warm_lead_id || standaloneInquiry.data.state_province !== 'TX' || standaloneInquiry.data.quantity !== 3) {
+  if (standaloneInquiry.data.source_warm_lead_id || standaloneInquiry.data.entry_origin !== 'direct' || standaloneInquiry.data.state_province !== 'TX' || standaloneInquiry.data.quantity !== 3) {
     throw new Error(`Standalone manual inquiry did not persist expected fields: ${JSON.stringify(standaloneInquiry.data)}`);
   }
+
+  // A different Sales Manager may see only their own silo and cannot backfill this PIC's
+  // direct Inquiry even if they know its UUID.
+  const { data: strangerCreated, error: strangerCreateError } = await supabaseAdmin.auth.admin.createUser({
+    email: strangerEmail,
+    password: strangerPassword,
+    email_confirm: true,
+    user_metadata: { username: `crm_e2e_stranger_${stamp}`, full_name: 'CRM E2E Stranger' },
+  });
+  if (strangerCreateError || !strangerCreated.user) throw strangerCreateError ?? new Error('Temporary stranger user was not created');
+  ids.strangerUser = strangerCreated.user.id;
+  const { error: strangerRoleError } = await supabaseAdmin.from('profiles').update({ role: 'sales_manager' }).eq('id', ids.strangerUser);
+  if (strangerRoleError) throw strangerRoleError;
+  const { data: strangerPic, error: strangerPicError } = await supabaseAdmin.from('pics').select('id').eq('profile_id', ids.strangerUser).eq('status', 'active').single();
+  if (strangerPicError || !strangerPic) throw strangerPicError ?? new Error('Stranger PIC was not created');
+  ids.strangerPic = strangerPic.id;
+  const { data: strangerSignedIn, error: strangerSignInError } = await publicClient.auth.signInWithPassword({ email: strangerEmail, password: strangerPassword });
+  if (strangerSignInError || !strangerSignedIn.session) throw strangerSignInError ?? new Error('Stranger could not sign in');
+
+  const crossPicBackfill = await fetch(`${apiBase}/leads/inquiries/${ids.standaloneInquiry}/add-to-warm-leads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${strangerSignedIn.session.access_token}` },
+  });
+  // Assert the specific code, not just "not 2xx" -- a 500 from an unexpected crash would
+  // have satisfied a bare !ok check while hiding a real failure. Owning the wrong PIC is
+  // an authorization failure and must read as one.
+  if (crossPicBackfill.status !== 403) {
+    throw new Error(`Cross-PIC Inquiry backfill should return 403, got ${crossPicBackfill.status}`);
+  }
+
+  // A missing Inquiry is a 404, not a malformed request.
+  const missingInquiryBackfill = await fetch(`${apiBase}/leads/inquiries/${randomUUID()}/add-to-warm-leads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+  });
+  if (missingInquiryBackfill.status !== 404) {
+    throw new Error(`Backfill of an unknown Inquiry should return 404, got ${missingInquiryBackfill.status}`);
+  }
+
+  // A malformed id must return one readable message, not a serialised ZodError.
+  const malformedBackfill = await fetch(`${apiBase}/leads/inquiries/not-a-uuid/add-to-warm-leads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+  });
+  const malformedBody = await malformedBackfill.json().catch(() => ({} as any));
+  if (malformedBackfill.status !== 400 || typeof malformedBody?.error?.message !== 'string' || malformedBody.error.message.trim().startsWith('[')) {
+    throw new Error(`Malformed Inquiry id should return a 400 with a readable message, got ${malformedBackfill.status}: ${JSON.stringify(malformedBody)}`);
+  }
+
+  const backfilled = await request(token, `/leads/inquiries/${ids.standaloneInquiry}/add-to-warm-leads`, { method: 'POST' });
+  ids.backfilledWarmLead = backfilled.data.id;
+  if (backfilled.data.source_inquiry_id !== ids.standaloneInquiry || backfilled.data.entry_origin !== 'inquiry_backfill' || backfilled.data.company_id !== ids.standaloneCompanyId) {
+    throw new Error(`Inquiry backfill did not preserve identity and origin: ${JSON.stringify(backfilled.data)}`);
+  }
+
+  const repeatedBackfill = await request(token, `/leads/inquiries/${ids.standaloneInquiry}/add-to-warm-leads`, { method: 'POST' });
+  if (repeatedBackfill.data.id !== ids.backfilledWarmLead) throw new Error('Repeated Inquiry backfill created a duplicate Warm Lead');
+
+  const directInquiryList = await request(token, `/leads/inquiries?search=${encodeURIComponent(`crm-e2e-standalone-${stamp}@example.test`)}`);
+  const directInquiryRow = directInquiryList.data.find((row: any) => row.id === ids.standaloneInquiry);
+  const linkedBackfill = Array.isArray(directInquiryRow?.backfilled_warm_leads)
+    ? directInquiryRow.backfilled_warm_leads[0]
+    : directInquiryRow?.backfilled_warm_leads;
+  if (directInquiryRow?.entry_origin !== 'direct' || linkedBackfill?.id !== ids.backfilledWarmLead || directInquiryRow?.status !== 'Pending Validation') {
+    throw new Error(`Backfill changed the Inquiry or failed to expose its relationship: ${JSON.stringify(directInquiryRow)}`);
+  }
+
+  const quoteDirectWhilePending = await fetch(`${apiBase}/deals/quotations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ inquiry_id: ids.standaloneInquiry, items: [{ description: 'Must remain blocked', quantity: 1, unit_price: 1 }] }),
+  });
+  if (quoteDirectWhilePending.ok) throw new Error('Direct Inquiry bypassed Procurement validation after Warm Lead backfill');
 
   const inquiry = await request(token, `/leads/warm-leads/${ids.warmLead}/create-inquiry`, {
     method: 'POST',
@@ -382,7 +466,7 @@ const run = async () => {
     throw new Error('PATCH status allowed modifying an already-Converted quotation');
   }
 
-  console.log('PASS hosted API: auth -> duplicate-safe import -> prospect -> warm lead (+reason/channel, status filter) -> manual warm lead -> manual inquiries (linked + standalone) -> inquiry -> reject+requote -> accepted -> sale -> immutability guards');
+  console.log('PASS hosted API: auth -> duplicate-safe import -> prospect -> direct/converted warm leads -> linked/direct inquiries -> idempotent inquiry backfill + PIC guard -> validation -> quotation -> sale -> immutability guards');
 };
 
 void (async () => {

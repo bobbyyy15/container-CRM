@@ -74,7 +74,7 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   const pics = usePics()
   // A Warm Lead usually starts the chain, but an existing customer/contact can get a fresh
   // inquiry with no Warm Lead in between at all.
-  const [source, setSource] = useState<'warmLead' | 'manual'>('warmLead')
+  const [source, setSource] = useState<'warmLead' | 'manual'>(initialId ? 'warmLead' : 'manual')
   const [warmLeadId, setWarmLeadId] = useState(initialId ?? warmLeads[0]?.id ?? '')
   const [identity, setIdentity] = useState('')
   const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'found' | 'notfound'>('idle')
@@ -183,12 +183,12 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
   }
 
   return (
-    <Modal title="Create inquiry" description="From a Warm Lead, or directly for an existing contact/customer." onClose={onClose}>
+    <Modal title="Create inquiry" description="Start from a Warm Lead or record a direct customer inquiry." onClose={onClose}>
       <form onSubmit={submit}>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="tabs" style={{ gridColumn: '1 / -1', padding: 0 }}>
             <button type="button" className={`tab${source === 'warmLead' ? ' active' : ''}`} onClick={() => setSource('warmLead')}>From Warm Lead</button>
-            <button type="button" className={`tab${source === 'manual' ? ' active' : ''}`} onClick={() => setSource('manual')}>Manual / Existing Customer</button>
+            <button type="button" className={`tab${source === 'manual' ? ' active' : ''}`} onClick={() => setSource('manual')}>Direct Inquiry</button>
           </div>
 
           {source === 'warmLead' ? (
@@ -203,7 +203,7 @@ export const NewInquiryDialog = ({ warmLeads, initialId, onClose, onSaved }: {
               </>
             ) : (
               <div style={{ gridColumn: '1 / -1', padding: 12, background: 'var(--brand-bg)', borderRadius: 8, fontSize: 12 }}>
-                There are no active warm leads. Convert a Prospect, add a Warm Lead manually, or switch to "Manual / Existing Customer".
+                There are no active warm leads. Convert a Prospect, add a Warm Lead directly, or switch to "Direct Inquiry".
               </div>
             )
           ) : (
@@ -335,7 +335,7 @@ export const NewWarmLeadDialog = ({ onClose, onSaved }: {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (!companyName.trim()) return
+    if (!companyName.trim() || (!contactPerson.trim() && !phone.trim() && !email.trim())) return
     setWorking(true)
     setError('')
     try {
@@ -370,6 +370,7 @@ export const NewWarmLeadDialog = ({ onClose, onSaved }: {
             <FieldLabel label="Company" required />
             <input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder="Company Name" required />
           </div>
+          <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--t4)', marginTop: -6 }}>Add at least a contact person, phone, or email so this lead can be identified without a Prospect record.</div>
           <div>
             <FieldLabel label="Contact person" optional />
             <input className="inp" value={contactPerson} onChange={event => setContactPerson(event.target.value)} placeholder="Full Name" />
@@ -421,7 +422,7 @@ export const NewWarmLeadDialog = ({ onClose, onSaved }: {
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={working || !companyName.trim()}>{working ? 'Creating…' : 'Create Warm Lead'}</button>
+          <button className="btn btn-primary" disabled={working || !companyName.trim() || (!contactPerson.trim() && !phone.trim() && !email.trim())}>{working ? 'Creating…' : 'Create Warm Lead'}</button>
         </div>
       </form>
     </Modal>

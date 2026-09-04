@@ -114,6 +114,28 @@ export class LeadService {
     return data;
   }
 
+  static async addInquiryToWarmLeads(inquiryId: string, actorId: string, actorPicId: string) {
+    const { data: inquiry, error: fetchError } = await supabaseAdmin
+      .from('inquiries')
+      .select('id, pic_id')
+      .eq('id', inquiryId)
+      .maybeSingle();
+    if (fetchError) throw new Error(`Failed to look up the inquiry: ${fetchError.message}`);
+    if (!inquiry) throw new Error('Inquiry not found.');
+    if (inquiry.pic_id !== actorPicId) {
+      throw new Error('You can only add inquiries owned by your own PIC to Warm Leads.');
+    }
+
+    const { data, error } = await supabaseAdmin
+      .rpc('create_warm_lead_from_inquiry', {
+        p_inquiry_id: inquiryId,
+        p_actor_id: actorId,
+      })
+      .single();
+    if (error) throw new Error(`Failed to add inquiry to Warm Leads: ${error.message}`);
+    return data;
+  }
+
   static async removePipelineEntry(stage: string, entityId: string, actorId: string, reason: string) {
     const { data, error } = await supabaseAdmin.rpc('remove_pipeline_entry', {
       p_stage: stage,

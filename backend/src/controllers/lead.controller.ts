@@ -11,6 +11,7 @@ import {
   AssignPicToEntrySchema,
   BulkRemovedEntriesSchema,
   ValidateInquiryTicketSchema,
+  AddInquiryToWarmLeadsSchema,
 } from '../schemas/lead.schema';
 import { supabaseAdmin } from '../config/supabase';
 
@@ -43,7 +44,8 @@ const listActiveLeads = async (
   const select = table === 'inquiries'
     ? '*, companies(*), contacts(*), pics(name), '
       + 'container_sizes!container_size_id(id, name), container_conditions!container_condition_id(id, name), '
-      + 'alt_size:container_sizes!alt_container_size_id(id, name), alt_condition:container_conditions!alt_container_condition_id(id, name)'
+      + 'alt_size:container_sizes!alt_container_size_id(id, name), alt_condition:container_conditions!alt_container_condition_id(id, name), '
+      + 'backfilled_warm_leads:warm_leads!source_inquiry_id(id)'
     : '*, companies(*), contacts(*), pics(name)';
   let dbQuery = supabaseAdmin
     .from(table)
@@ -249,6 +251,44 @@ export class LeadController {
         success: false,
         error: { message: error.message }
       });
+    }
+  }
+
+  static async addInquiryToWarmLeads(req: Request, res: Response) {
+    try {
+      // .parse() would surface the raw ZodError JSON to the caller; every other
+      // endpoint returns a single readable message.
+      const parsed = AddInquiryToWarmLeadsSchema.safeParse({ inquiryId: req.params.entityId });
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'A valid inquiry id is required.' },
+        });
+      }
+
+      const picId = requirePicId(req, res);
+      if (!picId) return;
+
+      const warmLead = await LeadService.addInquiryToWarmLeads(
+        parsed.data.inquiryId,
+        req.auth!.user.id,
+        picId,
+      );
+      res.status(201).json({
+        success: true,
+        data: warmLead,
+        message: 'Inquiry added to Warm Leads',
+      });
+    } catch (error: any) {
+      // Failing to own the inquiry is an authorization error, not a malformed request:
+      // returning 400 made it indistinguishable from a bad payload, and inconsistent
+      // with the 403 requireRoles already returns for procurement/operations. Message
+      // matching follows the same pattern as inventory.controller.
+      const message = String(error?.message ?? 'Failed to add the inquiry to Warm Leads.');
+      const status = /not found/i.test(message) ? 404
+        : /owned by your own PIC|active Admin or Sales Manager/i.test(message) ? 403
+        : 400;
+      res.status(status).json({ success: false, error: { message } });
     }
   }
 

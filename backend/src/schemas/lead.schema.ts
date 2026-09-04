@@ -34,7 +34,10 @@ export const CreateManualWarmLeadSchema = z.object({
   source: z.string().trim().max(100).optional(),
   followUpDate: z.string().date().optional(),
   followUpNotes: z.string().trim().max(2000).optional(),
-});
+}).refine(
+  data => Boolean(data.contactPerson) || Boolean(data.phone) || Boolean(data.email),
+  { message: 'A contact person, phone, or email is required', path: ['contactPerson'] },
+);
 
 export const CreateManualInquirySchema = z.object({
   // Either link to an existing Warm Lead, or (when omitted) create/match the company and
@@ -100,6 +103,10 @@ export const AssignPicToEntrySchema = z.object({
   stage: z.enum(['prospect', 'warm_lead']),
   entityId: z.string().uuid(),
   picId: z.string().uuid(),
+});
+
+export const AddInquiryToWarmLeadsSchema = z.object({
+  inquiryId: z.string().uuid(),
 });
 
 export const BulkRemovedEntriesSchema = z.object({

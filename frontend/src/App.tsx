@@ -342,6 +342,11 @@ const mapPipelineRow = (p: any) => ({
   lifecycleStatus: p.lifecycle_status || 'active',
   conversionReason: p.conversion_reason || '',
   conversionChannel: p.conversion_channel || '',
+  entryPath: p.entry_origin === 'inquiry_backfill'
+    ? 'From Inquiry'
+    : p.entry_origin === 'prospect_conversion'
+      ? 'From Prospect'
+      : 'Direct Entry',
 })
 
 export const useWarmLeads = (revision = 0) => {
@@ -383,6 +388,11 @@ const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') => {
           neededBy: row.needed_by_date ? new Date(row.needed_by_date).toLocaleDateString() : '—',
           status: row.status || 'Under Review',
           pic: row.pics?.name || 'Unassigned',
+          sourceWarmLeadId: row.source_warm_lead_id || null,
+          backfilledWarmLeadId: Array.isArray(row.backfilled_warm_leads)
+            ? row.backfilled_warm_leads[0]?.id || null
+            : row.backfilled_warm_leads?.id || null,
+          entryOrigin: row.entry_origin || (row.source_warm_lead_id ? 'warm_lead_conversion' : 'direct'),
           rejectionReason: row.rejection_reason || '',
           altSize: row.alt_size?.name || '',
           altCondition: row.alt_condition?.name || '',
@@ -2059,6 +2069,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const COLS = [
     { key: 'A', label: 'Date Added', field: 'added', w: 108 },
     { key: 'B', label: 'PIC', field: 'pic', w: 56 },
+    ...(mode === 'warm' ? [{ key: 'B2', label: 'Entry Path', field: 'entryPath', w: 112 }] : []),
     { key: 'C', label: 'Category', field: 'cat', w: 90, badge: true },
     { key: 'D', label: 'SMS Deliv.', field: 'sms', w: 100, badge: true },
     { key: 'E', label: 'Email Deliv.', field: 'email', w: 148, badge: true },
@@ -2473,6 +2484,7 @@ const InquiryList = () => {
   const [picFilter, setPicFilter] = useState('')
   const pics = [...new Set(INQUIRIES.map(r => r.pic).filter(Boolean))].sort() as string[]
   const [actionError, setActionError] = useState('')
+  const [addingWarmLeadId, setAddingWarmLeadId] = useState<string | null>(null)
 
   const applyAlternative = async (id: string) => {
     setActionError('')
@@ -2481,6 +2493,20 @@ const InquiryList = () => {
       setRevision(v => v + 1)
     } catch (err: any) {
       setActionError(err.response?.data?.error?.message ?? 'Could not apply the alternative offer.')
+    }
+  }
+
+  const addToWarmLeads = async (id: string) => {
+    setActionError('')
+    setAddingWarmLeadId(id)
+    try {
+      await api.post(`/leads/inquiries/${id}/add-to-warm-leads`)
+      toast('Inquiry added to Warm Leads.', 'success')
+      setRevision(value => value + 1)
+    } catch (err: any) {
+      setActionError(err.response?.data?.error?.message ?? 'Could not add the inquiry to Warm Leads.')
+    } finally {
+      setAddingWarmLeadId(null)
     }
   }
 
@@ -2614,7 +2640,7 @@ const InquiryList = () => {
                   setContextMenu({ x: e.clientX, y: e.clientY, colField: 'contact', colLabel: 'Contacts' });
                 }}
               >Contact</th>
-              <th>Category</th><th>Size</th><th className="r">Qty</th><th>Needed By</th><th>Status</th><th>PIC</th>
+              <th>Category</th><th>Size</th><th className="r">Qty</th><th>Needed By</th><th>Entry Path</th><th>Status</th><th>PIC</th>
               <th className="col-actions">Actions</th>
             </tr>
           </thead>
@@ -2638,6 +2664,11 @@ const InquiryList = () => {
                 <td className="mono">{row.size}</td>
                 <td className="r mono bold">{row.qty}</td>
                 <td className="mono">{row.neededBy}</td>
+                <td>
+                  <span style={{ fontSize: 11.5, color: row.entryOrigin === 'direct' ? 'var(--purple)' : 'var(--t3)', fontWeight: 600 }}>
+                    {row.entryOrigin === 'direct' ? 'Direct Inquiry' : 'From Warm Lead'}
+                  </span>
+                </td>
                 <td><Badge status={row.status as BadgeStatus} /></td>
                 <td><ChipPIC label={row.pic} /></td>
                 <td className="col-actions">
@@ -2648,6 +2679,20 @@ const InquiryList = () => {
                     )}
                     {row.status === 'Validation Rejected' && row.hasAlternative && (
                       <Btn variant="ghost" sm style={{ color: 'var(--green)' }} onClick={() => applyAlternative(row.id)}>Use Alternative</Btn>
+                    )}
+                    {!row.sourceWarmLeadId && !row.backfilledWarmLeadId && (
+                      <Btn
+                        variant="ghost"
+                        sm
+                        disabled={addingWarmLeadId === row.id}
+                        style={{ color: 'var(--brand)' }}
+                        onClick={() => addToWarmLeads(row.id)}
+                      >
+                        {addingWarmLeadId === row.id ? 'Adding...' : '+ Warm Lead'}
+                      </Btn>
+                    )}
+                    {row.backfilledWarmLeadId && (
+                      <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>Warm Lead Added</span>
                     )}
                   </div>
                 </td>
@@ -2664,6 +2709,7 @@ const InquiryList = () => {
             { label: 'Company', value: viewRow.company },
             { label: 'Contact', value: viewRow.contact },
             { label: 'Channel', value: viewRow.channel },
+            { label: 'Entry path', value: viewRow.entryOrigin === 'direct' ? 'Direct Inquiry' : 'From Warm Lead' },
             { label: 'Status', value: <Badge status={viewRow.status as BadgeStatus} /> },
             { label: 'Category', value: viewRow.category },
             { label: 'Container size', value: viewRow.size },
