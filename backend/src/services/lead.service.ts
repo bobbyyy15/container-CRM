@@ -169,13 +169,14 @@ export class LeadService {
     return data;
   }
 
-  static async bulkAddRemovedEntries(text: string, reason: string | undefined, actorId: string) {
+  static async bulkAddRemovedEntries(text: string, reason: string | undefined, actorId: string, blockCompany: boolean = false) {
     const identifiers = text.split('\n').map(line => line.trim()).filter(Boolean).slice(0, 1000);
     if (identifiers.length === 0) return [];
     const { data, error } = await supabaseAdmin.rpc('bulk_add_removed_entries', {
       p_identifiers: identifiers,
       p_reason: reason ?? null,
       p_actor_id: actorId,
+      p_block_company: blockCompany,
     });
     if (error) throw new Error(`Failed to process the pasted list: ${error.message}`);
     return data;

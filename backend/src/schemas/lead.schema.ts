@@ -113,6 +113,7 @@ export const AddInquiryToWarmLeadsSchema = z.object({
 export const BulkRemovedEntriesSchema = z.object({
   text: z.string().trim().min(1).max(50000),
   reason: z.string().trim().max(500).optional(),
+  blockCompany: z.boolean().optional().default(false),
 });
 
 export const ValidateInquiryTicketSchema = z.object({

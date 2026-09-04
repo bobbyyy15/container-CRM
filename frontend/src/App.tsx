@@ -4310,6 +4310,7 @@ const DailyTasks = () => {
 const RemovedSheet = () => {
   const [showPaste, setShowPaste] = useState(false)
   const [pasteText, setPasteText] = useState('')
+  const [blockCompany, setBlockCompany] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [revision, setRevision] = useState(0)
   const [data, setData] = useState<any[]>([])
@@ -4321,10 +4322,19 @@ const RemovedSheet = () => {
     if (!detectedCount) return
     setSubmitting(true)
     try {
-      const res = await api.post('/leads/removed/bulk', { text: pasteText, reason: 'Added from Removed Sheet' })
+      const res = await api.post('/leads/removed/bulk', {
+        text: pasteText,
+        reason: blockCompany ? 'Added from Removed Sheet (Company Block)' : 'Added from Removed Sheet',
+        blockCompany,
+      })
       const matched = (res.data.data || []).filter((r: any) => r.company_name || r.contact_name).length
-      toast(`${detectedCount} ${detectedCount === 1 ? 'entry' : 'entries'} suppressed — ${matched} matched an existing CRM contact.`, 'success')
+      if (blockCompany) {
+        toast(`${detectedCount} ${detectedCount === 1 ? 'entry' : 'entries'} processed — matched companies and all associated customers removed and blocked.`, 'success')
+      } else {
+        toast(`${detectedCount} ${detectedCount === 1 ? 'entry' : 'entries'} suppressed — ${matched} matched an existing CRM contact.`, 'success')
+      }
       setPasteText('')
+      setBlockCompany(false)
       setShowPaste(false)
       setRevision(r => r + 1)
     } catch (err: any) {
@@ -4416,8 +4426,33 @@ const RemovedSheet = () => {
             </div>
             <div className="modal-body">
               <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 12 }}>Paste phone numbers, email addresses, or company names (one per line). The system will find and update matching CRM records.</p>
-              <textarea className="inp" rows={8} autoFocus value={pasteText} onChange={e => setPasteText(e.target.value)} placeholder={'+1-206-555-0088\nbounce@example.com\nAcme Industrial Corp\n+1-701-555-0341'} style={{ height: 'auto', padding: '10px 12px', fontFamily: 'var(--mono)', fontSize: 12 }} />
+              <textarea
+                className="inp"
+                rows={8}
+                autoFocus
+                value={pasteText}
+                onChange={e => setPasteText(e.target.value)}
+                placeholder={'+1-206-555-0088\nbounce@example.com\nAcme Industrial Corp\n+1-701-555-0341'}
+                style={{ height: 'auto', padding: '10px 12px', fontFamily: 'var(--mono)', fontSize: 12 }}
+              />
               <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--t4)' }}>Detected: {detectedCount} {detectedCount === 1 ? 'entry' : 'entries'}</div>
+
+              <div style={{ marginTop: 14, padding: '10px 12px', background: 'var(--s2)', borderRadius: 8, border: '1px solid var(--border-s)' }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
+                  <input
+                    type="checkbox"
+                    checked={blockCompany}
+                    onChange={e => setBlockCompany(e.target.checked)}
+                    style={{ accentColor: 'var(--red)', width: 16, height: 16, marginTop: 2, cursor: 'pointer' }}
+                  />
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>Remove all customers on same company</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--t3)', marginTop: 2 }}>
+                      If checked, any company matched from the pasted details will have all associated customers, contacts, and pipeline records removed and blocked from outreach.
+                    </div>
+                  </div>
+                </label>
+              </div>
             </div>
             <div className="modal-footer">
               <Btn variant="ghost" onClick={() => setShowPaste(false)}>Cancel</Btn>
