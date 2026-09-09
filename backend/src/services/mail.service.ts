@@ -1,6 +1,7 @@
-import nodemailer from 'nodemailer';
+import { google } from 'googleapis';
 import { getGoogleOAuthConfig } from '../config/env';
 import { supabaseAdmin } from '../config/supabase';
+import { buildGmailRawMessage } from './gmail-message';
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
@@ -50,33 +51,32 @@ export class MailService {
     if (suppressionError) throw new Error(`Could not verify outreach suppression: ${suppressionError.message}`);
     if (isRemoved) throw new Error('Outreach is blocked because this identity is on the removed/suppression list.');
 
-    const transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      auth: {
-        type: 'OAuth2',
-        user: credential.google_email,
-        clientId: googleConfig.clientId,
-        clientSecret: googleConfig.clientSecret,
-        refreshToken: credential.refresh_token,
-      },
-    });
+    const oauthClient = new google.auth.OAuth2(
+      googleConfig.clientId,
+      googleConfig.clientSecret,
+      googleConfig.redirectUri,
+    );
+    oauthClient.setCredentials({ refresh_token: credential.refresh_token });
+    const gmail = google.gmail({ version: 'v1', auth: oauthClient });
 
     try {
-      const info = await transporter.sendMail({
-        from: credential.google_email,
-        to,
-        subject,
-        html,
+      // The OAuth flow grants gmail.send, which authorizes Gmail API delivery. It
+      // does not grant SMTP's broader https://mail.google.com/ scope.
+      const response = await gmail.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          raw: buildGmailRawMessage(credential.google_email, to, subject, html),
+        },
       });
+      const messageId = response.data.id;
+      if (!messageId) throw new Error('Google accepted the request but returned no message ID.');
 
       await supabaseAdmin.from('domain_events').insert({
         entity_type: 'prospect',
         entity_id: prospectId,
         event_type: 'email_sent',
         actor_id: actorId,
-        payload: { messageId: info.messageId, to, subject, sender: credential.google_email },
+        payload: { messageId, to, subject, sender: credential.google_email },
       });
 
       // Count it against today's outreach. The mail is already gone, so a failure
@@ -91,7 +91,7 @@ export class MailService {
         console.error('Email sent but not counted in daily_activity:', activityError.message);
       }
 
-      return { success: true, messageId: info.messageId };
+      return { success: true, messageId };
     } catch (error: any) {
       await supabaseAdmin.from('domain_events').insert({
         entity_type: 'prospect',

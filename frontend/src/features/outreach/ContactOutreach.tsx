@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import { toast, askConfirm, askReason } from '../../lib/notify'
 import { Ic, I } from '../../components/ui/icons'
@@ -11,6 +11,21 @@ import type { Screen, BadgeStatus } from '../../app/types'
 import { EligDot } from '../../components/ui/primitives'
 import { useProspects } from '../../hooks/useProspects'
 
+type EmailSendResult = {
+  id: string
+  label: string
+  email: string
+  status: 'sent' | 'failed' | 'not_sent'
+  message?: string
+}
+
+const MAX_BULK_EMAILS = 100
+const BULK_SEND_DELAY_MS = 1200
+
+const recipientLabel = (row: any) => row.contact || row.company || row.emailAddr
+const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds))
+const shouldStopBulkSend = (message: string) => /invalid_client|invalid_grant|oauth|authenticat|quota|rate.?limit|too many|daily.*limit|4\.7\.0|429/i.test(message)
+
 const ContactOutreach = () => {
   // The revision counter exists for the Refresh button -- useProspects re-fetches
   // when it changes, which a cache invalidation alone would not trigger.
@@ -19,11 +34,15 @@ const ContactOutreach = () => {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [copied, setCopied] = useState('')
-  const [emailRow, setEmailRow] = useState<any>(null)
+  const [emailRows, setEmailRows] = useState<any[]>([])
   const [emailSubject, setEmailSubject] = useState('')
   const [emailBody, setEmailBody] = useState('')
   const [sendingEmail, setSendingEmail] = useState(false)
   const [emailError, setEmailError] = useState('')
+  const [sendResults, setSendResults] = useState<EmailSendResult[]>([])
+  const [sendProgress, setSendProgress] = useState({ completed: 0, total: 0, current: '' })
+  const [stopRequested, setStopRequested] = useState(false)
+  const stopBulkRef = useRef(false)
 
   const term = search.trim().toLowerCase()
   const filtered = prospectsData.filter(r =>
@@ -44,6 +63,29 @@ const ContactOutreach = () => {
   // Copying operates on the selection when one exists, otherwise every currently-filtered row
   // -- so the buttons are useful with or without an explicit selection.
   const activeRows = selected.length > 0 ? withElig.filter(r => selected.includes(r.id)) : withElig
+  const selectedEmailRows = withElig.filter(r => selected.includes(r.id) && r.emailable)
+
+  const openEmailComposer = (rows: any[]) => {
+    if (rows.length > MAX_BULK_EMAILS) {
+      toast(`Select at most ${MAX_BULK_EMAILS} eligible contacts per email batch.`, 'error')
+      return
+    }
+    setEmailRows(rows)
+    setEmailError('')
+    setSendResults([])
+    setSendProgress({ completed: 0, total: rows.length, current: '' })
+    setStopRequested(false)
+    stopBulkRef.current = false
+  }
+
+  const closeEmailComposer = () => {
+    if (sendingEmail) return
+    setEmailRows([])
+    setEmailSubject('')
+    setEmailBody('')
+    setEmailError('')
+    setSendResults([])
+  }
 
   const handleCopy = (type: string, build: (r: typeof withElig[number]) => string | null, eligibleOf: (r: typeof withElig[number]) => boolean) => {
     const eligible = activeRows.filter(r => r.cat !== 'Removed' && eligibleOf(r))
@@ -57,48 +99,123 @@ const ContactOutreach = () => {
 
   const sendEmail = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!emailRow) return
+    if (emailRows.length === 0) return
+
+    if (emailRows.length > 1) {
+      const { confirmed } = await askConfirm({
+        title: `Send ${emailRows.length} separate emails?`,
+        message: 'Each eligible prospect will receive an individual message. Keep this page open until the batch finishes.',
+        confirmLabel: 'Start sending',
+      })
+      if (!confirmed) return
+    }
+
     setSendingEmail(true)
     setEmailError('')
-    try {
-      await api.post('/outreach/email', {
-        prospectId: emailRow.id,
-        to: emailRow.emailAddr,
-        subject: emailSubject,
-        body: emailBody.replace(/\n/g, '<br />'),
-      })
-      toast(`Email sent to ${emailRow.contact || emailRow.company}`, 'success')
-      setEmailRow(null)
-      setEmailSubject('')
-      setEmailBody('')
-    } catch (error: any) {
-      setEmailError(error.response?.data?.error?.message ?? error.message ?? 'Email could not be sent.')
-    } finally {
-      setSendingEmail(false)
+    setSendResults([])
+    setSendProgress({ completed: 0, total: emailRows.length, current: '' })
+    setStopRequested(false)
+    stopBulkRef.current = false
+
+    const results: EmailSendResult[] = []
+    let blockingMessage = ''
+
+    for (let index = 0; index < emailRows.length; index += 1) {
+      const row = emailRows[index]
+      const label = recipientLabel(row)
+
+      if (stopBulkRef.current || blockingMessage) {
+        results.push({
+          id: row.id,
+          label,
+          email: row.emailAddr,
+          status: 'not_sent',
+          message: blockingMessage || 'Stopped by user',
+        })
+        setSendResults([...results])
+        setSendProgress({ completed: results.length, total: emailRows.length, current: '' })
+        continue
+      }
+
+      setSendProgress({ completed: results.length, total: emailRows.length, current: label })
+      try {
+        await api.post('/outreach/email', {
+          prospectId: row.id,
+          to: row.emailAddr,
+          subject: emailSubject,
+          body: emailBody.replace(/\n/g, '<br />'),
+        })
+        results.push({ id: row.id, label, email: row.emailAddr, status: 'sent' })
+      } catch (error: any) {
+        const message = error.response?.data?.error?.message ?? error.message ?? 'Email could not be sent.'
+        results.push({ id: row.id, label, email: row.emailAddr, status: 'failed', message })
+        if (shouldStopBulkSend(message)) {
+          blockingMessage = `Batch stopped: ${message}`
+          setEmailError(blockingMessage)
+        }
+      }
+
+      setSendResults([...results])
+      setSendProgress({ completed: results.length, total: emailRows.length, current: '' })
+      if (index < emailRows.length - 1 && !stopBulkRef.current && !blockingMessage) {
+        await wait(BULK_SEND_DELAY_MS)
+      }
     }
+
+    const sentIds = new Set(results.filter(result => result.status === 'sent').map(result => result.id))
+    const sent = results.filter(result => result.status === 'sent').length
+    const failed = results.filter(result => result.status === 'failed').length
+    const notSent = results.filter(result => result.status === 'not_sent').length
+    setSelected(current => current.filter(id => !sentIds.has(id)))
+    setSendingEmail(false)
+    setSendProgress({ completed: results.length, total: emailRows.length, current: '' })
+    toast(`${sent} sent, ${failed} failed${notSent ? `, ${notSent} not sent` : ''}.`, failed || notSent ? 'error' : 'success')
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {emailRow && (
-        <div className="overlay" role="presentation" onMouseDown={() => !sendingEmail && setEmailRow(null)}>
+      {emailRows.length > 0 && (
+        <div className="overlay" role="presentation" onMouseDown={closeEmailComposer}>
           <form className="modal outreach-compose" onSubmit={sendEmail} onMouseDown={event => event.stopPropagation()}>
-            <div className="modal-header"><div><div className="modal-title">Compose outreach email</div><div className="modal-desc">Sending through your connected Google account to {emailRow.emailAddr}.</div></div><button type="button" className="btn btn-ghost" onClick={() => setEmailRow(null)} aria-label="Close">×</button></div>
+            <div className="modal-header"><div><div className="modal-title">Compose outreach email</div><div className="modal-desc">{emailRows.length === 1 ? `Sending through your connected Google account to ${emailRows[0].emailAddr}.` : `${emailRows.length} separate emails through your connected Google account. Recipients will not see each other.`}</div></div><button type="button" className="btn btn-ghost" disabled={sendingEmail} onClick={closeEmailComposer} aria-label="Close">×</button></div>
             <div className="modal-body" style={{ display: 'grid', gap: 12 }}>
               {emailError && <div style={{ padding: 10, borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12 }}>{emailError}</div>}
-              <label><span className="form-label">Subject</span><input className="inp" required maxLength={200} value={emailSubject} onChange={e => setEmailSubject(e.target.value)} /></label>
-              <label><span className="form-label">Message</span><textarea className="inp" required rows={8} value={emailBody} onChange={e => setEmailBody(e.target.value)} /></label>
+              <label><span className="form-label">Subject</span><input className="inp" required maxLength={200} disabled={sendingEmail || sendResults.length > 0} value={emailSubject} onChange={e => setEmailSubject(e.target.value)} /></label>
+              <label><span className="form-label">Message</span><textarea className="inp" required rows={8} disabled={sendingEmail || sendResults.length > 0} value={emailBody} onChange={e => setEmailBody(e.target.value)} /></label>
+              {(sendingEmail || sendResults.length > 0) && (
+                <div className="bulk-email-progress">
+                  <div className="bulk-email-progress-head">
+                    <strong>{sendingEmail ? (sendProgress.current ? `Sending to ${sendProgress.current}` : 'Preparing next email') : 'Batch complete'}</strong>
+                    <span>{sendProgress.completed} / {sendProgress.total}</span>
+                  </div>
+                  <div className="bulk-email-progress-track"><span style={{ width: `${sendProgress.total ? (sendProgress.completed / sendProgress.total) * 100 : 0}%` }} /></div>
+                </div>
+              )}
+              {sendResults.length > 0 && (
+                <div className="bulk-email-results" aria-live="polite">
+                  {sendResults.map(result => (
+                    <div className="bulk-email-result" key={result.id}>
+                      <span className={`bulk-email-status ${result.status}`}>{result.status === 'sent' ? 'Sent' : result.status === 'failed' ? 'Failed' : 'Not sent'}</span>
+                      <span><strong>{result.label}</strong><small>{result.email}{result.message ? ` — ${result.message}` : ''}</small></span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={() => setEmailRow(null)}>Cancel</button><button className="btn btn-primary" disabled={sendingEmail || !emailSubject.trim() || !emailBody.trim()}>{sendingEmail ? 'Sending…' : 'Send email'}</button></div>
+            <div className="modal-footer">
+              {sendingEmail ? <button type="button" className="btn btn-ghost" disabled={stopRequested} onClick={() => { stopBulkRef.current = true; setStopRequested(true) }}>{stopRequested ? 'Stopping…' : 'Stop after current'}</button> : <button type="button" className="btn btn-ghost" onClick={closeEmailComposer}>{sendResults.length ? 'Close' : 'Cancel'}</button>}
+              {sendResults.length === 0 && <button className="btn btn-primary" disabled={sendingEmail || !emailSubject.trim() || !emailBody.trim()}>{sendingEmail ? `Sending ${sendProgress.completed + 1} of ${sendProgress.total}…` : emailRows.length === 1 ? 'Send email' : `Send ${emailRows.length} separate emails`}</button>}
+            </div>
           </form>
         </div>
       )}
       <div className="page-header">
         <div>
           <div className="page-title">Contact Outreach Sheet</div>
-          <div className="page-desc">Select contacts (or leave none selected to use every row below) and copy for RingCentral, email, or SMS campaigns.</div>
+          <div className="page-desc">Select eligible contacts to send separate Gmail messages, or copy contact details for RingCentral and SMS campaigns.</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {selected.length > 0 && <Btn variant="primary" sm disabled={selectedEmailRows.length === 0 || sendingEmail} onClick={() => openEmailComposer(selectedEmailRows)}><Ic n={I.mail} size={13} /> Compose Selected ({selectedEmailRows.length})</Btn>}
           <Btn variant="secondary" sm onClick={() => handleCopy('Numbers', r => r.phone || null, r => r.callable || r.textable)}><Ic n={I.copy} size={13} /> Copy Numbers</Btn>
           <Btn variant="secondary" sm onClick={() => handleCopy('Emails', r => r.emailAddr || null, r => r.emailable)}><Ic n={I.copy} size={13} /> Copy Emails</Btn>
           <Btn variant="secondary" sm onClick={() => handleCopy('Name + Number', r => r.phone ? `${r.contact || r.company}\t${r.phone}` : null, r => r.callable || r.textable)}><Ic n={I.copy} size={13} /> Copy Name + Number</Btn>
@@ -170,7 +287,7 @@ const ContactOutreach = () => {
                 <td style={{ textAlign: 'center' }}><EligDot on={r.callable} /></td>
                 <td style={{ textAlign: 'center' }}><EligDot on={r.textable} /></td>
                 <td style={{ textAlign: 'center' }}><EligDot on={r.emailable} /></td>
-                <td className="col-actions"><Btn variant="ghost" sm disabled={!r.emailable} onClick={() => { setEmailRow(r); setEmailError(''); }}>Compose</Btn></td>
+                <td className="col-actions"><Btn variant="ghost" sm disabled={!r.emailable} onClick={() => openEmailComposer([r])}>Compose</Btn></td>
               </tr>
             ))}
             {withElig.length === 0 && (

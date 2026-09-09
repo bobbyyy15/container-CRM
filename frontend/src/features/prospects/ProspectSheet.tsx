@@ -11,6 +11,7 @@ import AssignPicModal from '../../components/ui/AssignPicModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
 import RefreshButton from '../../components/ui/RefreshButton'
 import { confirmDelete } from '../../lib/deleteRecord'
+import { invalidateCache } from '../../lib/dataCache'
 const ProspectImportDialog = lazy(() => import('../import/ProspectImportDialog'))
 import { NewWarmLeadDialog, NewProspectDialog, NewInquiryDialog, usePics, type WarmLeadOption } from '../pipeline/PipelineDialogs'
 import { mapPipelineRow } from '../../hooks/mapPipelineRow'
@@ -36,6 +37,8 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [inquiryWarmLeadId, setInquiryWarmLeadId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
   const [showAssignPic, setShowAssignPic] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const selectAllRef = useRef<HTMLInputElement>(null)
 
   // Distinct from Remove, next to it in every row: Remove files the record on the
   // Removed Sheet and suppresses the contact, Delete destroys the row. A Prospect
@@ -47,6 +50,64 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     cacheKey: mode === 'warm' ? 'leads:warm-leads' : 'leads:prospects',
     onDeleted: () => setRevision(v => v + 1),
   })
+
+  const handleBulkDelete = async () => {
+    if (!selected.length || bulkDeleting) return
+
+    const ids = [...selected]
+    const recordLabel = mode === 'warm' ? 'warm lead' : 'prospect'
+    const { confirmed } = await askConfirm({
+      title: `Permanently delete ${ids.length} selected ${recordLabel}${ids.length === 1 ? '' : 's'}?`,
+      message: 'This cannot be undone. Records linked to later pipeline stages are protected and will not be deleted.',
+      danger: true,
+      confirmLabel: `Delete ${ids.length}`,
+    })
+    if (!confirmed) return
+
+    setBulkDeleting(true)
+    const deletedIds: string[] = []
+    const failures: string[] = []
+    const stage = mode === 'warm' ? 'warm-leads' : 'prospects'
+
+    try {
+      // Keep enough parallelism for large selections without flooding the API.
+      for (let index = 0; index < ids.length; index += 5) {
+        const batch = ids.slice(index, index + 5)
+        const results = await Promise.all(batch.map(async id => {
+          try {
+            await api.delete(`/leads/${stage}/${id}`)
+            return { id, deleted: true as const }
+          } catch (error: any) {
+            return {
+              id,
+              deleted: false as const,
+              message: error.response?.data?.error?.message ?? error.message ?? 'Delete failed.',
+            }
+          }
+        }))
+
+        results.forEach(result => {
+          if (result.deleted) deletedIds.push(result.id)
+          else failures.push(result.message)
+        })
+      }
+
+      const deletedSet = new Set(deletedIds)
+      setSelected(current => current.filter(id => !deletedSet.has(id)))
+      if (deletedIds.length) {
+        invalidateCache(mode === 'warm' ? 'leads:warm-leads' : 'leads:prospects')
+        setRevision(value => value + 1)
+      }
+
+      if (failures.length) {
+        toast(`${deletedIds.length} deleted; ${failures.length} protected or failed. ${failures[0]}`, 'error')
+      } else {
+        toast(`${deletedIds.length} ${recordLabel}${deletedIds.length === 1 ? '' : 's'} permanently deleted.`, 'success')
+      }
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
   const pics = usePics()
 
   const [localOverrides, setLocalOverrides] = useState<Record<string, Record<string, any>>>({})
@@ -159,6 +220,14 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const textElig = filtered.filter(r => r.cat === 'Proceed' && (r.sms === 'Call/Text' || r.sms === 'Text Only')).length
   const emailElig = filtered.filter(r => r.cat === 'Proceed' && r.emailAddr).length
   const missingContact = prospectsData.filter(r => r.contactMissing).length
+  const allFilteredSelected = filtered.length > 0 && filtered.every(row => selected.includes(row.id))
+  const someFilteredSelected = filtered.some(row => selected.includes(row.id))
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someFilteredSelected && !allFilteredSelected
+    }
+  }, [allFilteredSelected, someFilteredSelected])
 
   const COLS = [
     { key: 'A', label: 'Date Added', field: 'added', w: 108 },
@@ -379,11 +448,14 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
         {selected.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', background: 'var(--brand-bg)', borderRadius: 7, fontSize: 12, fontWeight: 600, color: 'var(--brand)' }}>
             {selected.length} selected
-            <Btn variant="ghost" sm onClick={() => setShowAssignPic(true)}>Assign PIC</Btn>
+            <Btn variant="ghost" sm disabled={bulkDeleting} onClick={() => setShowAssignPic(true)}>Assign PIC</Btn>
             {mode === 'prospect'
-              ? <Btn variant="ghost" sm onClick={() => Promise.all(selected.map(handleConvert))}>→ Warm Lead</Btn>
-              : <Btn variant="ghost" sm onClick={() => setInquiryWarmLeadId(selected[0])}>Create Inquiry</Btn>
+              ? <Btn variant="ghost" sm disabled={bulkDeleting} onClick={() => Promise.all(selected.map(handleConvert))}>→ Warm Lead</Btn>
+              : <Btn variant="ghost" sm disabled={bulkDeleting} onClick={() => setInquiryWarmLeadId(selected[0])}>Create Inquiry</Btn>
             }
+            <Btn variant="danger" sm disabled={bulkDeleting} onClick={handleBulkDelete}>
+              <Ic n={I.removed} size={12} /> {bulkDeleting ? 'Deleting…' : `Delete (${selected.length})`}
+            </Btn>
           </div>
         )}
 
@@ -438,7 +510,15 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 5, background: 'var(--s2)', borderBottom: '2px solid var(--border)' }}>
             {/* Row num + checkbox */}
             <div style={{ width: 44, minWidth: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--border)', background: 'var(--s2)', position: 'sticky', left: 0, zIndex: 6 }}>
-              <input type="checkbox" className="cb" onChange={e => setSelected(e.target.checked ? filtered.map(r => r.id) : [])} />
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                className="cb"
+                checked={allFilteredSelected}
+                disabled={bulkDeleting || filtered.length === 0}
+                aria-label="Select all visible records"
+                onChange={e => setSelected(e.target.checked ? filtered.map(r => r.id) : [])}
+              />
             </div>
             {visibleCols.map((col, ci) => (
               <div
@@ -502,6 +582,8 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                     type="checkbox"
                     className="cb"
                     checked={isSel}
+                    disabled={bulkDeleting}
+                    aria-label={`Select ${row.company || row.contact || `row ${ri + 1}`}`}
                     onChange={() => setSelected(current => current.includes(row.id) ? current.filter(id => id !== row.id) : [...current, row.id])}
                     onClick={e => e.stopPropagation()}
                   />
