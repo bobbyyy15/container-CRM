@@ -8,7 +8,9 @@ import ExportMenu from '../../components/ui/ExportMenu'
 import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
 import RefreshButton from '../../components/ui/RefreshButton'
-import { confirmDelete } from '../../lib/deleteRecord'
+import { confirmDelete, confirmBulkDelete } from '../../lib/deleteRecord'
+import BulkBar from '../../components/ui/BulkBar'
+import { useRowSelection } from '../../hooks/useRowSelection'
 import type { Screen, BadgeStatus } from '../../app/types'
 import { QuotationDialog, SaleDialog, type InquiryOption, type QuotationOption } from '../pipeline/PipelineDialogs'
 import { useQuotations } from '../../hooks/useQuotations'
@@ -26,6 +28,7 @@ const QuotationList = () => {
   const quotes = useQuotations(revision)
   const inquiries = useInquiries(revision)
   const quotePics = [...new Set(quotes.map(q => q.pic).filter(Boolean))].sort() as string[]
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const handleDelete = (q: any) => confirmDelete({
     what: 'Quotation',
     name: q.ref,
@@ -41,6 +44,28 @@ const QuotationList = () => {
     const picMatch = !picFilter || q.pic === picFilter
     return searchMatch && statusMatch && picMatch
   })
+
+  const selection = useRowSelection(filteredQuotes.map(q => q.id))
+
+  const handleBulkDelete = async () => {
+    if (bulkDeleting) return
+    setBulkDeleting(true)
+    try {
+      await confirmBulkDelete({
+        what: 'quotation',
+        ids: selection.selected,
+        endpoint: id => `/deals/quotations/${id}`,
+        cacheKey: 'deals:quotations',
+        detail: 'A quotation already converted to a Sale is protected.',
+        onDeleted: deletedIds => {
+          selection.remove(deletedIds)
+          if (deletedIds.length) setRevision(value => value + 1)
+        },
+      })
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
 
   const updateQuotationStatus = async (id: string, status: string) => {
     setActionError('')
@@ -132,6 +157,7 @@ const QuotationList = () => {
           <option value="Converted">Converted</option>
         </select>
         <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{quotePics.map(p => <option key={p} value={p}>{p}</option>)}</select>
+        <BulkBar count={selection.selected.length} busy={bulkDeleting} onDelete={handleBulkDelete} />
         <div className="toolbar-right">
           <RefreshButton cacheKey="deals:quotations" label="Quotations" onRefresh={() => setRevision(value => value + 1)} />
           <ExportMenu data={filteredQuotes} filename="quotations" />
@@ -142,6 +168,17 @@ const QuotationList = () => {
       <div className="table-wrap">
         <table className="crm">
           <thead><tr>
+            <th className="col-check">
+              <input
+                ref={selection.selectAllRef}
+                type="checkbox"
+                className="cb"
+                checked={selection.allSelected}
+                disabled={bulkDeleting || filteredQuotes.length === 0}
+                aria-label="Select all visible quotations"
+                onChange={e => selection.toggleAll(e.target.checked)}
+              />
+            </th>
             <th>Quote #</th><th>Date</th><th>Company</th><th>Category</th><th>Size</th>
             <th className="r">Qty</th><th className="r">Total Sell</th><th className="r">Est. Profit</th>
             <th className="r">Margin</th><th>Status</th><th>Source</th><th>PIC</th><th className="col-actions">Actions</th>
@@ -149,7 +186,7 @@ const QuotationList = () => {
           <tbody>
             {filteredQuotes.length === 0 && (
               <EmptyTableState
-                colSpan={13}
+                colSpan={14}
                 icon={I.quote}
                 title="No quotations found"
                 subtitle={search || statusFilter || picFilter
@@ -160,7 +197,17 @@ const QuotationList = () => {
               />
             )}
             {filteredQuotes.map(q => (
-              <tr key={q.ref}>
+              <tr key={q.ref} style={selection.isSelected(q.id) ? { background: 'var(--brand-50)' } : undefined}>
+                <td className="col-check">
+                  <input
+                    type="checkbox"
+                    className="cb"
+                    checked={selection.isSelected(q.id)}
+                    disabled={bulkDeleting}
+                    aria-label={`Select quotation ${q.ref}`}
+                    onChange={() => selection.toggle(q.id)}
+                  />
+                </td>
                 <td><span className="ref-id" style={{ color: 'var(--purple)' }}>{q.ref}</span></td>
                 <td style={{ fontSize: 12.5 }}>{q.date}</td>
                 <td>

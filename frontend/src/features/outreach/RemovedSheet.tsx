@@ -9,6 +9,7 @@ import EmptyTableState from '../../components/ui/EmptyTableState'
 import RefreshButton from '../../components/ui/RefreshButton'
 import type { Screen, BadgeStatus } from '../../app/types'
 import { exportToCSV } from '../../lib/exporters'
+import { confirmBulkDelete, confirmDelete } from '../../lib/deleteRecord'
 
 const RemovedSheet = () => {
   const [showPaste, setShowPaste] = useState(false)
@@ -19,6 +20,7 @@ const RemovedSheet = () => {
   const [data, setData] = useState<any[]>([])
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string[]>([])
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   const detectedCount = pasteText.split('\n').map(line => line.trim()).filter(Boolean).length
 
@@ -94,6 +96,42 @@ const RemovedSheet = () => {
     }
   }
 
+  // Restore puts the record back in its pipeline stage. Delete erases the Removed
+  // Sheet row instead: the identity stops being suppressed, but nothing re-enters the
+  // pipeline -- which is what clearing this sheet out means.
+  const deletedDetail = 'The entry leaves this sheet and the identity is no longer blocked from outreach; the pipeline record it came from is not restored.'
+
+  const handleDeleteEntry = (row: any) => confirmDelete({
+    what: 'removed entry',
+    name: row.contact || row.co || row.email || row.phone || 'This entry',
+    endpoint: `/leads/removed/${row.id}`,
+    detail: deletedDetail,
+    onDeleted: () => {
+      setSelected(prev => prev.filter(id => id !== row.id))
+      setRevision(r => r + 1)
+    },
+  })
+
+  const handleBulkDelete = async () => {
+    if (bulkDeleting) return
+    setBulkDeleting(true)
+    try {
+      await confirmBulkDelete({
+        what: 'removed entry',
+        ids: selected,
+        endpoint: id => `/leads/removed/${id}`,
+        detail: deletedDetail,
+        onDeleted: deletedIds => {
+          const done = new Set(deletedIds)
+          setSelected(prev => prev.filter(id => !done.has(id)))
+          if (deletedIds.length) setRevision(r => r + 1)
+        },
+      })
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
   useEffect(() => {
     api.get('/leads/removed').then(response => {
       if (response.data.success) setData((response.data.data || []).map((row: any) => ({
@@ -140,10 +178,13 @@ const RemovedSheet = () => {
         {selected.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', background: 'var(--brand-bg)', borderRadius: 7, fontSize: 12, fontWeight: 600, color: 'var(--brand)' }}>
             <span>{selected.length} selected</span>
-            <Btn variant="ghost" sm onClick={handleBulkRestore} title="Restore selected records back to active pipeline">
+            <Btn variant="ghost" sm disabled={bulkDeleting} onClick={handleBulkRestore} title="Restore selected records back to active pipeline">
               <Ic n={I.sync} size={13} /> Restore Selected
             </Btn>
-            <Btn variant="ghost" sm onClick={() => setSelected([])}>
+            <Btn variant="danger" sm disabled={bulkDeleting} onClick={handleBulkDelete} title="Erase the selected entries from the Removed Sheet">
+              <Ic n={I.removed} size={12} /> {bulkDeleting ? 'Deleting…' : `Delete (${selected.length})`}
+            </Btn>
+            <Btn variant="ghost" sm disabled={bulkDeleting} onClick={() => setSelected([])}>
               Clear
             </Btn>
           </div>
@@ -175,7 +216,7 @@ const RemovedSheet = () => {
             <th>Date</th><th>Removal Type</th><th>Phone</th><th>Email</th>
             <th>Company</th><th>Contact</th><th>Reason</th><th>Channel</th>
             <th>Prev Status</th><th>Curr Status</th><th>Added By</th>
-            <th style={{ width: 90, textAlign: 'center' }}>Action</th>
+            <th style={{ width: 150, textAlign: 'center' }}>Action</th>
           </tr></thead>
           <tbody>
             {filtered.length === 0 && (
@@ -214,9 +255,14 @@ const RemovedSheet = () => {
                 <td><Badge status={r.currStatus as BadgeStatus} /></td>
                 <td style={{ fontSize: 12, color: 'var(--t3)' }}>{r.by}</td>
                 <td style={{ textAlign: 'center' }}>
-                  <Btn variant="ghost" sm onClick={() => handleRestore(r)} title="Restore back to active pipeline">
-                    <Ic n={I.sync} size={13} /> Restore
-                  </Btn>
+                  <div className="row-actions" style={{ justifyContent: 'center' }}>
+                    <Btn variant="ghost" sm disabled={bulkDeleting} onClick={() => handleRestore(r)} title="Restore back to active pipeline">
+                      <Ic n={I.sync} size={13} /> Restore
+                    </Btn>
+                    <Btn variant="danger" sm disabled={bulkDeleting} onClick={() => handleDeleteEntry(r)} title="Erase this entry from the Removed Sheet">
+                      <Ic n={I.removed} size={12} /> Delete
+                    </Btn>
+                  </div>
                 </td>
               </tr>
             ))}

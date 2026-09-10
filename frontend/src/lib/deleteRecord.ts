@@ -54,3 +54,80 @@ export const confirmDelete = async ({
     return false
   }
 }
+
+/**
+ * Delete every selected row, shared by the grids that offer checkbox selection.
+ *
+ * Per-record endpoints are what the API exposes, so this fans out over them in
+ * small batches: enough parallelism for a long selection without flooding the API
+ * with hundreds of simultaneous requests.
+ *
+ * A selection normally mixes deletable rows with ones the backend protects (a
+ * Prospect that became a Warm Lead, a Quotation that became a Sale). Those answer
+ * 409 with a sentence naming the blocker, so failures are counted and the first
+ * reason is surfaced rather than aborting the whole run on the first refusal.
+ */
+export const confirmBulkDelete = async ({
+  what,
+  ids,
+  endpoint,
+  cacheKey,
+  detail,
+  onDeleted,
+}: {
+  /** Record type as the user sees it, lowercase, e.g. 'prospect', 'quotation'. */
+  what: string
+  ids: string[]
+  /** API path to DELETE for one id. */
+  endpoint: (id: string) => string
+  cacheKey?: string
+  /** Extra consequence worth spelling out before the user commits. */
+  detail?: string
+  /** Given the ids actually deleted, refresh the grid. */
+  onDeleted: (deletedIds: string[]) => void
+}): Promise<string[]> => {
+  if (!ids.length) return []
+  const plural = `${what}${ids.length === 1 ? '' : 's'}`
+
+  const { confirmed } = await askConfirm({
+    title: `Permanently delete ${ids.length} selected ${plural}?`,
+    message: `This cannot be undone${detail ? `. ${detail}` : ', and unlike removing a record it leaves nothing on the Removed Sheet'}. `
+      + 'Records linked to a later pipeline stage are protected and will not be deleted.',
+    danger: true,
+    confirmLabel: `Delete ${ids.length}`,
+  })
+  if (!confirmed) return []
+
+  const deletedIds: string[] = []
+  const failures: string[] = []
+
+  for (let index = 0; index < ids.length; index += 5) {
+    const batch = ids.slice(index, index + 5)
+    const results = await Promise.all(batch.map(async id => {
+      try {
+        await api.delete(endpoint(id))
+        return { id, deleted: true as const }
+      } catch (e: any) {
+        return {
+          id,
+          deleted: false as const,
+          message: e?.response?.data?.error?.message ?? e?.message ?? 'Delete failed.',
+        }
+      }
+    }))
+    results.forEach(result => {
+      if (result.deleted) deletedIds.push(result.id)
+      else failures.push(result.message)
+    })
+  }
+
+  if (deletedIds.length && cacheKey) invalidateCache(cacheKey)
+  onDeleted(deletedIds)
+
+  if (failures.length) {
+    toast(`${deletedIds.length} deleted; ${failures.length} protected or failed. ${failures[0]}`, 'error')
+  } else {
+    toast(`${deletedIds.length} ${what}${deletedIds.length === 1 ? '' : 's'} permanently deleted.`, 'success')
+  }
+  return deletedIds
+}

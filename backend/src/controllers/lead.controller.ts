@@ -392,6 +392,25 @@ export class LeadController {
     }
   }
 
+  /**
+   * Erases a Removed Sheet entry. Restoring puts the record back in its pipeline
+   * stage; this only drops the suppression row, which is what clearing the sheet
+   * means -- the identity stops being blocked but nothing re-enters the pipeline.
+   */
+  static async deleteRemoved(req: Request, res: Response) {
+    try {
+      const removedId = String(req.params.removedId ?? '').trim();
+      if (!removedId) {
+        return res.status(400).json({ success: false, error: { message: 'A removed entry ID is required.' } });
+      }
+      await LeadService.deleteRemovedEntry(removedId);
+      invalidateRemovedCache();
+      res.json({ success: true, message: 'Removed entry deleted.' });
+    } catch (error: any) {
+      res.status(error.status ?? 400).json({ success: false, error: { message: error.message } });
+    }
+  }
+
   static async restoreRemoved(req: Request, res: Response) {
     try {
       const removedId = String(req.params.removedId ?? '').trim();

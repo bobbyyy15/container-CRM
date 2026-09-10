@@ -427,6 +427,22 @@ export class LeadService {
     return data;
   }
 
+  /** Drops one Removed Sheet row. Suppression lives in this table, so the identity
+   *  is no longer blocked; the pipeline record it pointed at is left as it is. */
+  static async deleteRemovedEntry(removedId: string) {
+    const { data: row, error: fetchError } = await supabaseAdmin
+      .from('removed_entries')
+      .select('id')
+      .eq('id', removedId)
+      .maybeSingle();
+    if (fetchError) throw fetchError;
+    if (!row) throw Object.assign(new Error('Removed entry not found.'), { status: 404 });
+
+    const { error } = await supabaseAdmin.from('removed_entries').delete().eq('id', removedId);
+    if (error) throw error;
+    return { id: removedId };
+  }
+
   static async restoreRemovedEntry(removedId: string, actorId: string) {
     try {
       const { data, error } = await supabaseAdmin.rpc('restore_removed_entry', {

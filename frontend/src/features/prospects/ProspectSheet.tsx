@@ -10,7 +10,7 @@ import type { Screen, BadgeStatus } from '../../app/types'
 import AssignPicModal from '../../components/ui/AssignPicModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
 import RefreshButton from '../../components/ui/RefreshButton'
-import { confirmDelete } from '../../lib/deleteRecord'
+import { confirmDelete, confirmBulkDelete } from '../../lib/deleteRecord'
 import { invalidateCache } from '../../lib/dataCache'
 const ProspectImportDialog = lazy(() => import('../import/ProspectImportDialog'))
 import { NewWarmLeadDialog, NewProspectDialog, NewInquiryDialog, usePics, type WarmLeadOption } from '../pipeline/PipelineDialogs'
@@ -53,57 +53,19 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 
   const handleBulkDelete = async () => {
     if (!selected.length || bulkDeleting) return
-
-    const ids = [...selected]
-    const recordLabel = mode === 'warm' ? 'warm lead' : 'prospect'
-    const { confirmed } = await askConfirm({
-      title: `Permanently delete ${ids.length} selected ${recordLabel}${ids.length === 1 ? '' : 's'}?`,
-      message: 'This cannot be undone. Records linked to later pipeline stages are protected and will not be deleted.',
-      danger: true,
-      confirmLabel: `Delete ${ids.length}`,
-    })
-    if (!confirmed) return
-
     setBulkDeleting(true)
-    const deletedIds: string[] = []
-    const failures: string[] = []
-    const stage = mode === 'warm' ? 'warm-leads' : 'prospects'
-
     try {
-      // Keep enough parallelism for large selections without flooding the API.
-      for (let index = 0; index < ids.length; index += 5) {
-        const batch = ids.slice(index, index + 5)
-        const results = await Promise.all(batch.map(async id => {
-          try {
-            await api.delete(`/leads/${stage}/${id}`)
-            return { id, deleted: true as const }
-          } catch (error: any) {
-            return {
-              id,
-              deleted: false as const,
-              message: error.response?.data?.error?.message ?? error.message ?? 'Delete failed.',
-            }
-          }
-        }))
-
-        results.forEach(result => {
-          if (result.deleted) deletedIds.push(result.id)
-          else failures.push(result.message)
-        })
-      }
-
-      const deletedSet = new Set(deletedIds)
-      setSelected(current => current.filter(id => !deletedSet.has(id)))
-      if (deletedIds.length) {
-        invalidateCache(mode === 'warm' ? 'leads:warm-leads' : 'leads:prospects')
-        setRevision(value => value + 1)
-      }
-
-      if (failures.length) {
-        toast(`${deletedIds.length} deleted; ${failures.length} protected or failed. ${failures[0]}`, 'error')
-      } else {
-        toast(`${deletedIds.length} ${recordLabel}${deletedIds.length === 1 ? '' : 's'} permanently deleted.`, 'success')
-      }
+      await confirmBulkDelete({
+        what: mode === 'warm' ? 'warm lead' : 'prospect',
+        ids: [...selected],
+        endpoint: id => `/leads/${mode === 'warm' ? 'warm-leads' : 'prospects'}/${id}`,
+        cacheKey: mode === 'warm' ? 'leads:warm-leads' : 'leads:prospects',
+        onDeleted: deletedIds => {
+          const done = new Set(deletedIds)
+          setSelected(current => current.filter(id => !done.has(id)))
+          if (deletedIds.length) setRevision(value => value + 1)
+        },
+      })
     } finally {
       setBulkDeleting(false)
     }

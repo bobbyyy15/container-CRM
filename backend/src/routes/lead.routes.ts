@@ -15,7 +15,10 @@ router.get('/inquiries/board', requireRoles('admin', 'procurement'), LeadControl
 router.get('/removed', LeadController.getRemoved);
 router.post('/removed/bulk', requireRoles('admin', 'sales_manager'), LeadController.bulkRemove);
 router.post('/removed/:removedId/restore', requireRoles('admin', 'sales_manager'), LeadController.restoreRemoved);
-router.delete('/removed/:removedId', requireRoles('admin', 'sales_manager'), LeadController.restoreRemoved);
+// Delete, not restore: it drops the suppression record without putting anything
+// back in the pipeline. This route used to point at restoreRemoved by mistake, so a
+// DELETE silently restored the record instead.
+router.delete('/removed/:removedId', requireRoles('admin', 'sales_manager'), LeadController.deleteRemoved);
 
 // Inquiry ticket validation (Procurement approves/rejects before it's quotable)
 router.post('/inquiries/:entityId/validate', requireRoles('admin', 'procurement'), LeadController.validateTicket);

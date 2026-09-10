@@ -55,6 +55,7 @@ FROM public.companies company
 WHERE company.id = warm.company_id
   AND company.account_owner_pic_id IS NOT NULL
   AND warm.status = 'active';
+  
 
 -- Recalculate a company's owner from the current sale history. Locking the company row
 -- serializes simultaneous Won sales so two PICs cannot both claim the same account.

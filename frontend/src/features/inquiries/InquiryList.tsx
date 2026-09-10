@@ -8,7 +8,9 @@ import ExportMenu from '../../components/ui/ExportMenu'
 import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
 import RefreshButton from '../../components/ui/RefreshButton'
-import { confirmDelete } from '../../lib/deleteRecord'
+import { confirmDelete, confirmBulkDelete } from '../../lib/deleteRecord'
+import BulkBar from '../../components/ui/BulkBar'
+import { useRowSelection } from '../../hooks/useRowSelection'
 import type { Screen, BadgeStatus } from '../../app/types'
 import { NewInquiryDialog, QuotationDialog, type InquiryOption, type WarmLeadOption } from '../pipeline/PipelineDialogs'
 import { useInquiries } from '../../hooks/useInquiries'
@@ -32,6 +34,7 @@ const InquiryList = () => {
   const pics = [...new Set(INQUIRIES.map(r => r.pic).filter(Boolean))].sort() as string[]
   const [actionError, setActionError] = useState('')
   const [addingWarmLeadId, setAddingWarmLeadId] = useState<string | null>(null)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   const handleDelete = (row: any) => confirmDelete({
     what: 'Inquiry',
@@ -77,6 +80,27 @@ const InquiryList = () => {
       || phoneMatch
       || [r.company, r.contact, r.ref, r.category, r.phone, r.email].some(value => String(value).toLowerCase().includes(term)))
   })
+
+  const selection = useRowSelection(filtered.map(r => r.id))
+
+  const handleBulkDelete = async () => {
+    if (bulkDeleting) return
+    setBulkDeleting(true)
+    try {
+      await confirmBulkDelete({
+        what: 'inquiry',
+        ids: selection.selected,
+        endpoint: id => `/leads/inquiries/${id}`,
+        cacheKey: 'leads:inquiries',
+        onDeleted: deletedIds => {
+          selection.remove(deletedIds)
+          if (deletedIds.length) setRevision(value => value + 1)
+        },
+      })
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -146,6 +170,7 @@ const InquiryList = () => {
         </div>
         <select className="sel" value={channel} onChange={e => setChannel(e.target.value)}><option value="">All Channels</option><option value="Email">Email</option><option value="Direct">Direct</option></select>
         <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{pics.map(p => <option key={p} value={p}>{p}</option>)}</select>
+        <BulkBar count={selection.selected.length} busy={bulkDeleting} onDelete={handleBulkDelete} />
         <div className="toolbar-right">
           <RefreshButton cacheKey="leads:inquiries" label="Inquiries" onRefresh={() => setRevision(v => v + 1)} />
           <span className="count-label">{filtered.length} inquiries</span>
@@ -180,6 +205,17 @@ const InquiryList = () => {
         <table className="crm">
           <thead>
             <tr>
+              <th className="col-check">
+                <input
+                  ref={selection.selectAllRef}
+                  type="checkbox"
+                  className="cb"
+                  checked={selection.allSelected}
+                  disabled={bulkDeleting || filtered.length === 0}
+                  aria-label="Select all visible inquiries"
+                  onChange={e => selection.toggleAll(e.target.checked)}
+                />
+              </th>
               <th>Inquiry #</th><th>Date / Time</th><th>Channel</th>
               <th 
                 style={{ cursor: 'context-menu' }} 
@@ -204,7 +240,7 @@ const InquiryList = () => {
           <tbody>
             {filtered.length === 0 && (
               <EmptyTableState
-                colSpan={13}
+                colSpan={14}
                 icon={I.inquiry}
                 title="No inquiries found"
                 subtitle={lookup || channel || picFilter || tab !== 'All'
@@ -215,7 +251,17 @@ const InquiryList = () => {
               />
             )}
             {filtered.map(row => (
-              <tr key={row.ref}>
+              <tr key={row.ref} style={selection.isSelected(row.id) ? { background: 'var(--brand-50)' } : undefined}>
+                <td className="col-check">
+                  <input
+                    type="checkbox"
+                    className="cb"
+                    checked={selection.isSelected(row.id)}
+                    disabled={bulkDeleting}
+                    aria-label={`Select inquiry ${row.ref}`}
+                    onChange={() => selection.toggle(row.id)}
+                  />
+                </td>
                 <td><span className="ref-id">{row.ref}</span></td>
                 <td>
                   <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t1)' }}>{row.date}</div>

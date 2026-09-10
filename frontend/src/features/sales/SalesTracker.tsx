@@ -8,6 +8,10 @@ import ExportMenu from '../../components/ui/ExportMenu'
 import EmptyTableState from '../../components/ui/EmptyTableState'
 import RefreshButton from '../../components/ui/RefreshButton'
 import RecordDetailModal from '../../components/ui/RecordDetailModal'
+import BulkBar from '../../components/ui/BulkBar'
+import { useRowSelection } from '../../hooks/useRowSelection'
+import { confirmBulkDelete } from '../../lib/deleteRecord'
+import { invalidateCache } from '../../lib/dataCache'
 import type { Screen, BadgeStatus } from '../../app/types'
 import { NewManualSaleDialog, SaleDialog, type QuotationOption } from '../pipeline/PipelineDialogs'
 import { useSales } from '../../hooks/useSales'
@@ -26,6 +30,7 @@ const SalesTracker = () => {
   const quotations = useQuotations(revision)
   const salesPics = [...new Set(SALES.map(s => s.pic).filter(Boolean))].sort() as string[]
   const salesCategories = [...new Set(SALES.map(s => s.category).filter(Boolean))].sort() as string[]
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   const filteredSales = SALES.filter(s => {
     const term = search.trim().toLowerCase()
@@ -62,7 +67,9 @@ const SalesTracker = () => {
   }
 
   const handleDeleteSale = async (id: string, ref: string) => {
-    const confirmed = await askConfirm({
+    // askConfirm resolves to an object, so this must read .confirmed: testing the
+    // object itself is always truthy and deleted the sale even when the user cancelled.
+    const { confirmed } = await askConfirm({
       title: `Delete Sale ${ref}`,
       message: `Are you sure you want to delete this sale record? This action cannot be undone.`,
       confirmLabel: 'Delete Sale',
@@ -71,10 +78,33 @@ const SalesTracker = () => {
     if (!confirmed) return
     try {
       await api.delete(`/deals/sales/${id}`)
+      invalidateCache('deals:sales')
       toast(`Sale ${ref} deleted successfully.`, 'success')
       setRevision(value => value + 1)
     } catch (err: any) {
       toast(err.response?.data?.error?.message || 'Failed to delete sale.', 'error')
+    }
+  }
+
+  const selection = useRowSelection(filteredSales.map(s => s.id))
+
+  const handleBulkDelete = async () => {
+    if (bulkDeleting) return
+    setBulkDeleting(true)
+    try {
+      await confirmBulkDelete({
+        what: 'sale',
+        ids: selection.selected,
+        endpoint: id => `/deals/sales/${id}`,
+        cacheKey: 'deals:sales',
+        detail: 'A sale with a contract or delivery against it is protected.',
+        onDeleted: deletedIds => {
+          selection.remove(deletedIds)
+          if (deletedIds.length) setRevision(value => value + 1)
+        },
+      })
+    } finally {
+      setBulkDeleting(false)
     }
   }
 
@@ -114,6 +144,7 @@ const SalesTracker = () => {
         <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{salesPics.map(p => <option key={p} value={p}>{p}</option>)}</select>
         <select className="sel" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">All Categories</option>{salesCategories.map(c => <option key={c} value={c}>{c}</option>)}</select>
         <select className="sel" value={dateRange} onChange={e => setDateRange(e.target.value)}><option>This Month</option><option>Last Month</option><option>All Time</option></select>
+        <BulkBar count={selection.selected.length} busy={bulkDeleting} onDelete={handleBulkDelete} />
         <div className="toolbar-right">
           <RefreshButton cacheKey="deals:sales" label="Sales" onRefresh={() => setRevision(value => value + 1)} />
           <ExportMenu data={filteredSales} filename="sales" />
@@ -125,6 +156,17 @@ const SalesTracker = () => {
       <div className="table-wrap">
         <table className="crm">
           <thead><tr>
+            <th className="col-check">
+              <input
+                ref={selection.selectAllRef}
+                type="checkbox"
+                className="cb"
+                checked={selection.allSelected}
+                disabled={bulkDeleting || filteredSales.length === 0}
+                aria-label="Select all visible sales"
+                onChange={e => selection.toggleAll(e.target.checked)}
+              />
+            </th>
             <th>Sale #</th><th>Date</th><th>Company</th><th>Category</th><th>Size</th>
             <th>Condition</th><th className="r">Qty</th><th className="r">Buy/Unit</th>
             <th className="r">Sell/Unit</th><th className="r">Total Buy</th><th className="r">Total Sell</th>
@@ -134,7 +176,7 @@ const SalesTracker = () => {
           <tbody>
             {filteredSales.length === 0 && (
               <EmptyTableState
-                colSpan={16}
+                colSpan={17}
                 icon={I.sales}
                 title="No sales records found"
                 subtitle={search || picFilter || categoryFilter || dateRange !== 'This Month'
@@ -145,7 +187,17 @@ const SalesTracker = () => {
               />
             )}
             {filteredSales.map(s => (
-              <tr key={s.ref}>
+              <tr key={s.ref} style={selection.isSelected(s.id) ? { background: 'var(--brand-50)' } : undefined}>
+                <td className="col-check">
+                  <input
+                    type="checkbox"
+                    className="cb"
+                    checked={selection.isSelected(s.id)}
+                    disabled={bulkDeleting}
+                    aria-label={`Select sale ${s.ref}`}
+                    onChange={() => selection.toggle(s.id)}
+                  />
+                </td>
                 <td><span className="ref-id">{s.ref}</span></td>
                 <td style={{ fontSize: 12.5 }}>{s.date}</td>
                 <td>
@@ -188,7 +240,7 @@ const SalesTracker = () => {
           </tbody>
           <tfoot>
             <tr style={{ background: 'var(--s2)' }}>
-              <td colSpan={6} style={{ padding: '10px 14px', fontWeight: 700, color: 'var(--t1)' }}>Totals ({filteredSales.length} sales)</td>
+              <td colSpan={7} style={{ padding: '10px 14px', fontWeight: 700, color: 'var(--t1)' }}>Totals ({filteredSales.length} sales)</td>
               <td className="r mono bold" style={{ color: 'var(--t1)' }}>{totalUnits}</td>
               <td colSpan={2} />
               <td className="r cost-cell" style={{ fontWeight: 700 }}>${totalBuy.toLocaleString()}</td>

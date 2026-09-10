@@ -59,8 +59,14 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
       const response = await api.post('/data/imports', { rows: parsed.submitRows, filename })
       const result = response.data.data
       const withoutContact = result.withoutContactCount ? ` (${result.withoutContactCount} without a named contact)` : ''
+      // Skipped and "recorded for review" are different things and are counted
+      // separately by the database: skipped rows were incomplete in the source sheet and
+      // need nothing from anyone, while a recorded row hit an actual fault. Only mention
+      // each one when it happened, so a clean import reads as a clean import.
+      const skipped = result.skippedCount ? ` · ${result.skippedCount} skipped (incomplete source rows)` : ''
+      const recorded = result.errorCount ? ` · ${result.errorCount} recorded for review` : ''
       setMessage(
-        `${result.importedCount} imported${withoutContact} · ${result.duplicateCount} duplicates · ${result.removedCount} removed · ${result.conflictCount} conflicts · ${result.errorCount} recorded for review`,
+        `${result.importedCount} imported${withoutContact} · ${result.duplicateCount} duplicates · ${result.removedCount} removed · ${result.conflictCount} conflicts${skipped}${recorded}`,
       )
       onImported()
     } catch (error: any) {
