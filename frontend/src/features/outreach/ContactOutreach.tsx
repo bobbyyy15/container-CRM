@@ -65,6 +65,11 @@ const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | nul
     onIntentApplied?.()
   }, [intent, onIntentApplied])
 
+  // A new filter is a new list: read it from the top.
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0
+  }, [channel, stateFilter, search])
+
   const term = search.trim().toLowerCase()
   const filtered = prospectsData.filter(r =>
     !term || [r.company, r.contact, r.phone, r.emailAddr].some(value => String(value ?? '').toLowerCase().includes(term))
@@ -88,11 +93,40 @@ const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | nul
       || (channel === 'text' && r.textable)
       || (channel === 'email' && r.emailable)))
 
-  // Drawing every row of a large pipeline freezes the tab, and this screen is for acting
-  // on contacts rather than reading them one by one. Actions below use the full filtered
-  // set; only the visible slice is rendered.
-  const RENDER_LIMIT = 300
-  const shown = withElig.slice(0, RENDER_LIMIT)
+  // Only the rows in view are in the DOM. Rows are pinned to one height (long values
+  // truncate rather than wrap) so the ones on screen can be derived from the scroll
+  // position, with spacer rows standing in for the rest -- the scrollbar still measures the
+  // whole list, and selection, copying and sending all act on every filtered row, not just
+  // the drawn ones.
+  const ROW_HEIGHT = 44
+  const OVERSCAN = 6
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [viewport, setViewport] = useState({ top: 0, height: 800 })
+  useEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+    const measure = () => setViewport({ top: element.scrollTop, height: element.clientHeight })
+    measure()
+    element.addEventListener('scroll', measure, { passive: true })
+    window.addEventListener('resize', measure)
+    return () => {
+      element.removeEventListener('scroll', measure)
+      window.removeEventListener('resize', measure)
+    }
+  }, [])
+
+  const windowSize = Math.ceil(viewport.height / ROW_HEIGHT) + OVERSCAN * 2
+  // Clamped to the end of the list: filtering can shrink the list under a scroll position
+  // that is still deep, which would otherwise leave a screen showing one row or none.
+  const windowStart = Math.min(
+    Math.max(0, Math.floor(viewport.top / ROW_HEIGHT) - OVERSCAN),
+    Math.max(0, withElig.length - windowSize),
+  )
+  const windowEnd = Math.min(withElig.length, windowStart + windowSize)
+  const shown = withElig.slice(windowStart, windowEnd)
+  const padTop = windowStart * ROW_HEIGHT
+  const padBottom = Math.max(0, (withElig.length - windowEnd) * ROW_HEIGHT)
+  const COLUMN_COUNT = 11
 
   const allSelected = withElig.length > 0 && withElig.every(r => selected.includes(r.id))
   const toggleAll = () => setSelected(allSelected ? [] : withElig.map(r => r.id))
@@ -299,15 +333,13 @@ const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | nul
           <Btn variant="ghost" sm onClick={() => { setChannel('all'); setStateFilter(''); setSearch(''); setSelected([]) }}><Ic n={I.x} size={13} /> Clear</Btn>
         )}
         <div className="toolbar-right">
-          <span className="count-label">
-            {withElig.length.toLocaleString()} contacts{withElig.length > RENDER_LIMIT ? ` · showing ${RENDER_LIMIT}` : ''}
-          </span>
+          <span className="count-label">{withElig.length.toLocaleString()} contacts</span>
           <RefreshButton cacheKey="leads:prospects" label="Contacts" onRefresh={() => setRevision(r => r + 1)} />
           <Btn variant="primary" sm style={{ background: '#1F2937' }} onClick={() => handleCopy('RingCentral Format', r => r.phone || null, r => r.callable || r.textable)}><Ic n={I.copy} size={13} /> Copy RingCentral Format</Btn>
         </div>
       </div>
 
-      <div className="table-wrap">
+      <div className="table-wrap" ref={scrollRef}>
         <table className="crm">
           <thead><tr>
             <th className="col-check"><input type="checkbox" className="cb" checked={allSelected} onChange={toggleAll} /></th>
@@ -326,8 +358,9 @@ const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | nul
                   : 'This sheet lists your prospect contacts. Import or add prospects to fill it.'}
               />
             )}
+            {padTop > 0 && <tr style={{ height: padTop }}><td colSpan={COLUMN_COUNT} /></tr>}
             {shown.map(r => (
-              <tr key={r.id} style={{ background: r.cat === 'Removed' ? 'var(--red-bg)' : undefined }}>
+              <tr key={r.id} className="row-fixed" style={{ height: ROW_HEIGHT, background: r.cat === 'Removed' ? 'var(--red-bg)' : undefined }}>
                 <td className="col-check"><input type="checkbox" className="cb" checked={selected.includes(r.id)} onChange={() => toggleOne(r.id)} /></td>
                 <td style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{r.company}</td>
                 <td style={{ fontSize: 12.5 }}>{r.contact}</td>
@@ -341,6 +374,7 @@ const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | nul
                 <td className="col-actions"><Btn variant="ghost" sm disabled={!r.emailable} onClick={() => openEmailComposer([r])}>Compose</Btn></td>
               </tr>
             ))}
+            {padBottom > 0 && <tr style={{ height: padBottom }}><td colSpan={COLUMN_COUNT} /></tr>}
             {withElig.length === 0 && (
               <tr><td colSpan={11} style={{ textAlign: 'center', padding: 30, color: 'var(--t4)', fontSize: 13 }}>No contacts match.</td></tr>
             )}

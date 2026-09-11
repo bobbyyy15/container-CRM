@@ -261,8 +261,14 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     }
   }, [])
 
-  const windowStart = Math.max(0, Math.floor(viewport.top / rowHeight) - OVERSCAN)
-  const windowEnd = Math.min(filtered.length, windowStart + Math.ceil(viewport.height / rowHeight) + OVERSCAN * 2)
+  const windowSize = Math.ceil(viewport.height / rowHeight) + OVERSCAN * 2
+  // Clamped to the end of the list, so narrowing the filters under a deep scroll position
+  // still shows a full screen of rows rather than one or none.
+  const windowStart = Math.min(
+    Math.max(0, Math.floor(viewport.top / rowHeight) - OVERSCAN),
+    Math.max(0, filtered.length - windowSize),
+  )
+  const windowEnd = Math.min(filtered.length, windowStart + windowSize)
   const windowRows = filtered.slice(windowStart, windowEnd)
   const windowTop = windowStart * rowHeight
   const windowBottom = Math.max(0, (filtered.length - windowEnd) * rowHeight)

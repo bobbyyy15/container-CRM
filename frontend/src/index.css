@@ -1445,3 +1445,19 @@ table.crm tbody tr:nth-child(10) { animation-delay: 0.225s; }
 }
 .stat-chip:hover { background: var(--s2); }
 .stat-chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* Windowed tables need every row to be the same height, so a long company name or email
+   truncates instead of wrapping the row onto a second line and drifting out of step with
+   the spacers that stand in for the rows not drawn. */
+table.crm tr.row-fixed { height: 44px; }
+table.crm tr.row-fixed > td {
+  height: 44px;
+  padding-top: 0;
+  padding-bottom: 0;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+table.crm tr.row-fixed > td.col-check,
+table.crm tr.row-fixed > td.col-actions { max-width: none; overflow: visible; }
