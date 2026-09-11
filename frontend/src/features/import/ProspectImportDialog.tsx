@@ -141,11 +141,20 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
       const needsAttention = (result.conflictCount ?? 0) + (result.errorCount ?? 0) > 0
       if (!needsAttention) {
         toast(summary, 'success')
+        setParsed(empty)
+        setPaste('')
+        setFilename(undefined)
         onClose()
         return
       }
+      // Kept open only so the conflicts can be read. The file is released either way:
+      // leaving it loaded meant the Import button stayed live and a second click sent the
+      // whole sheet again.
+      setParsed(empty)
+      setPaste('')
+      setFilename(undefined)
       setMessage(summary)
-      toast(`Import finished with ${result.conflictCount} conflicts. Review them in the import dialog.`, 'error')
+      toast(`Import finished with ${result.conflictCount} conflicts. Review them below.`, 'error')
     } catch (error: any) {
       setProgress(null)
       setMessage(error.response?.data?.error?.message ?? error.message ?? 'Import failed.')
@@ -286,7 +295,10 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
           )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-            <button className="btn btn-secondary btn-sm" onClick={onClose}>Cancel</button>
+            <button className="btn btn-secondary btn-sm" onClick={onClose}>{message && !parsed.submitRows.length ? 'Close' : 'Cancel'}</button>
+            {/* Once an import has run the file is released, so there is nothing left to
+                submit and no button to click twice. */}
+            {(parsed.submitRows.length > 0 || working) && (
             <button className="btn btn-primary btn-sm" disabled={working || !parsed.submitRows.length} onClick={importRows}>
               {working
                 ? (progress && progress.total > CHUNK_SIZE
@@ -296,6 +308,7 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
                   ? `Import ${parsed.rows.length} as prospects (+${parsed.submitRows.length - parsed.rows.length} recorded for review)`
                   : `Import ${parsed.rows.length} valid rows`}
             </button>
+            )}
           </div>
         </div>
       </div>

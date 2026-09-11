@@ -240,6 +240,33 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   }
   const rowHeight = density === 'Compact' ? 30 : density === 'Comfortable' ? 46 : 38
 
+  // Only the rows in view are in the DOM. A pipeline of 17,000 records is roughly 200,000
+  // cells; rendering them all locks the tab for several seconds and scrolls badly ever
+  // after. Rows are a fixed height, so the ones on screen can be worked out from the scroll
+  // position and the rest replaced by a spacer of exactly the right size -- the scrollbar
+  // still reflects the whole list.
+  const OVERSCAN = 8
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [viewport, setViewport] = useState({ top: 0, height: 900 })
+  useEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+    const measure = () => setViewport({ top: element.scrollTop, height: element.clientHeight })
+    measure()
+    element.addEventListener('scroll', measure, { passive: true })
+    window.addEventListener('resize', measure)
+    return () => {
+      element.removeEventListener('scroll', measure)
+      window.removeEventListener('resize', measure)
+    }
+  }, [])
+
+  const windowStart = Math.max(0, Math.floor(viewport.top / rowHeight) - OVERSCAN)
+  const windowEnd = Math.min(filtered.length, windowStart + Math.ceil(viewport.height / rowHeight) + OVERSCAN * 2)
+  const windowRows = filtered.slice(windowStart, windowEnd)
+  const windowTop = windowStart * rowHeight
+  const windowBottom = Math.max(0, (filtered.length - windowEnd) * rowHeight)
+
   // ── Spreadsheet-style cell selection & keyboard navigation ─────────────────
   type CellRef = { r: number; c: number }
   const [anchor, setAnchor] = useState<CellRef | null>(null)
@@ -464,7 +491,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
       </div>
 
       {/* Spreadsheet table */}
-      <div className="table-wrap">
+      <div className="table-wrap" ref={scrollRef}>
         {contextMenu && (
           <>
             <div style={{ position: 'fixed', inset: 0, zIndex: 999 }} onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
@@ -549,7 +576,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
               onAction={() => mode === 'warm' ? setShowNewWarmLead(true) : setShowNewProspect(true)}
             />
           )}
-          {filtered.map((row, ri) => {
+          {windowTop > 0 && <div style={{ height: windowTop }} />}
+          {windowRows.map((row, windowIndex) => {
+            const ri = windowStart + windowIndex
             const isRemoved = row.cat === 'Removed'
             const isSel = selected.includes(row.id)
             return (
@@ -773,6 +802,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
               </div>
             )
           })}
+          {windowBottom > 0 && <div style={{ height: windowBottom }} />}
         </div>
       </div>
 

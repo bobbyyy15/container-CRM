@@ -66,6 +66,31 @@ const getCachedRemovedEntries = async () => {
   return cachedRemoved;
 };
 
+/**
+ * What this PIC already has further down the pipeline, cached briefly per PIC.
+ *
+ * These three queries answer the same question for every page of a list, and a large
+ * pipeline is read a thousand rows at a time -- eighteen pages meant fifty-four identical
+ * lookups. The window is short enough that a conversion still disappears from Prospects
+ * within moments of being made.
+ */
+const cachedDownstream = new Map<string, { rows: any[][]; timestamp: number }>();
+
+const getCachedDownstream = async (picId: string) => {
+  const now = Date.now();
+  const hit = cachedDownstream.get(picId);
+  if (hit && now - hit.timestamp < 15_000) return hit.rows;
+
+  const results = await Promise.all([
+    supabaseAdmin.from('warm_leads').select('company_id, contact_id, companies(name), contacts(email_active, email_2, phone_direct, phone_2)').eq('pic_id', picId).eq('status', 'active'),
+    supabaseAdmin.from('inquiries').select('company_id, contact_id, companies(name), contacts(email_active, email_2, phone_direct, phone_2)').eq('pic_id', picId).not('status', 'in', '(Removed,Lost)'),
+    supabaseAdmin.from('sales').select('company_id, companies(name)').eq('pic_id', picId).eq('status', 'Won'),
+  ]);
+  const rows = results.map(result => result.data ?? []);
+  cachedDownstream.set(picId, { rows, timestamp: now });
+  return rows;
+};
+
 const listActiveLeads = async (
   table: 'prospect_clients' | 'warm_leads' | 'inquiries',
   req: Request,
@@ -84,15 +109,24 @@ const listActiveLeads = async (
       + 'container_sizes!container_size_id(id, name), container_conditions!container_condition_id(id, name), '
       + 'alt_size:container_sizes!alt_container_size_id(id, name), alt_condition:container_conditions!alt_container_condition_id(id, name), '
       + 'backfilled_warm_leads:warm_leads!source_inquiry_id(id)'
-    : '*, companies(*), contacts(*), pics(name)';
+    // The row's own columns, but only the joined fields the lists actually read: pulling
+    // every column of companies and contacts (normalised copies of each identity included)
+    // roughly doubled a page's payload, which is what loading a large pipeline spends its
+    // time on. Kept as '*' for the lead row itself, whose columns differ per stage.
+    : '*, companies(id, name, industry, address_street, address_city, address_state, address_country), '
+      + 'contacts(id, first_name, last_name, email_active, email_2, phone_direct, phone_2), '
+      + 'pics(name)';
 
-  const fetchLimit = Math.min(Math.max(query.limit * 2, 500), 1000);
+  // Page in the database, by range, so an offset past the first page reaches rows the
+  // earlier approach could never see: it fetched a fixed first slab and then sliced it,
+  // which meant everything beyond about a thousand records was unreachable no matter what
+  // offset was asked for.
   let dbQuery = supabaseAdmin
     .from(table)
     .select(select)
     .eq('pic_id', picId)
     .order('created_at', { ascending: false })
-    .limit(fetchLimit);
+    .range(query.offset, query.offset + query.limit - 1);
 
   if (table === 'prospect_clients' && query.status !== 'all') dbQuery = dbQuery.eq('lifecycle_status', query.status);
   if (table === 'warm_leads' && query.status !== 'all') dbQuery = dbQuery.eq('status', 'active');
@@ -104,13 +138,7 @@ const listActiveLeads = async (
   const [{ data, error }, removedSet, downstream] = await Promise.all([
     dbQuery,
     applySuppressionFilter ? getCachedRemovedEntries() : Promise.resolve(null),
-    needsDownstreamFilter
-      ? Promise.all([
-          supabaseAdmin.from('warm_leads').select('company_id, contact_id, companies(name), contacts(email_active, email_2, phone_direct, phone_2)').eq('pic_id', picId).eq('status', 'active'),
-          supabaseAdmin.from('inquiries').select('company_id, contact_id, companies(name), contacts(email_active, email_2, phone_direct, phone_2)').eq('pic_id', picId).not('status', 'in', '(Removed,Lost)'),
-          supabaseAdmin.from('sales').select('company_id, companies(name)').eq('pic_id', picId).eq('status', 'Won'),
-        ])
-      : Promise.resolve(null),
+    needsDownstreamFilter ? getCachedDownstream(picId) : Promise.resolve(null),
   ]);
   if (error) throw error;
 
@@ -121,8 +149,8 @@ const listActiveLeads = async (
   const downstreamPhones = new Set<string>();
 
   if (downstream) {
-    for (const res of downstream) {
-      for (const row of (res.data ?? []) as any[]) {
+    for (const rows of downstream) {
+      for (const row of rows as any[]) {
         if (row.company_id) downstreamCompanyIds.add(row.company_id);
         if (row.contact_id) downstreamContactIds.add(row.contact_id);
         if (row.companies?.name) downstreamCompanyNames.add(text(row.companies.name));
@@ -168,9 +196,11 @@ const listActiveLeads = async (
     return true;
   });
 
+  // `fetched` is the count before the suppression and downstream filters ran. The client
+  // pages on that, not on the filtered length, which is smaller and would stop it early.
   return {
-    data: eligible.slice(query.offset, query.offset + query.limit),
-    meta: { total: eligible.length, limit: query.limit, offset: query.offset },
+    data: eligible,
+    meta: { total: eligible.length, fetched: (data ?? []).length, limit: query.limit, offset: query.offset },
   };
 };
 

@@ -89,7 +89,9 @@ export const LeadListQuerySchema = z.object({
   city: z.string().trim().max(100).optional(),
   industry: z.string().trim().max(100).optional(),
   status: z.enum(['active', 'converted', 'removed', 'all']).default('active'),
-  limit: z.coerce.number().int().min(1).max(500).default(100),
+  // A page, not the whole list: the client pages through until it has everything, so a
+  // pipeline of any size is reachable. The ceiling only keeps one response a sane size.
+  limit: z.coerce.number().int().min(1).max(2000).default(100),
   offset: z.coerce.number().int().min(0).default(0),
 });
 

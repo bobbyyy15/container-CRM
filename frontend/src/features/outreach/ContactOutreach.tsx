@@ -88,6 +88,12 @@ const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | nul
       || (channel === 'text' && r.textable)
       || (channel === 'email' && r.emailable)))
 
+  // Drawing every row of a large pipeline freezes the tab, and this screen is for acting
+  // on contacts rather than reading them one by one. Actions below use the full filtered
+  // set; only the visible slice is rendered.
+  const RENDER_LIMIT = 300
+  const shown = withElig.slice(0, RENDER_LIMIT)
+
   const allSelected = withElig.length > 0 && withElig.every(r => selected.includes(r.id))
   const toggleAll = () => setSelected(allSelected ? [] : withElig.map(r => r.id))
   const toggleOne = (id: string) => setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
@@ -293,7 +299,9 @@ const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | nul
           <Btn variant="ghost" sm onClick={() => { setChannel('all'); setStateFilter(''); setSearch(''); setSelected([]) }}><Ic n={I.x} size={13} /> Clear</Btn>
         )}
         <div className="toolbar-right">
-          <span className="count-label">{withElig.length} contacts</span>
+          <span className="count-label">
+            {withElig.length.toLocaleString()} contacts{withElig.length > RENDER_LIMIT ? ` · showing ${RENDER_LIMIT}` : ''}
+          </span>
           <RefreshButton cacheKey="leads:prospects" label="Contacts" onRefresh={() => setRevision(r => r + 1)} />
           <Btn variant="primary" sm style={{ background: '#1F2937' }} onClick={() => handleCopy('RingCentral Format', r => r.phone || null, r => r.callable || r.textable)}><Ic n={I.copy} size={13} /> Copy RingCentral Format</Btn>
         </div>
@@ -318,7 +326,7 @@ const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | nul
                   : 'This sheet lists your prospect contacts. Import or add prospects to fill it.'}
               />
             )}
-            {withElig.map(r => (
+            {shown.map(r => (
               <tr key={r.id} style={{ background: r.cat === 'Removed' ? 'var(--red-bg)' : undefined }}>
                 <td className="col-check"><input type="checkbox" className="cb" checked={selected.includes(r.id)} onChange={() => toggleOne(r.id)} /></td>
                 <td style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{r.company}</td>
