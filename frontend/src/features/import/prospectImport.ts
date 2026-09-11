@@ -57,6 +57,14 @@ const aliases: Record<string, keyof ProspectImportRow> = {
   contactnumber2: 'contact_number_2', email: 'email_active', emailaddress: 'email_active', workemail: 'email_active',
   emailactive: 'email_active', email1: 'email_active', email2: 'email_2', alternateemail: 'email_2',
   address: 'address', streetaddress: 'address', location: 'address',
+  // Business and carrier registries name the company column after the registration, not
+  // the word "company": FMCSA census exports ship LEGAL_NAME and DBA_NAME, and broker
+  // lists use "Carrier Name" or "Trade Name". Unrecognized, every row in such a file
+  // failed as "missing company name".
+  legalname: 'company_name', legalbusinessname: 'company_name', dbaname: 'company_name',
+  dba: 'company_name', carriername: 'company_name', carrier: 'company_name',
+  entityname: 'company_name', tradename: 'company_name', operatingname: 'company_name',
+  corporatename: 'company_name', accountname: 'company_name', customername: 'company_name',
 }
 
 // Carrier/business registry exports (e.g. FMCSA census data) commonly carry per-commodity
@@ -100,6 +108,9 @@ const strongGuess = (k: string): keyof ProspectImportRow | undefined => {
   }
   if (/officer|owner|principal|manager|agent|representative|president|attn|attention|poc|contact|person/.test(k)) return 'contact_person'
   if (/company|business|client|organi[sz]ation|firm|account|vendor|customer/.test(k)) return 'company_name'
+  // Registry wording for the same thing. Checked after the person-role patterns above, so
+  // "legal contact" or "carrier rep" still resolves to a person.
+  if (/carrier|legal|dba|entity|trade|operating|corporate|enterprise|establishment/.test(k)) return 'company_name'
   if (/industry|sector/.test(k)) return 'industry'
   if (/country/.test(k)) return 'country'
   if (/state|province/.test(k)) return 'state_province'
@@ -188,17 +199,42 @@ const isPhoneCell = (v: string) => {
   return digits.length >= 7 && digits.length <= 15 && /^[\d\s\-+().ext#/]+$/i.test(v)
 }
 
+const isNumericCell = (v: string) => /^[\d\s.,%$-]+$/.test(v)
+const isDateCell = (v: string) => /^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(v)
+const isFlagCell = (v: string) => /^(y|n|yes|no|true|false|0|1)$/i.test(v)
+
+type ColumnStats = {
+  c: number
+  total: number
+  emailCount: number
+  phoneCount: number
+  /** Cells that could plausibly be an organization name: words, not codes or flags. */
+  nameLikeCount: number
+  distinct: number
+}
+
+const columnStats = (rows: { row: unknown[] }[], maxCols: number): ColumnStats[] =>
+  Array.from({ length: maxCols }, (_, c) => {
+    const values = rows.map(r => clean(r.row[c])).filter(Boolean)
+    return {
+      c,
+      total: values.length,
+      emailCount: values.filter(isEmailCell).length,
+      phoneCount: values.filter(isPhoneCell).length,
+      nameLikeCount: values.filter(v =>
+        v.length > 2 && /[a-z]/i.test(v)
+        && !isEmailCell(v) && !isPhoneCell(v) && !isNumericCell(v) && !isDateCell(v) && !isFlagCell(v)
+      ).length,
+      distinct: new Set(values.map(v => v.toLowerCase())).size,
+    }
+  })
+
 const inferHeaderlessColumns = (rows: { row: unknown[]; rowNumber: number }[]): (keyof ProspectImportRow | undefined)[] => {
   if (!rows.length) return []
   const maxCols = Math.max(...rows.map(r => r.row.length))
   if (maxCols === 0) return []
 
-  const colStats = Array.from({ length: maxCols }, (_, c) => {
-    const values = rows.map(r => clean(r.row[c])).filter(Boolean)
-    const emailCount = values.filter(isEmailCell).length
-    const phoneCount = values.filter(isPhoneCell).length
-    return { c, total: values.length, emailCount, phoneCount }
-  })
+  const colStats = columnStats(rows, maxCols)
 
   const mapping: (keyof ProspectImportRow | undefined)[] = new Array(maxCols).fill(undefined)
 
@@ -218,6 +254,52 @@ const inferHeaderlessColumns = (rows: { row: unknown[]; rowNumber: number }[]): 
   if (unassigned.length > 3) mapping[unassigned[3].c] = 'state_province'
 
   return mapping
+}
+
+/**
+ * A header row that names every column except the company one used to fail the whole
+ * sheet: without company_name mapped, every row came back "missing company name" and
+ * nothing could be imported, however complete the data actually was.
+ *
+ * So when the header leaves it unmapped, pick the column out of the data instead. The test
+ * is whether a column reads like a list of organization names rather than a list of codes:
+ * several words per cell, a legal suffix like LLC or Inc, real length. A reference column
+ * ("A-1", "DOT123") clears every generic "is this text?" check, so those signals are what
+ * separate it from a company column -- and when nothing scores, nothing is guessed, which
+ * keeps a sheet of IDs and flags from being imported as companies.
+ */
+const COMPANY_SUFFIX = /\b(llc|l\.l\.c|inc|incorporated|corp|corporation|co|company|ltd|limited|plc|gmbh|pte|bv|sa|srl|llp|lp|group|holdings|enterprises?|industries|logistics|freight|lines|shipping|trucking|transport|trading|services|solutions|supply|systems)\b\.?$/i
+const CODE_LIKE = /^[a-z]{0,4}[-_ ]?\d+[a-z]?$/i
+
+const inferCompanyColumn = (
+  mapped: (keyof ProspectImportRow | undefined)[],
+  rows: { row: unknown[] }[],
+): number | undefined => {
+  if (!rows.length) return undefined
+  const maxCols = Math.max(mapped.length, ...rows.map(r => r.row.length))
+
+  const scored = columnStats(rows, maxCols)
+    .filter(stat => !mapped[stat.c] && stat.total >= Math.max(1, rows.length * 0.5))
+    .filter(stat => stat.nameLikeCount >= stat.total * 0.7 && stat.distinct > 1)
+    .map(stat => {
+      const values = rows.map(r => clean(r.row[stat.c])).filter(Boolean)
+      const share = (predicate: (v: string) => boolean) => values.filter(predicate).length / values.length
+      const multiWord = share(v => v.includes(' '))
+      const suffixed = share(v => COMPANY_SUFFIX.test(v))
+      const codeLike = share(v => CODE_LIKE.test(v))
+      const averageLength = values.reduce((total, v) => total + v.length, 0) / values.length
+      return {
+        c: stat.c,
+        // A company column earns its place on at least one of these, not on merely being
+        // text: multi-word values, a legal suffix, or names long enough not to be codes.
+        qualifies: codeLike < 0.5 && (multiWord >= 0.5 || suffixed >= 0.3 || averageLength >= 8),
+        score: multiWord * 3 + suffixed * 4 + averageLength / 10 - codeLike * 5,
+      }
+    })
+    .filter(entry => entry.qualifies)
+    .sort((a, b) => b.score - a.score)
+
+  return scored[0]?.c
 }
 
 export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport => {
@@ -260,9 +342,18 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
   let mapped: (keyof ProspectImportRow | undefined)[]
   let dataRows: { row: unknown[]; rowNumber: number }[]
 
+  let inferredCompanyLabel: string | undefined
+
   if (hasHeader) {
     mapped = resolveHeaderFields(headerCandidate.row)
     dataRows = nonEmpty.filter(item => item.rowNumber > headerCandidate.rowNumber)
+    if (!mapped.includes('company_name')) {
+      const column = inferCompanyColumn(mapped, dataRows)
+      if (column !== undefined) {
+        mapped[column] = 'company_name'
+        inferredCompanyLabel = clean(headerCandidate.row[column]) || `column ${column + 1}`
+      }
+    }
   } else {
     mapped = inferHeaderlessColumns(nonEmpty)
     dataRows = nonEmpty
@@ -300,6 +391,13 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
   })
 
   const result = validateCandidates(candidates, dataRows.length)
+  if (inferredCompanyLabel && result.rows.length) {
+    result.errors.unshift({
+      message: `No column was named like a company, so "${inferredCompanyLabel}" was read as the Company Name. `
+        + 'Check the preview below before importing.',
+      kind: 'issue',
+    })
+  }
   if (!result.rows.length && result.sourceRows > 0 && !mapped.includes('company_name')) {
     const headerText = (hasHeader ? headerCandidate.row : nonEmpty[0].row).map(clean).filter(Boolean).join(', ')
     result.errors.unshift({
