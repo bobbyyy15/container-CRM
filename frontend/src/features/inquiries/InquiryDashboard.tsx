@@ -5,9 +5,12 @@ import { Prog } from '../../components/ui/primitives'
 import { useAnalytics } from '../../hooks/useAnalytics'
 import { useInquiries } from '../../hooks/useInquiries'
 import type { LossReasonRow } from '../../app/types'
+import { scopedLabel } from '../../lib/scope'
 
-const InquiryDashboard = () => {
+const InquiryDashboard = ({ role }: { role?: string }) => {
   const analytics = useAnalytics();
+  // Inquiry counts come back scoped to this person's PIC unless they are an admin.
+  const mine = (label: string) => scopedLabel(label, role)
   const LOSS_REASONS: LossReasonRow[] = analytics?.charts?.LOSS_REASONS || [];
   const inquiries = useInquiries(0, 'all')
   const total = inquiries.length
@@ -21,12 +24,12 @@ const InquiryDashboard = () => {
   return (
   <div className="page-scroll">
     <div className="greeting-bar">
-      <p className="greeting-title">Inquiry Dashboard</p>
+      <p className="greeting-title">{mine('Inquiry dashboard')}</p>
     </div>
     <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
         {[
-          { label: 'Total Inquiries', val: String(total) },
+          { label: mine('Total inquiries'), val: String(total) },
           { label: 'Pending Validation', val: String(pendingValidation) },
           { label: 'Approved / Under Review', val: String(underReview) },
           { label: 'Converted to Sale', val: String(convertedToSale) },
@@ -40,7 +43,7 @@ const InquiryDashboard = () => {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <div className="chart-card">
-          <div className="chart-title">Inquiry Conversion Funnel</div>
+          <div className="chart-title">{mine('Inquiry conversion funnel')}</div>
           <div className="chart-sub" style={{ marginBottom: 14 }}>Approved tickets, by stage</div>
           {[
             { label: 'Under Review', v: underReview, pct: pct(underReview), color: '#315EF6' },

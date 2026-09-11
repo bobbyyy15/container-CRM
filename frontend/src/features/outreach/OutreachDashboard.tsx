@@ -8,9 +8,14 @@ import { Trend, Prog } from '../../components/ui/primitives'
 import { useAnalytics } from '../../hooks/useAnalytics'
 import { useProspects } from '../../hooks/useProspects'
 import { downloadPdfDocument } from '../../lib/exporters'
+import { isAdminRole, scopedLabel } from '../../lib/scope'
 
-const OutreachDashboard = () => {
+const OutreachDashboard = ({ role }: { role?: string }) => {
   const analytics = useAnalytics()
+  // The API scopes these to the caller's PIC unless they are an admin, so the labels say
+  // whose numbers they are rather than implying the whole company's.
+  const isAdmin = isAdminRole(role)
+  const mine = (label: string) => scopedLabel(label, role)
   const m = analytics?.metrics || {}
   const prospects = useProspects() || []
   
@@ -71,7 +76,7 @@ const OutreachDashboard = () => {
     <div className="page-scroll">
       <div className="greeting-bar">
         <div>
-          <p className="greeting-title">Outreach Dashboard</p>
+          <p className="greeting-title">{mine('Outreach dashboard')}</p>
           <p className="greeting-sub">Daily targets, outreach completion, and profit progress — {todayStr}</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
@@ -93,7 +98,7 @@ const OutreachDashboard = () => {
             </>
           )}
           <Btn variant="ghost" sm onClick={() => void downloadPdfDocument({
-            title: 'OUTREACH PERFORMANCE REPORT',
+            title: isAdmin ? 'OUTREACH PERFORMANCE REPORT' : 'MY OUTREACH PERFORMANCE REPORT',
             scope: `Container CRM | ${dateRange}`,
             filename: 'outreach-performance',
             sections: [
@@ -135,7 +140,7 @@ const OutreachDashboard = () => {
             </div>
           </div>
           <div className="kpi-card">
-            <div className="kpi-label">Projected Period-End</div>
+            <div className="kpi-label">{mine('Projected period-end')}</div>
             <div className="kpi-value" style={{ fontSize: 22, color: 'var(--green)' }}>${projectedProfit.toLocaleString()}</div>
             <div className="kpi-sub">Based on current pace</div>
             <span className={`badge ${projectedPct >= 100 ? 'b-green' : 'b-amber'}`} style={{ marginTop: 8 }}>{projectedPct}% of target</span>
@@ -146,7 +151,7 @@ const OutreachDashboard = () => {
             <Trend val="0"/><div className="kpi-sub">vs previous {dateRange.replace('This ', '')}</div>
           </div>
           <div className="kpi-card">
-            <div className="kpi-label">Eligible Contacts</div>
+            <div className="kpi-label">{mine('Eligible contacts')}</div>
             <div className="kpi-value" style={{ fontSize: 22 }}>{eligibleContacts}</div>
             <div className="kpi-sub">For email, call, or text</div>
             <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>{excludedContacts} excluded (Removed)</div>

@@ -9,6 +9,7 @@ import { useAnalytics } from '../../hooks/useAnalytics'
 import { useCustomers } from '../../hooks/useCustomers'
 import { useContracts } from '../../hooks/useContracts'
 import { downloadPdfDocument } from '../../lib/exporters'
+import { isAdminRole, scopedLabel } from '../../lib/scope'
 import type { Screen, ProfitChartPoint, ChartSlice, PicPerformanceRow, LossReasonRow } from '../../app/types'
 
 // The only period-shaped numbers here are the sales figures. The funnel counts what is
@@ -87,7 +88,10 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
   }
   const money = (value: number | undefined) => loaded ? `$${(value || 0).toLocaleString()}` : '—'
   const count = (value: number | undefined) => loaded ? String(value || 0) : '—'
-  const isAdmin = role === 'admin'
+  const isAdmin = isAdminRole(role)
+  // Every figure below is already scoped by the backend to this person's PIC unless they
+  // are an admin. Say so in the label, so "Revenue" is never read as the company's.
+  const mine = (label: string) => scopedLabel(label, role)
 
   return (
     <div className="page-scroll">
@@ -95,7 +99,9 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
       <div className="greeting-bar">
         <div>
           <p className="greeting-title">{timeGreeting}, {userName}!</p>
-          <p className="greeting-sub">Sales figures cover {rangeLabel.toLowerCase()}. Pipeline and outreach always show where things stand now.</p>
+          <p className="greeting-sub">
+            {isAdmin ? 'Company-wide figures.' : 'Your figures only.'} Sales cover {rangeLabel.toLowerCase()}; pipeline and outreach always show where things stand now.
+          </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
           <div className="date-range" onClick={() => setShowDateMenu(!showDateMenu)}>
@@ -140,12 +146,14 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
                 { Channel: 'Calls',  Completed: analytics?.outreach?.calls || 0 },
                 { Channel: 'Texts',  Completed: analytics?.outreach?.texts || 0 },
               ]},
-              { title: 'Performance by PIC - this month', rows: (PIC_DATA || []).map(p => ({
+              // Admins only, exactly as on screen: the report should not hand a
+              // salesperson the leaderboard the dashboard withholds.
+              ...(isAdmin ? [{ title: 'Performance by PIC - this month', rows: (PIC_DATA || []).map(p => ({
                 PIC: p.name, Sales: p.sales, Units: p.units,
                 Revenue: `$${(p.revenue || 0).toLocaleString()}`,
                 'Gross Profit': `$${(p.profit || 0).toLocaleString()}`,
                 Emails: p.emails, Calls: p.calls, Texts: p.texts,
-              })) },
+              })) }] : []),
               { title: 'Inquiries on record, by status', rows: inquiryStatusData.map(d => ({ Status: d.name, Count: d.value })) },
             ],
           })}><Ic n={I.export} size={13} /> Export PDF</Btn>
@@ -159,7 +167,7 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
           {/* Featured KPI */}
           <div className="kpi-featured" style={{ background: 'linear-gradient(145deg, #2D4FE0 0%, #4C6FFF 100%)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 500 }}>Gross profit · {rangeLabel.toLowerCase()}</span>
+              <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 500 }}>{mine('Gross profit')} · {rangeLabel.toLowerCase()}</span>
             </div>
             <div>
               <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginBottom: 6 }}>{money(m.total_gross_profit)}</div>
@@ -185,13 +193,13 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
           {/* Secondary KPIs stacked */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">Revenue · {rangeLabel.toLowerCase()}</div>
+              <div className="kpi-label">{mine('Revenue')} · {rangeLabel.toLowerCase()}</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{money(m.total_revenue)}</div>
               {revenueDelta ? <Trend val={revenueDelta}/> : null}
               <div className="kpi-sub">{caption(Boolean(revenueDelta))}</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">Units sold · {rangeLabel.toLowerCase()}</div>
+              <div className="kpi-label">{mine('Units sold')} · {rangeLabel.toLowerCase()}</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{count(m.total_units)}</div>
               {unitsDelta ? <Trend val={unitsDelta}/> : null}
               <div className="kpi-sub">containers · {caption(Boolean(unitsDelta))}</div>
@@ -203,12 +211,12 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
                 definition -- a company counts as active while its last won sale is inside
                 three months -- and it has to agree with the Active Clients screen. */}
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">Active clients</div>
+              <div className="kpi-label">{mine('Active clients')}</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{count(m.active_clients)}</div>
               <div className="kpi-sub" style={{ marginTop: 6 }}>{loaded ? 'bought in the last 3 months' : 'loading…'}</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">Profit margin · {rangeLabel.toLowerCase()}</div>
+              <div className="kpi-label">{mine('Profit margin')} · {rangeLabel.toLowerCase()}</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{loaded ? `${(m.profit_margin || 0).toFixed(1)}%` : '—'}</div>
               {marginDelta !== null ? <Trend val={`${marginDelta > 0 ? '+' : ''}${marginDelta.toFixed(1)}pts`}/> : null}
               <div className="kpi-sub">{!loaded ? 'loading…' : marginDelta !== null ? `vs ${previousLabel}` : 'gross profit as a share of revenue'}</div>
@@ -219,7 +227,7 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
           <div className="chart-card">
             <div className="chart-header">
               <div>
-                <div className="chart-title">Gross profit by month</div>
+                <div className="chart-title">{mine('Gross profit')} by month</div>
                 <div className="chart-sub">Last 6 months · won sales{isAdmin ? ', all PICs' : ', your sales'} · not affected by the range above</div>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
@@ -252,7 +260,7 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
         <div className="card" style={{ overflow: 'hidden' }}>
           <div style={{ padding: '14px 20px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>Pipeline open now</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>{mine('Pipeline')} open now</span>
               <span style={{ fontSize: 11.5, color: 'var(--t3)', marginLeft: 8 }}>
                 Records still open at each stage · Sales counts what was won {range === 'all' ? 'at any time' : rangeLabel.toLowerCase()}
               </span>
@@ -287,7 +295,7 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
           {/* Outreach progress */}
           <div className="chart-card">
-            <div className="chart-title">Outreach · month to date</div>
+            <div className="chart-title">{mine('Outreach')} · month to date</div>
             <div className="chart-sub">Logged on Daily Tasks, against the daily target × working days</div>
             {[
               { label: 'Emails', done: analytics?.outreach?.emails || 0, target: (Number(analytics?.targets?.daily_email_target) || 0) * (Number(analytics?.targets?.working_days_per_month) || 22), color: '#315EF6' },
@@ -308,8 +316,8 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
 
           {/* Inquiry status donut */}
           <div className="chart-card">
-            <div className="chart-title">Inquiries by status</div>
-            <div className="chart-sub">Every inquiry on record, open or closed</div>
+            <div className="chart-title">{mine('Inquiries')} by status</div>
+            <div className="chart-sub">{isAdmin ? 'Every inquiry on record' : 'Every inquiry of yours'}, open or closed</div>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <ResponsiveContainer width={110} height={110}>
                 <PieChart>
@@ -332,7 +340,7 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
 
           {/* Category donut */}
           <div className="chart-card">
-            <div className="chart-title">Container sizes sold</div>
+            <div className="chart-title">{isAdmin ? 'Container sizes sold' : 'Container sizes you sold'}</div>
             <div className="chart-sub">Units on won sales · all time · size comes from the inquiry</div>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <ResponsiveContainer width={110} height={110}>
@@ -356,12 +364,12 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
         </div>
 
         {/* ── Row 4: Best Clients + PIC + Overdue ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isAdmin ? '1.6fr 1fr 1fr' : '1.6fr 1fr', gap: 12 }}>
           {/* Best Clients */}
           <div className="chart-card" style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div className="chart-title">Best clients by units</div>
+                <div className="chart-title">{isAdmin ? 'Best clients by units' : 'Your best clients by units'}</div>
                 <div className="chart-sub" style={{ marginBottom: 0 }}>Top 5 across all time</div>
               </div>
               <Btn variant="ghost" sm onClick={() => onNav('best-clients')}>View All →</Btn>
@@ -383,31 +391,34 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
             </table>
           </div>
 
-          {/* PIC Performance */}
-          <div className="chart-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '14px 18px 10px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div className="chart-title">PIC performance</div>
-                <div className="chart-sub" style={{ marginBottom: 0 }}>Won sales this month</div>
-              </div>
-              <Btn variant="ghost" sm onClick={() => onNav('pic-performance')}>View All →</Btn>
-            </div>
-            <div style={{ padding: '10px 18px 14px' }}>
-              {PIC_DATA.map((p, i) => (
-                <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: i < PIC_DATA.length - 1 ? 12 : 0 }}>
-                  <div className="avatar" style={{ width: 30, height: 30, borderRadius: 8, fontSize: 10, background: ['#315EF620','#7C3AED20','#0D948820','#D9770620'][i], color: ['#315EF6','#7C3AED','#0D9488','#D97706'][i] }}>{p.initials}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t1)' }}>{p.name.split(' ')[0]}</span>
-                      <span className="profit-cell" style={{ fontSize: 12 }}>${p.profit.toLocaleString()}</span>
-                    </div>
-                    <Prog pct={(p.sales / 10) * 100} color={['#315EF6','#7C3AED','#0D9488','#D97706'][i]} />
-                    <div style={{ fontSize: 10.5, color: 'var(--t4)', marginTop: 3 }}>{p.sales} sales · {p.units} units</div>
-                  </div>
+          {/* PIC Performance -- a leaderboard of other salespeople is management's
+              view, not a salesperson's, so it is admin-only. */}
+          {isAdmin && (
+            <div className="chart-card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ padding: '14px 18px 10px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div className="chart-title">PIC performance</div>
+                  <div className="chart-sub" style={{ marginBottom: 0 }}>Won sales this month</div>
                 </div>
-              ))}
+                <Btn variant="ghost" sm onClick={() => onNav('pic-performance')}>View All →</Btn>
+              </div>
+              <div style={{ padding: '10px 18px 14px' }}>
+                {PIC_DATA.map((p, i) => (
+                  <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: i < PIC_DATA.length - 1 ? 12 : 0 }}>
+                    <div className="avatar" style={{ width: 30, height: 30, borderRadius: 8, fontSize: 10, background: ['#315EF620','#7C3AED20','#0D948820','#D9770620'][i], color: ['#315EF6','#7C3AED','#0D9488','#D97706'][i] }}>{p.initials}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t1)' }}>{p.name.split(' ')[0]}</span>
+                        <span className="profit-cell" style={{ fontSize: 12 }}>${p.profit.toLocaleString()}</span>
+                      </div>
+                      <Prog pct={(p.sales / 10) * 100} color={['#315EF6','#7C3AED','#0D9488','#D97706'][i]} />
+                      <div style={{ fontSize: 10.5, color: 'var(--t4)', marginTop: 3 }}>{p.sales} sales · {p.units} units</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Overdue Pickups */}
           <div className="chart-card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -415,7 +426,7 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
               <div>
                 <div className="chart-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Ic n={I.warning} size={13} style={{ color: OVERDUE_PICKUPS.length > 0 ? 'var(--red)' : 'var(--t4)' }} />
-                  Overdue Pickups
+                  {mine('Overdue pickups')}
                 </div>
                 <div className="chart-sub" style={{ marginBottom: 0 }}>{OVERDUE_PICKUPS.length > 0 ? 'Past their scheduled pickup date' : 'Nothing past its pickup date'}</div>
               </div>

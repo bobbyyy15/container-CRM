@@ -54,7 +54,9 @@ export const NAV: NavGroup[] = [
   {
     label: 'Analytics',
     items: [
-      { id: 'pic-performance', label: 'PIC Performance', icon: I.analytics, roles: ['admin', 'sales_manager'] },
+      // A leaderboard comparing salespeople is management's view. Admin only, matching
+      // the Executive Overview, which no longer shows that card to anyone else.
+      { id: 'pic-performance', label: 'PIC Performance', icon: I.analytics, roles: ['admin'] },
       { id: 'best-clients', label: 'Best Clients', icon: I.flag, roles: ['admin', 'sales_manager'] },
       { id: 'profit-analytics', label: 'Profit Analytics', icon: I.profit, roles: ['admin', 'sales_manager'] },
       { id: 'inquiry-funnel', label: 'Inquiry Funnel', icon: I.inquiry, roles: ['admin', 'sales_manager'] },

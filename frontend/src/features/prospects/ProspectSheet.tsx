@@ -287,31 +287,38 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
             })
           }
         }
-      } else if (event.key === 'ArrowDown') {
+      } else if (event.key.startsWith('Arrow')) {
         event.preventDefault()
-        const nextR = Math.min(filtered.length - 1, bounds.r2 + 1)
-        setAnchor({ r: nextR, c: bounds.c1 })
-        setFocusCell({ r: nextR, c: bounds.c1 })
-      } else if (event.key === 'ArrowUp') {
-        event.preventDefault()
-        const nextR = Math.max(0, bounds.r1 - 1)
-        setAnchor({ r: nextR, c: bounds.c1 })
-        setFocusCell({ r: nextR, c: bounds.c1 })
-      } else if (event.key === 'ArrowRight') {
-        event.preventDefault()
-        const nextC = Math.min(visibleCols.length - 1, bounds.c2 + 1)
-        setAnchor({ r: bounds.r1, c: nextC })
-        setFocusCell({ r: bounds.r1, c: nextC })
-      } else if (event.key === 'ArrowLeft') {
-        event.preventDefault()
-        const nextC = Math.max(0, bounds.c1 - 1)
-        setAnchor({ r: bounds.r1, c: nextC })
-        setFocusCell({ r: bounds.r1, c: nextC })
+        const lastRow = filtered.length - 1
+        const lastCol = visibleCols.length - 1
+        const step = { ArrowDown: [1, 0], ArrowUp: [-1, 0], ArrowRight: [0, 1], ArrowLeft: [0, -1] }[event.key]
+        if (!step) return
+        const [dr, dc] = step
+
+        if (event.shiftKey && anchor && focusCell) {
+          // Grow or shrink from the anchor, so the block can reach sideways and
+          // diagonally rather than only down a single column.
+          setFocusCell({
+            r: Math.max(0, Math.min(lastRow, focusCell.r + dr)),
+            c: Math.max(0, Math.min(lastCol, focusCell.c + dc)),
+          })
+          return
+        }
+
+        // A plain arrow collapses the block and moves one cell from its edge.
+        const fromR = dr > 0 ? bounds.r2 : bounds.r1
+        const fromC = dc > 0 ? bounds.c2 : bounds.c1
+        const next = {
+          r: Math.max(0, Math.min(lastRow, fromR + dr)),
+          c: Math.max(0, Math.min(lastCol, fromC + dc)),
+        }
+        setAnchor(next)
+        setFocusCell(next)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [bounds, editingCell, filtered, visibleCols, localOverrides])
+  }, [bounds, anchor, focusCell, editingCell, filtered, visibleCols, localOverrides])
 
   // Ctrl/Cmd+C over the grid copies the selected block, not the whole page.
   useEffect(() => {
@@ -571,8 +578,8 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                         event.preventDefault()
                         beginSelect(ri, ci, event.shiftKey)
                       }}
-                      onMouseEnter={event => {
-                        if (draggingRef.current && anchor && !isEditing) setFocusCell({ r: ri, c: event.shiftKey ? ci : anchor.c })
+                      onMouseEnter={() => {
+                        if (draggingRef.current && anchor && !isEditing) setFocusCell({ r: ri, c: ci })
                       }}
                       onDoubleClick={event => {
                         event.stopPropagation()
@@ -763,7 +770,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           Showing {filtered.length} of {prospectsData.length} active records
           {bounds && (
             <span style={{ marginLeft: 10, color: 'var(--brand)', fontWeight: 600 }}>
-              · {bounds.r2 - bounds.r1 + 1} × {bounds.c2 - bounds.c1 + 1} selected — Ctrl+C to copy
+              · {bounds.r2 - bounds.r1 + 1} × {bounds.c2 - bounds.c1 + 1} selected — drag any direction, Shift+arrows to extend, Ctrl+C to copy
             </span>
           )}
         </span>

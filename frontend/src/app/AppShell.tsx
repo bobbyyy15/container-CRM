@@ -69,8 +69,8 @@ export default function AppShell({ session, currentProfile }: AppShellProps) {
   const renderScreen = () => {
     switch (screen) {
       case 'dashboard':           return <Dashboard onNav={handleNav} session={session} role={currentProfile?.role} />
-      case 'outreach-dashboard':  return <OutreachDashboard />
-      case 'inquiry-dashboard':   return <InquiryDashboard />
+      case 'outreach-dashboard':  return <OutreachDashboard role={currentProfile?.role} />
+      case 'inquiry-dashboard':   return <InquiryDashboard role={currentProfile?.role} />
       case 'prospects':           return <ProspectSheet mode="prospect" onNav={handleNav} />
       case 'warm-leads':          return <ProspectSheet mode="warm" onNav={handleNav} />
       case 'inquiries':           return <InquiryList />
@@ -84,7 +84,7 @@ export default function AppShell({ session, currentProfile }: AppShellProps) {
       case 'removed':             return <RemovedSheet />
       case 'deliverability':      return <Deliverability />
       case 'container-catalog':   return <ContainerCatalog />
-      case 'pic-performance':     return <PICPerformance />
+      case 'pic-performance':     return currentProfile?.role === 'admin' ? <PICPerformance /> : <Dashboard onNav={handleNav} session={session} role={currentProfile?.role} />
       case 'profit-analytics':    return <ProfitAnalytics />
       case 'daily-targets':       return <DailyTargets />
       case 'service-territories': return <ServiceTerritories />

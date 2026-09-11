@@ -11,6 +11,7 @@ import type { Screen, BadgeStatus } from '../../app/types'
 import { NewInquiryDialog, NewManualSaleDialog, type WarmLeadOption } from '../pipeline/PipelineDialogs'
 import { useCustomers } from '../../hooks/useCustomers'
 import { useWarmLeads } from '../../hooks/useWarmLeads'
+import { isAdminRole } from '../../lib/scope'
 
 const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Screen) => void }) => {
   const [tab, setTab] = useState('All')
@@ -43,6 +44,7 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
   }
 
   const canDelete = role === 'admin' || role === 'sales_manager'
+  const isAdmin = isAdminRole(role)
 
   // Scoped to this manager's own PIC by the backend, so deleting here never
   // touches a colleague's sales for the same company.
@@ -70,8 +72,12 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="page-header">
         <div>
-          <div className="page-title">Active Clients Dashboard</div>
-          <div className="page-desc">Your dedicated client portfolio. Manage repeat buyers, monitor lifetime value, and trigger quick deals.</div>
+          <div className="page-title">{isAdmin ? 'Active clients' : 'Your active clients'}</div>
+          <div className="page-desc">
+            {isAdmin
+              ? 'Every client with a purchase in the last three months, across the company.'
+              : 'Your repeat buyers: clients you have sold to in the last three months.'}
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn variant="secondary" sm onClick={() => setShowNewInquiry(true)}><Ic n={I.inquiry} size={13} /> New Inquiry</Btn>
