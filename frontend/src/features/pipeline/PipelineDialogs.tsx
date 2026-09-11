@@ -91,6 +91,9 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
   const [email, setEmail] = useState('')
   const [stateProvince, setStateProvince] = useState('')
   const [country, setCountry] = useState('')
+  // Where the customer is, in full: state and country alone left the address half
+  // recorded at the one moment somebody is actually looking them up.
+  const [city, setCity] = useState('')
   const [picId, setPicId] = useState('')
   const [containerSizeId, setContainerSizeId] = useState('')
   const [containerConditionId, setContainerConditionId] = useState('')
@@ -179,6 +182,7 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
           ...shared,
           stateProvince: stateProvince.trim() || undefined,
           country: country.trim() || undefined,
+          city: city.trim() || undefined,
         })
       } else {
         await api.post('/leads/inquiries', {
@@ -189,6 +193,7 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
           email: email.trim() || undefined,
           stateProvince: stateProvince.trim() || undefined,
           country: country.trim() || undefined,
+          city: city.trim() || undefined,
           picId: picId || undefined,
         })
       }
@@ -332,6 +337,10 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
           )}
 
           {(source === 'warmLead' ? warmLeads.length > 0 : true) && <>
+            <div>
+              <FieldLabel label="City" optional />
+              <input className="inp" value={city} onChange={event => setCity(event.target.value)} placeholder="e.g. Pueblo" />
+            </div>
             <div>
               <FieldLabel label="State / Province" optional />
               <input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. CO, ON" />

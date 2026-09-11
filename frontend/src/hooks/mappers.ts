@@ -49,12 +49,19 @@ export const mapQuotationRow = (row: any) => {
   return {
     id: row.id,
     inquiryId: row.inquiry_id,
+    companyId: row.company_id,
+    contactId: row.contact_id,
     ref: `QUO-${row.id.slice(0, 8).toUpperCase()}`,
     date: new Date(row.created_at).toLocaleDateString(),
     co: row.companies?.name || '',
     contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
     category: items[0]?.description || 'Container',
-    size: '—',
+    size: row.inquiries?.container_sizes?.name || '—',
+    condition: row.inquiries?.container_conditions?.name || '—',
+    // Whether the customer has actually seen it. A quotation sits in Draft until it goes
+    // out; every later status means it was sent.
+    sent: row.status !== 'Draft',
+    createdAt: row.created_at,
     qty: quantity,
     sellTotal: total,
     profit: 0,

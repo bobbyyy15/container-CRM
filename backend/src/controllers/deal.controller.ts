@@ -29,7 +29,11 @@ export class DealController {
 
       const { data, error } = await supabaseAdmin
         .from('quotations')
-        .select('*, companies(*), contacts(*), pics(name), quotation_items(*)')
+        // What was quoted for is recorded on the inquiry, so the quotation list can show
+        // size and condition instead of a dash. An inquiry has two of each -- the
+        // requirement and the Procurement alternative -- so the embed names the column.
+        .select('*, companies(*), contacts(*), pics(name), quotation_items(*), '
+          + 'inquiries(container_sizes!container_size_id(name), container_conditions!container_condition_id(name)))')
         .eq('pic_id', picId)
         .order('created_at', { ascending: false });
 

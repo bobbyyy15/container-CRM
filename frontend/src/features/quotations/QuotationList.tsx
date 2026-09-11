@@ -24,9 +24,16 @@ const QuotationList = () => {
   const [viewRow, setViewRow] = useState<any>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  // Whether it has gone out to the customer, which is the question people actually ask of
+  // this list -- the detailed status is a second question.
+  const [sentFilter, setSentFilter] = useState<'' | 'sent' | 'unsent'>('')
   const [picFilter, setPicFilter] = useState('')
   const quotes = useQuotations(revision)
   const inquiries = useInquiries(revision)
+  // Every inquiry this customer has raised, closed ones included: pricing a repeat order
+  // is done against what they asked for before, and the converted and lost ones are the
+  // most telling of all. The working list leaves those out.
+  const allInquiries = useInquiries(revision, 'all')
   const quotePics = [...new Set(quotes.map(q => q.pic).filter(Boolean))].sort() as string[]
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const handleDelete = (q: any) => confirmDelete({
@@ -42,8 +49,9 @@ const QuotationList = () => {
     const searchMatch = !term || [q.co, q.contact, q.ref, q.category].some(value => String(value).toLowerCase().includes(term))
     const statusMatch = !statusFilter || q.status === statusFilter
     const picMatch = !picFilter || q.pic === picFilter
-    return searchMatch && statusMatch && picMatch
-  })
+    const sentMatch = !sentFilter || (sentFilter === 'sent' ? q.sent : !q.sent)
+    return searchMatch && statusMatch && picMatch && sentMatch
+  }).sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
 
   const selection = useRowSelection(filteredQuotes.map(q => q.id))
 
@@ -156,6 +164,11 @@ const QuotationList = () => {
           <option value="Rejected">Rejected</option>
           <option value="Converted">Converted</option>
         </select>
+        <select className="sel" value={sentFilter} onChange={e => setSentFilter(e.target.value as '' | 'sent' | 'unsent')} aria-label="Sent or unsent">
+          <option value="">Sent and unsent</option>
+          <option value="sent">Sent</option>
+          <option value="unsent">Unsent</option>
+        </select>
         <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{quotePics.map(p => <option key={p} value={p}>{p}</option>)}</select>
         <BulkBar count={selection.selected.length} busy={bulkDeleting} onDelete={handleBulkDelete} />
         <div className="toolbar-right">
@@ -179,14 +192,14 @@ const QuotationList = () => {
                 onChange={e => selection.toggleAll(e.target.checked)}
               />
             </th>
-            <th>Quote #</th><th>Date</th><th>Company</th><th>Category</th><th>Size</th>
+            <th>Quote #</th><th>Date</th><th>Company</th><th>Category</th><th>Size</th><th>Condition</th>
             <th className="r">Qty</th><th className="r">Total Sell</th><th className="r">Est. Profit</th>
-            <th className="r">Margin</th><th>Status</th><th>Source</th><th>PIC</th><th className="col-actions">Actions</th>
+            <th className="r">Margin</th><th>Sent</th><th>Status</th><th>Source</th><th>PIC</th><th className="col-actions">Actions</th>
           </tr></thead>
           <tbody>
             {filteredQuotes.length === 0 && (
               <EmptyTableState
-                colSpan={14}
+                colSpan={16}
                 icon={I.quote}
                 title="No quotations found"
                 subtitle={search || statusFilter || picFilter
@@ -216,10 +229,14 @@ const QuotationList = () => {
                 </td>
                 <td style={{ fontSize: 12.5 }}>{q.category}</td>
                 <td className="mono">{q.size}</td>
+                <td style={{ fontSize: 12 }}>{q.condition}</td>
                 <td className="r mono bold">{q.qty}</td>
                 <td className="r revenue-cell">${q.sellTotal.toLocaleString()}</td>
                 <td className="r profit-cell">${q.profit.toLocaleString()}</td>
                 <td className="r mono" style={{ fontWeight: 700, color: 'var(--green)' }}>{q.margin.toFixed(1)}%</td>
+                <td>
+                  <span className={`badge ${q.sent ? 'b-green' : 'b-amber'}`} style={{ fontSize: 10.5 }}>{q.sent ? 'Sent' : 'Unsent'}</span>
+                </td>
                 <td><Badge status={q.status as BadgeStatus} /></td>
                 <td><span className="ref-id" style={{ color: 'var(--orange)', fontSize: 11 }}>{q.source}</span></td>
                 <td><ChipPIC label={q.pic} /></td>
@@ -259,8 +276,45 @@ const QuotationList = () => {
             { label: 'Margin', value: `${viewRow.margin.toFixed(1)}%` },
             { label: 'Source inquiry', value: viewRow.source },
             { label: 'PIC', value: viewRow.pic },
+            { label: 'Size', value: viewRow.size },
+            { label: 'Condition', value: viewRow.condition },
+            { label: 'Sent to customer', value: viewRow.sent ? 'Yes' : 'Not yet' },
             { label: 'Date', value: viewRow.date },
           ]}
+          width={620}
+          extra={(() => {
+            const history = allInquiries
+              .filter(i => (viewRow.companyId && i.companyId === viewRow.companyId)
+                || (viewRow.contactId && i.contactId === viewRow.contactId))
+              .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
+            return (
+              <div style={{ borderTop: '1px solid var(--border-s)', paddingTop: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 6 }}>
+                  Inquiry history for this customer
+                </div>
+                {history.length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: 'var(--t4)' }}>No inquiries on record for this customer.</div>
+                ) : (
+                  <div style={{ maxHeight: 210, overflow: 'auto', border: '1px solid var(--border-s)', borderRadius: 8 }}>
+                    <table className="crm" style={{ width: '100%' }}>
+                      <thead><tr><th>Date</th><th>Size</th><th>Condition</th><th className="r">Qty</th><th>Status</th></tr></thead>
+                      <tbody>
+                        {history.map(h => (
+                          <tr key={h.id}>
+                            <td className="mono" style={{ fontSize: 11.5 }}>{h.date}</td>
+                            <td style={{ fontSize: 12 }}>{h.size}</td>
+                            <td style={{ fontSize: 12 }}>{h.condition}</td>
+                            <td className="r mono" style={{ fontSize: 12 }}>{h.qty}</td>
+                            <td><Badge status={h.status as BadgeStatus} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         />
       )}
     </div>

@@ -37,6 +37,19 @@ export class LeadService {
 
     if (error) throw new Error(`Failed to create inquiry: ${error.message}`);
     const convertedCompanyId = (data as { company_id?: string } | null)?.company_id;
+    // create_inquiry_from_warm_lead predates the city field and takes state and country
+    // only, so the city is recorded here -- and only when the company has none, so an
+    // address already on file is never overwritten.
+    if (convertedCompanyId && payload.city?.trim()) {
+      const { data: company } = await supabaseAdmin
+        .from('companies')
+        .select('address_city')
+        .eq('id', convertedCompanyId)
+        .maybeSingle();
+      if (!company?.address_city?.trim()) {
+        await supabaseAdmin.from('companies').update({ address_city: payload.city.trim() }).eq('id', convertedCompanyId);
+      }
+    }
     if (convertedCompanyId) {
       await supabaseAdmin
         .from('prospect_clients')
@@ -126,6 +139,7 @@ export class LeadService {
         p_remarks: payload.remarks ?? null,
         p_follow_up_date: payload.followUpDate ?? null,
         p_needed_by_date: payload.neededByDate ?? null,
+        p_city: payload.city ?? null,
       })
       .single();
 

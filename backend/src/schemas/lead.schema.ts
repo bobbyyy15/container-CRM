@@ -19,6 +19,7 @@ export const CreateInquirySchema = z.object({
   followUpDate: z.string().date().optional(),
   stateProvince: z.string().trim().max(100).optional(),
   country: z.string().trim().max(100).optional(),
+  city: z.string().trim().max(100).optional(),
 });
 
 export const CreateManualWarmLeadSchema = z.object({
@@ -49,6 +50,7 @@ export const CreateManualInquirySchema = z.object({
   email: z.string().trim().max(200).optional(),
   stateProvince: z.string().trim().max(100).optional(),
   country: z.string().trim().max(100).optional(),
+  city: z.string().trim().max(100).optional(),
   picId: z.string().uuid().optional(),
   containerSizeId: z.string().uuid(),
   containerConditionId: z.string().uuid(),
