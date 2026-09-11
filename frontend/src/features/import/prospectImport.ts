@@ -233,9 +233,16 @@ const US_STATES = new Set(('al ak az ar ca co ct de fl ga hi id il in ia ks ky l
 const COUNTRY_CODES = new Set(['us', 'usa', 'united states', 'ca', 'can', 'canada', 'mx', 'mexico', 'ph', 'phl', 'philippines'])
 const STREET_WORDS = /\b(rd|road|st|street|ave|avenue|blvd|hwy|highway|ln|lane|dr|drive|ct|court|way|pkwy|circle|cir|county|cr|mcr|route|rt|box|suite|ste|apt|unit|floor|fl)\b/i
 
+const COMPANY_SUFFIX = /\b(llc|l\.l\.c|inc|incorporated|corp|corporation|co|company|ltd|limited|plc|gmbh|pte|bv|sa|srl|llp|lp|group|holdings|enterprises?|industries|logistics|freight|lines|shipping|trucking|transport|trading|services|solutions|supply|systems)\b\.?$/i
+const CODE_LIKE = /^[a-z]{0,4}[-_ ]?\d+[a-z]?$/i
+
 const isStateCell = (v: string) => US_STATES.has(v.toLowerCase()) || (v.length <= 3 && /^[a-z]{2,3}$/i.test(v))
 const isCountryCell = (v: string) => COUNTRY_CODES.has(v.toLowerCase())
-const isAddressCell = (v: string) => /\d/.test(v) && (STREET_WORDS.test(v) || v.split(/\s+/).length >= 3)
+// A street address starts with a house number or names a street type. Merely holding a
+// digit and three words is not enough: "RAW HAULERS 1 LLC" cleared that bar and got
+// claimed as the address column, pushing the company name out of its own field.
+const isAddressCell = (v: string) =>
+  /\d/.test(v) && !COMPANY_SUFFIX.test(v) && (STREET_WORDS.test(v) || /^\d+\s+\S/.test(v))
 const isPersonCell = (v: string) => {
   const words = v.split(/\s+/).filter(Boolean)
   return words.length >= 2 && words.length <= 4 && words.every(w => /^[a-z.'-]+$/i.test(w)) && !COMPANY_SUFFIX.test(v)
@@ -326,8 +333,6 @@ const inferHeaderlessColumns = (rows: { row: unknown[]; rowNumber: number }[]): 
  * separate it from a company column -- and when nothing scores, nothing is guessed, which
  * keeps a sheet of IDs and flags from being imported as companies.
  */
-const COMPANY_SUFFIX = /\b(llc|l\.l\.c|inc|incorporated|corp|corporation|co|company|ltd|limited|plc|gmbh|pte|bv|sa|srl|llp|lp|group|holdings|enterprises?|industries|logistics|freight|lines|shipping|trucking|transport|trading|services|solutions|supply|systems)\b\.?$/i
-const CODE_LIKE = /^[a-z]{0,4}[-_ ]?\d+[a-z]?$/i
 
 const inferCompanyColumn = (
   mapped: (keyof ProspectImportRow | undefined)[],
@@ -360,19 +365,34 @@ const inferCompanyColumn = (
   return scored[0]?.c
 }
 
-export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport => {
-  const nonEmpty = matrix
-    .map((row, index) => ({ row, rowNumber: index + 1 }))
-    .filter(item => item.row.some(cell => clean(cell)))
-  if (nonEmpty.length === 0) return { rows: [], submitRows: [], errors: [{ message: 'The sheet must contain prospect data.', kind: 'issue' }], sourceRows: 0 }
+/**
+ * A transposed sheet runs field labels DOWN a column, with each prospect in a column of
+ * its own -- the shape of a filled-in form rather than a table.
+ *
+ * The catch is that an ordinary sheet's header row is also made of field labels, so a
+ * naive reading turns "Date Added | PIC | Category | ..." into a record per header and
+ * rotates the whole file. Hence the gate: the labels must run down a column, at least
+ * three of them, at the same column index and naming different fields. One header row can
+ * never satisfy that, and a real vertical form always does.
+ */
+const parseTransposed = (nonEmpty: { row: unknown[]; rowNumber: number }[]): ParsedProspectImport | null => {
+  const labelled = nonEmpty
+    .map(({ row }) => {
+      const labelIndex = row.findIndex(cell => Boolean(resolveField(cell)))
+      return labelIndex < 0 ? null : { row, labelIndex, field: resolveField(row[labelIndex])! }
+    })
+    .filter((entry): entry is { row: unknown[]; labelIndex: number; field: keyof ProspectImportRow } => entry !== null)
 
-  // Accept transposed sheets too: field labels run downward while prospects run
-  // across columns. A two-column key/value form is the one-record version of this.
+  const byColumn = new Map<number, typeof labelled>()
+  labelled.forEach(entry => byColumn.set(entry.labelIndex, [...(byColumn.get(entry.labelIndex) ?? []), entry]))
+  const labelColumn = [...byColumn.entries()]
+    .map(([index, entries]) => ({ index, entries, fields: new Set(entries.map(e => e.field)).size }))
+    .sort((a, b) => b.fields - a.fields)[0]
+
+  if (!labelColumn || labelColumn.fields < 3) return null
+
   const transposed = new Map<number, Record<string, string>>()
-  nonEmpty.forEach(({ row }) => {
-    const labelIndex = row.findIndex(cell => Boolean(resolveField(cell)))
-    if (labelIndex < 0) return
-    const field = resolveField(row[labelIndex])!
+  labelColumn.entries.forEach(({ row, labelIndex, field }) => {
     row.slice(labelIndex + 1).forEach((cell, offset) => {
       const value = clean(cell)
       if (!value) return
@@ -382,15 +402,32 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
       transposed.set(column, record)
     })
   })
-  const transposedCandidates = [...transposed.entries()]
+
+  const candidates = [...transposed.entries()]
     .sort(([a], [b]) => a - b)
     .map(([column, record]) => ({ record, rowNumber: column + 1 }))
-  const transposedResult = validateCandidates(transposedCandidates)
-  if (transposedResult.rows.length) return transposedResult
+  return candidates.length ? validateCandidates(candidates) : null
+}
+
+export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport => {
+  const nonEmpty = matrix
+    .map((row, index) => ({ row, rowNumber: index + 1 }))
+    .filter(item => item.row.some(cell => clean(cell)))
+  if (nonEmpty.length === 0) return { rows: [], submitRows: [], errors: [{ message: 'The sheet must contain prospect data.', kind: 'issue' }], sourceRows: 0 }
+
+  const transposedResult = parseTransposed(nonEmpty)
 
   const headerCandidate = nonEmpty
     .slice(0, 25)
-    .map(item => ({ ...item, recognized: item.row.filter(cell => resolveField(cell)).length }))
+    .map(item => {
+      const filled = item.row.map(clean).filter(Boolean)
+      // A row holding an email or a phone number is a record, not a description of one.
+      // That alone separates them: requiring most cells to be labels as well rejected
+      // real headers whose columns are mostly unfamiliar (e.g. "Ref | Count | Flag | Email").
+      const carriesData = filled.some(value => isEmailCell(value) || isPhoneCell(value))
+      const recognized = item.row.filter(cell => resolveField(cell)).length
+      return { ...item, recognized: carriesData ? 0 : recognized }
+    })
     .sort((a, b) => b.recognized - a.recognized)[0]
   
   const hasMultiHeader = headerCandidate && headerCandidate.recognized >= 2 && nonEmpty.length > 1
@@ -449,6 +486,11 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
   })
 
   const result = validateCandidates(candidates, dataRows.length)
+
+  // Both readings are now on the table: take the one that found more prospects, and on a
+  // tie the ordinary row-wise one, which is what nearly every sheet is.
+  if (transposedResult && transposedResult.rows.length > result.rows.length) return transposedResult
+
   if (inferredCompanyLabel && result.rows.length) {
     result.errors.unshift({
       message: `No column was named like a company, so "${inferredCompanyLabel}" was read as the Company Name. `
