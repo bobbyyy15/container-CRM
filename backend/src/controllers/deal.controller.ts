@@ -51,7 +51,14 @@ export class DealController {
         // A manually recorded sale has no quotation, so the contact cannot come from
         // quotations(...) alone -- it rendered blank in Sales Tracker even when the
         // company had a contact on file. Embed the company's contacts as a fallback.
-        .select('*, companies(*, company_contacts(is_primary, contacts(*))), pics(name), quotations(*, contacts(*), quotation_items(*))')
+        // Size and condition are recorded on a manual sale and live on the inquiry behind
+        // the quotation otherwise, so both are embedded and the mapper prefers the sale's own.
+        .select('*, companies(*, company_contacts(is_primary, contacts(*))), pics(name), '
+          + 'container_sizes(name), container_conditions(name), '
+          // An inquiry has two size and two condition FKs -- the requirement and the
+          // Procurement-suggested alternative -- so the embed has to name the column.
+          + 'quotations(*, contacts(*), quotation_items(*), '
+          + 'inquiries(container_sizes!container_size_id(name), container_conditions!container_condition_id(name)))')
         .order('created_at', { ascending: false });
       if (!seesAllSales) query = query.eq('pic_id', picId!);
       const { data, error } = await query;

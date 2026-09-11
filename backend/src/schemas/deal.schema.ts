@@ -32,6 +32,12 @@ export const CreateManualSaleSchema = z.object({
   revenue: z.number().min(0),
   stateProvince: z.string().trim().max(100).optional(),
   country: z.string().trim().max(100).optional(),
+  city: z.string().trim().max(100).optional(),
+  // What was sold, and when it was sold -- a sale entered after the fact is dated by the
+  // person entering it, not by the clock.
+  containerSizeId: z.string().uuid().optional(),
+  containerConditionId: z.string().uuid().optional(),
+  saleDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional(),
 });
 
 export const UpdateSaleStatusSchema = z.object({

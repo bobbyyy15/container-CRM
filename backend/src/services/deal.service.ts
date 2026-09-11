@@ -43,9 +43,13 @@ export class DealService {
         p_revenue: payload.revenue,
         p_state_province: payload.stateProvince ?? null,
         p_country: payload.country ?? null,
+        p_city: payload.city ?? null,
+        p_container_size_id: payload.containerSizeId ?? null,
+        p_container_condition_id: payload.containerConditionId ?? null,
+        p_sale_date: payload.saleDate ?? null,
       })
       .single();
-    if (error) throw new Error(`Failed to create sale: ${error.message}`);
+    if (error) throw new Error(error.code === 'P0001' ? error.message : `Failed to create sale: ${error.message}`);
     const convertedCompanyId = (sale as { company_id?: string } | null)?.company_id;
     if (convertedCompanyId) {
       await supabaseAdmin

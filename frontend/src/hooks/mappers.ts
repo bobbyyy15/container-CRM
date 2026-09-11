@@ -74,13 +74,16 @@ export const mapSaleRow = (row: any) => {
   return {
     id: row.id,
     ref: `SAL-${row.id.slice(0, 8).toUpperCase()}`,
-    date: new Date(row.created_at).toLocaleDateString(),
-    createdAt: row.created_at,
+    // sale_date is the day the sale happened; created_at is when the row was typed in.
+    date: new Date(row.sale_date ?? row.created_at).toLocaleDateString(),
+    createdAt: row.sale_date ?? row.created_at,
     company: row.companies?.name || '',
     contact: fullName(quote.contacts) || fullName(companyContact),
     category: item?.description || 'Container',
-    size: '—',
-    condition: '—',
+    // The sale's own values when it was recorded by hand, otherwise the inquiry that the
+    // quotation came from. Sales Tracker used to print an em dash for every row.
+    size: row.container_sizes?.name || quote.inquiries?.container_sizes?.name || '—',
+    condition: row.container_conditions?.name || quote.inquiries?.container_conditions?.name || '—',
     qty: units,
     buyPU: units ? buyingCost / units : 0,
     sellPU: units ? revenue / units : 0,

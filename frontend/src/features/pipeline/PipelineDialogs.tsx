@@ -800,6 +800,14 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
   const [sellPerUnit, setSellPerUnit] = useState(0)
   const [stateProvince, setStateProvince] = useState(initialData?.stateProvince ?? '')
   const [country, setCountry] = useState(initialData?.country ?? '')
+  const [city, setCity] = useState('')
+  // What was sold, and when. A sale recorded after the fact is dated by the person
+  // entering it; today is only the starting value.
+  const [saleDate, setSaleDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [containerSizeId, setContainerSizeId] = useState('')
+  const [containerConditionId, setContainerConditionId] = useState('')
+  const sizes = useCatalog('/catalog/sizes')
+  const conditions = useCatalog('/catalog/conditions')
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
 
@@ -825,6 +833,10 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
         revenue,
         stateProvince: stateProvince.trim() || undefined,
         country: country.trim() || undefined,
+        city: city.trim() || undefined,
+        containerSizeId: containerSizeId || undefined,
+        containerConditionId: containerConditionId || undefined,
+        saleDate: saleDate || undefined,
       })
       onSaved()
       onClose()
@@ -867,8 +879,30 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
             <input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. TX, CA" />
           </div>
           <div>
+            <FieldLabel label="City" optional />
+            <input className="inp" value={city} onChange={event => setCity(event.target.value)} placeholder="e.g. Pueblo" />
+          </div>
+          <div>
             <FieldLabel label="Country" optional />
             <input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" />
+          </div>
+          <div>
+            <FieldLabel label="Date of sale" required />
+            <input className="inp" type="date" value={saleDate} max={new Date().toISOString().slice(0, 10)} onChange={event => setSaleDate(event.target.value)} required />
+          </div>
+          <div>
+            <FieldLabel label="Container size" optional />
+            <select className="inp" value={containerSizeId} onChange={event => setContainerSizeId(event.target.value)}>
+              <option value="">Not specified</option>
+              {sizes.map(size => <option key={size.id} value={size.id}>{size.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <FieldLabel label="Condition" optional />
+            <select className="inp" value={containerConditionId} onChange={event => setContainerConditionId(event.target.value)}>
+              <option value="">Not specified</option>
+              {conditions.map(condition => <option key={condition.id} value={condition.id}>{condition.name}</option>)}
+            </select>
           </div>
           <div>
             <FieldLabel label="Units" required />
@@ -879,7 +913,7 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
             <input className="inp" type="number" min="0" step="1" value={buyPerUnit || ''} onChange={event => setBuyPerUnit(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required />
           </div>
           <div>
-            <FieldLabel label="Selling cost / unit ($)" required />
+            <FieldLabel label="Selling price / unit ($)" required />
             <input className="inp" type="number" min="0" step="1" value={sellPerUnit || ''} onChange={event => setSellPerUnit(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required />
           </div>
           <div style={{ gridColumn: '1 / -1', padding: 12, borderRadius: 8, background: 'var(--s2)', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
