@@ -229,29 +229,87 @@ const columnStats = (rows: { row: unknown[] }[], maxCols: number): ColumnStats[]
     }
   })
 
+const US_STATES = new Set(('al ak az ar ca co ct de fl ga hi id il in ia ks ky la me md ma mi mn ms mo mt ne nv nh nj nm ny nc nd oh ok or pa ri sc sd tn tx ut vt va wa wv wi wy dc pr').split(' '))
+const COUNTRY_CODES = new Set(['us', 'usa', 'united states', 'ca', 'can', 'canada', 'mx', 'mexico', 'ph', 'phl', 'philippines'])
+const STREET_WORDS = /\b(rd|road|st|street|ave|avenue|blvd|hwy|highway|ln|lane|dr|drive|ct|court|way|pkwy|circle|cir|county|cr|mcr|route|rt|box|suite|ste|apt|unit|floor|fl)\b/i
+
+const isStateCell = (v: string) => US_STATES.has(v.toLowerCase()) || (v.length <= 3 && /^[a-z]{2,3}$/i.test(v))
+const isCountryCell = (v: string) => COUNTRY_CODES.has(v.toLowerCase())
+const isAddressCell = (v: string) => /\d/.test(v) && (STREET_WORDS.test(v) || v.split(/\s+/).length >= 3)
+const isPersonCell = (v: string) => {
+  const words = v.split(/\s+/).filter(Boolean)
+  return words.length >= 2 && words.length <= 4 && words.every(w => /^[a-z.'-]+$/i.test(w)) && !COMPANY_SUFFIX.test(v)
+}
+
+/**
+ * Work out what each column holds when the sheet has no header row at all -- a plain paste
+ * out of Excel, which is how most of this data arrives.
+ *
+ * Columns are claimed by what their cells actually look like, strongest signal first, and
+ * only then by position. The previous version recognized one email and one phone and then
+ * handed the leftover columns to company / contact / city / state in order, which quietly
+ * mangled the common export shape: a second phone column became the city, and the street
+ * address became the state. Those wrong values then decide company identity on import (the
+ * match is on name plus country/state/city), so every row after the first collided with the
+ * company it had just created and came back as a conflict.
+ */
 const inferHeaderlessColumns = (rows: { row: unknown[]; rowNumber: number }[]): (keyof ProspectImportRow | undefined)[] => {
   if (!rows.length) return []
   const maxCols = Math.max(...rows.map(r => r.row.length))
   if (maxCols === 0) return []
 
-  const colStats = columnStats(rows, maxCols)
-
   const mapping: (keyof ProspectImportRow | undefined)[] = new Array(maxCols).fill(undefined)
+  const columns = Array.from({ length: maxCols }, (_, c) => {
+    const values = rows.map(r => clean(r.row[c])).filter(Boolean)
+    const share = (predicate: (v: string) => boolean) =>
+      values.length ? values.filter(predicate).length / values.length : 0
+    return {
+      c,
+      values,
+      total: values.length,
+      email: share(isEmailCell),
+      phone: share(isPhoneCell),
+      state: share(isStateCell),
+      country: share(isCountryCell),
+      address: share(v => isAddressCell(v) && !isPhoneCell(v)),
+      person: share(v => isPersonCell(v) && !isEmailCell(v)),
+      company: share(v => COMPANY_SUFFIX.test(v)),
+      word: share(v => /[a-z]/i.test(v) && !isEmailCell(v) && !isPhoneCell(v) && !isNumericCell(v) && !isDateCell(v) && !isFlagCell(v)),
+    }
+  }).filter(column => column.total > 0)
 
-  // 1. Map email column
-  const emailCol = colStats.find(s => s.emailCount > 0 && s.emailCount >= s.total * 0.3)
-  if (emailCol) mapping[emailCol.c] = 'email_active'
+  const free = () => columns.filter(column => !mapping[column.c])
+  /** Claim the column that scores highest on `of`, if it clears `floor`. */
+  const claim = (field: keyof ProspectImportRow, of: (column: typeof columns[number]) => number, floor = 0.5) => {
+    const best = free().sort((a, b) => of(b) - of(a))[0]
+    if (best && of(best) >= floor) {
+      mapping[best.c] = field
+      return best
+    }
+    return undefined
+  }
 
-  // 2. Map phone column
-  const phoneCol = colStats.find(s => s.c !== emailCol?.c && s.phoneCount > 0 && s.phoneCount >= s.total * 0.3)
-  if (phoneCol) mapping[phoneCol.c] = 'contact_number_direct'
-
-  // 3. Map remaining text columns
-  const unassigned = colStats.filter(s => mapping[s.c] === undefined && s.total > 0)
-  if (unassigned.length > 0) mapping[unassigned[0].c] = 'company_name'
-  if (unassigned.length > 1) mapping[unassigned[1].c] = 'contact_person'
-  if (unassigned.length > 2) mapping[unassigned[2].c] = 'city'
-  if (unassigned.length > 3) mapping[unassigned[3].c] = 'state_province'
+  // Unambiguous shapes first: an email is an email wherever it sits.
+  claim('email_active', column => column.email, 0.3)
+  claim('email_2', column => column.email, 0.3)
+  claim('contact_number_direct', column => column.phone, 0.3)
+  claim('contact_number_2', column => column.phone, 0.3)
+  // Country and state before company: "CO" is Colorado here, not the suffix of "& Co".
+  claim('country', column => column.country, 0.7)
+  claim('state_province', column => column.state, 0.7)
+  claim('address', column => column.address, 0.5)
+  // Then the two that carry the record: a legal suffix marks the company, and a plain
+  // two-or-three-word all-letters cell marks the person.
+  claim('company_name', column => column.company, 0.4)
+  claim('contact_person', column => column.person, 0.5)
+  // Whatever is still unclaimed falls back to position, left to right, for the fields a
+  // prospect cannot do without.
+  const remaining = free().filter(column => column.word >= 0.5)
+  const missing = (['company_name', 'contact_person', 'city'] as const).filter(field => !mapping.includes(field))
+  missing.forEach((field, index) => {
+    const column = remaining[index]
+    if (column) mapping[column.c] = field
+  })
 
   return mapping
 }

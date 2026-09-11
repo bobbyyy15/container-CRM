@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
 import { api } from '../../lib/api'
+import { toast } from '../../lib/notify'
 import {
   parseProspectFile,
   parseProspectPaste,
@@ -91,10 +92,22 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
       // each one when it happened, so a clean import reads as a clean import.
       const skipped = result.skippedCount ? ` · ${result.skippedCount} skipped (incomplete source rows)` : ''
       const recorded = result.errorCount ? ` · ${result.errorCount} recorded for review` : ''
-      setMessage(
-        `${result.importedCount} imported${withoutContact} · ${result.duplicateCount} duplicates · ${result.removedCount} removed · ${result.conflictCount} conflicts${skipped}${recorded}`,
-      )
+      const summary = `${result.importedCount} imported${withoutContact} · ${result.duplicateCount} duplicates · ${result.removedCount} removed · ${result.conflictCount} conflicts${skipped}${recorded}`
       onImported()
+
+      // The import is done and the grid behind this dialog already shows the result, so
+      // close rather than making the user dismiss a box to see what they just imported.
+      // The summary goes to a toast so it survives the close; anything that still needs a
+      // person (a conflict, or a row recorded for review) is flagged as such, and the
+      // dialog stays open so those rows can be read right here.
+      const needsAttention = (result.conflictCount ?? 0) + (result.errorCount ?? 0) > 0
+      if (!needsAttention) {
+        toast(summary, 'success')
+        onClose()
+        return
+      }
+      setMessage(summary)
+      toast(`Import finished with ${result.conflictCount} conflicts. Review them in the import dialog.`, 'error')
     } catch (error: any) {
       setMessage(error.response?.data?.error?.message ?? error.message ?? 'Import failed.')
     } finally {
@@ -106,7 +119,7 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
     setLoadingRecorded(true)
     try {
       const response = await api.get('/data/imports/conflicts')
-      setRecorded((response.data.data ?? []).filter((row: any) => row.status === 'error'))
+      setRecorded((response.data.data ?? []).filter((row: any) => row.status === 'conflict' || row.status === 'error'))
     } catch (error: any) {
       setMessage(error.response?.data?.error?.message ?? error.message ?? 'Could not load recorded rows.')
     } finally {
@@ -206,16 +219,19 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                 <span>{message}</span>
                 <button className="btn btn-ghost btn-sm" onClick={loadRecorded} disabled={loadingRecorded}>
-                  {loadingRecorded ? 'Loading…' : 'View recorded rows'}
+                  {loadingRecorded ? 'Loading…' : 'View conflicts / recorded rows'}
                 </button>
               </div>
               {recorded && (
                 <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10, maxHeight: 220, overflow: 'auto' }}>
                   {recorded.length === 0
-                    ? <div style={{ color: 'var(--t3)' }}>No rows are currently recorded for review.</div>
+                    ? <div style={{ color: 'var(--t3)' }}>No rows are currently waiting for review.</div>
                     : recorded.map(row => (
                       <div key={row.id} style={{ marginBottom: 8 }}>
-                        <div style={{ fontWeight: 600 }}>{row.reason ?? 'Recorded for review'}</div>
+                        <div style={{ fontWeight: 600 }}>
+                          <span style={{ color: row.status === 'conflict' ? 'var(--amber)' : 'var(--red)', textTransform: 'uppercase', fontSize: 10, marginRight: 6 }}>{row.status}</span>
+                          {row.reason ?? 'Recorded for review'}
+                        </div>
                         <div style={{ color: 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 11 }}>
                           {Object.entries(row.raw_data ?? {}).filter(([, value]) => value).map(([k, v]) => `${k}: ${v}`).join(' · ') || '(no data captured)'}
                         </div>
