@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import { toast, askConfirm, askReason } from '../../lib/notify'
 import { Ic, I } from '../../components/ui/icons'
@@ -7,7 +7,7 @@ import { Badge, ChipPIC } from '../../components/ui/primitives'
 import ExportMenu from '../../components/ui/ExportMenu'
 import EmptyTableState from '../../components/ui/EmptyTableState'
 import RefreshButton from '../../components/ui/RefreshButton'
-import type { Screen, BadgeStatus } from '../../app/types'
+import type { Screen, BadgeStatus, NavIntent, OutreachChannel } from '../../app/types'
 import { EligDot } from '../../components/ui/primitives'
 import { useProspects } from '../../hooks/useProspects'
 
@@ -26,12 +26,23 @@ const recipientLabel = (row: any) => row.contact || row.company || row.emailAddr
 const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds))
 const shouldStopBulkSend = (message: string) => /invalid_client|invalid_grant|oauth|authenticat|quota|rate.?limit|too many|daily.*limit|4\.7\.0|429/i.test(message)
 
-const ContactOutreach = () => {
+const CHANNELS: { key: OutreachChannel; label: string }[] = [
+  { key: 'all', label: 'All contacts' },
+  { key: 'call', label: 'Call eligible' },
+  { key: 'text', label: 'Text eligible' },
+  { key: 'email', label: 'Email eligible' },
+]
+
+const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | null; onIntentApplied?: () => void } = {}) => {
   // The revision counter exists for the Refresh button -- useProspects re-fetches
   // when it changes, which a cache invalidation alone would not trigger.
   const [revision, setRevision] = useState(0)
   const prospectsData = useProspects(revision)
   const [search, setSearch] = useState('')
+  // Eligibility is the whole point of this sheet, so it is a filter rather than something
+  // to read off each row: pick Text eligible and what is left is exactly who can be texted.
+  const [channel, setChannel] = useState<OutreachChannel>('all')
+  const [stateFilter, setStateFilter] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [copied, setCopied] = useState('')
   const [emailRows, setEmailRows] = useState<any[]>([])
@@ -44,17 +55,38 @@ const ContactOutreach = () => {
   const [stopRequested, setStopRequested] = useState(false)
   const stopBulkRef = useRef(false)
 
+  // A count on Prospect Clients hands over what it was counting. Applied once and then
+  // released, so coming back to this screen later does not silently re-filter.
+  useEffect(() => {
+    if (!intent) return
+    if (intent.channel) setChannel(intent.channel)
+    setStateFilter(intent.state ?? '')
+    setSelected([])
+    onIntentApplied?.()
+  }, [intent, onIntentApplied])
+
   const term = search.trim().toLowerCase()
   const filtered = prospectsData.filter(r =>
     !term || [r.company, r.contact, r.phone, r.emailAddr].some(value => String(value ?? '').toLowerCase().includes(term))
   )
 
-  const withElig = filtered.map(r => ({
+  const scored = filtered.map(r => ({
     ...r,
     callable: r.cat === 'Proceed' && (r.sms === 'Call/Text' || r.sms === 'Calls Only'),
     textable: r.cat === 'Proceed' && (r.sms === 'Call/Text' || r.sms === 'Text Only'),
     emailable: r.cat === 'Proceed' && !!r.emailAddr,
   }))
+
+  const states = [...new Set(prospectsData.map(r => r.state).filter(Boolean))].sort() as string[]
+
+  // Every eligibility already requires category Proceed, so choosing a channel narrows to
+  // Proceed plus that channel -- the same set the Gmail composer will send to.
+  const withElig = scored.filter(r =>
+    (!stateFilter || r.state === stateFilter)
+    && (channel === 'all'
+      || (channel === 'call' && r.callable)
+      || (channel === 'text' && r.textable)
+      || (channel === 'email' && r.emailable)))
 
   const allSelected = withElig.length > 0 && withElig.every(r => selected.includes(r.id))
   const toggleAll = () => setSelected(allSelected ? [] : withElig.map(r => r.id))
@@ -250,7 +282,18 @@ const ContactOutreach = () => {
 
       <div className="toolbar">
         <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search contacts…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+        <select className="sel" value={channel} onChange={e => { setChannel(e.target.value as OutreachChannel); setSelected([]) }} aria-label="Outreach channel">
+          {CHANNELS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+        </select>
+        <select className="sel" value={stateFilter} onChange={e => { setStateFilter(e.target.value); setSelected([]) }} aria-label="State">
+          <option value="">All states</option>
+          {states.map(value => <option key={value} value={value}>{value}</option>)}
+        </select>
+        {(channel !== 'all' || stateFilter || search) && (
+          <Btn variant="ghost" sm onClick={() => { setChannel('all'); setStateFilter(''); setSearch(''); setSelected([]) }}><Ic n={I.x} size={13} /> Clear</Btn>
+        )}
         <div className="toolbar-right">
+          <span className="count-label">{withElig.length} contacts</span>
           <RefreshButton cacheKey="leads:prospects" label="Contacts" onRefresh={() => setRevision(r => r + 1)} />
           <Btn variant="primary" sm style={{ background: '#1F2937' }} onClick={() => handleCopy('RingCentral Format', r => r.phone || null, r => r.callable || r.textable)}><Ic n={I.copy} size={13} /> Copy RingCentral Format</Btn>
         </div>

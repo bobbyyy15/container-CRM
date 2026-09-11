@@ -1427,3 +1427,21 @@ table.crm tbody tr:nth-child(10) { animation-delay: 0.225s; }
     transition-duration: 0.001ms !important;
   }
 }
+
+/* The counts on Prospect Clients are buttons -- clicking one opens the outreach sheet
+   holding exactly the contacts it counted -- but they should still read as a summary
+   strip, not as a row of buttons. */
+.stat-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 14px 2px 0;
+  border: 0;
+  border-right: 1px solid var(--border-s);
+  background: none;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background .12s;
+}
+.stat-chip:hover { background: var(--s2); }
+.stat-chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }

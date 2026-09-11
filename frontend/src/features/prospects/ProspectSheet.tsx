@@ -6,7 +6,7 @@ import Btn from '../../components/ui/Button'
 import { Badge } from '../../components/ui/primitives'
 import ExportMenu from '../../components/ui/ExportMenu'
 import RecordDetailModal from '../../components/ui/RecordDetailModal'
-import type { Screen, BadgeStatus } from '../../app/types'
+import type { Screen, BadgeStatus, NavIntent, OutreachChannel } from '../../app/types'
 import AssignPicModal from '../../components/ui/AssignPicModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
 import RefreshButton from '../../components/ui/RefreshButton'
@@ -20,12 +20,13 @@ import { useWarmLeads } from '../../hooks/useWarmLeads'
 import { exportToCSV, readDensity, writeDensity } from '../../lib/exporters'
 import type { DensityOption } from '../../app/types'
 
-const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm'; onNav?: (s: Screen) => void }) => {
+const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm'; onNav?: (s: Screen, intent?: NavIntent) => void }) => {
   const [selected, setSelected] = useState<string[]>([])
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('')
   const [country, setCountry] = useState('')
   const [industry, setIndustry] = useState('')
+  const [stateFilter, setStateFilter] = useState('')
   const [status, setStatus] = useState<'active' | 'converted' | 'removed' | 'all'>('active')
   const [missingContactOnly, setMissingContactOnly] = useState(false)
   const [tab, setTab] = useState('Standard View')
@@ -166,6 +167,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 
   const countries = [...new Set(prospectsData.map(r => r.country).filter(Boolean))].sort() as string[]
   const industries = [...new Set(prospectsData.map(r => r.industry).filter(Boolean))].sort() as string[]
+  // Territories are worked state by state, and the same filter follows the counts through
+  // to the outreach sheet.
+  const states = [...new Set(prospectsData.map(r => r.state).filter(Boolean))].sort() as string[]
   const filtered = prospectsData.filter(r => {
     const term = search.trim().toLowerCase()
     const matchesSearch = !term || [r.company, r.city, r.contact, r.emailAddr, r.phone]
@@ -174,6 +178,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
       && (!category || r.cat === category)
       && (!country || r.country === country)
       && (!industry || r.industry === industry)
+      && (!stateFilter || r.state === stateFilter)
       && (!missingContactOnly || r.contactMissing)
   })
 
@@ -368,16 +373,22 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
       {/* Summary strip */}
       <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border-s)', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
         {[
-          { label: 'Total', val: filtered.length, color: 'var(--t3)' },
-          { label: 'Proceed', val: proceed, color: 'var(--green)' },
-          { label: 'Call Eligible', val: callElig, color: '#0D9488' },
-          { label: 'Text Eligible', val: textElig, color: 'var(--purple)' },
-          { label: 'Email Eligible', val: emailElig, color: 'var(--brand)' },
-        ].map((s, i) => (
-          <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 14, borderRight: '1px solid var(--border-s)' }}>
+          { label: 'Total', val: filtered.length, color: 'var(--t3)', channel: 'all' as OutreachChannel },
+          { label: 'Proceed', val: proceed, color: 'var(--green)', channel: 'all' as OutreachChannel },
+          { label: 'Call Eligible', val: callElig, color: '#0D9488', channel: 'call' as OutreachChannel },
+          { label: 'Text Eligible', val: textElig, color: 'var(--purple)', channel: 'text' as OutreachChannel },
+          { label: 'Email Eligible', val: emailElig, color: 'var(--brand)', channel: 'email' as OutreachChannel },
+        ].map(s => (
+          <button
+            key={s.label}
+            type="button"
+            className="stat-chip"
+            title={`Open these ${s.label.toLowerCase()} contacts in the outreach sheet`}
+            onClick={() => onNav?.('contact-outreach', { channel: s.channel, state: stateFilter || undefined })}
+          >
             <span style={{ fontSize: 18, fontWeight: 700, color: s.color, fontFamily: 'var(--mono)' }}>{s.val}</span>
             <span style={{ fontSize: 11.5, color: 'var(--t3)' }}>{s.label}</span>
-          </div>
+          </button>
         ))}
         {mode === 'prospect' && missingContact > 0 && (
           <button
@@ -405,6 +416,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
         <select className="sel" value={category} onChange={e => setCategory(e.target.value)}><option value="">All Categories</option><option value="Proceed">Proceed</option></select>
         <select className="sel" value={country} onChange={e => setCountry(e.target.value)}><option value="">All Countries</option>{countries.map(value => <option key={value}>{value}</option>)}</select>
         <select className="sel" value={industry} onChange={e => setIndustry(e.target.value)}><option value="">All Industries</option>{industries.map(value => <option key={value}>{value}</option>)}</select>
+        <select className="sel" value={stateFilter} onChange={e => setStateFilter(e.target.value)}><option value="">All States</option>{states.map(value => <option key={value}>{value}</option>)}</select>
         {mode === 'prospect' && (
           <select className="sel" value={status} onChange={e => setStatus(e.target.value as typeof status)}>
             <option value="active">Active Prospects</option>

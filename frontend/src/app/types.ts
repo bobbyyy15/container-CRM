@@ -1,5 +1,13 @@
 import type React from 'react'
 
+/**
+ * What a navigation was asking for, when a plain screen name is not enough: clicking
+ * "Text Eligible" on Prospect Clients should open the outreach sheet already narrowed to
+ * the contacts that count as text eligible, optionally within one state.
+ */
+export type OutreachChannel = 'all' | 'call' | 'text' | 'email'
+export type NavIntent = { channel?: OutreachChannel; state?: string }
+
 export type Screen =
   | 'dashboard' | 'outreach-dashboard' | 'inquiry-dashboard'
   | 'prospects' | 'warm-leads' | 'inquiries' | 'quotations' | 'sales-tracker' | 'active-clients'

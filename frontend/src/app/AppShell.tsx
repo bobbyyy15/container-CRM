@@ -3,7 +3,7 @@ import { api } from '../lib/api'
 import { ToastHost, ConfirmHost } from '../lib/notify'
 import Sidebar from '../components/layout/Sidebar'
 import TopBar from '../components/layout/TopBar'
-import type { Screen } from './types'
+import type { Screen, NavIntent } from './types'
 import Dashboard from '../features/dashboard/Dashboard'
 import OutreachDashboard from '../features/outreach/OutreachDashboard'
 import InquiryDashboard from '../features/inquiries/InquiryDashboard'
@@ -57,7 +57,13 @@ export default function AppShell({ session, currentProfile }: AppShellProps) {
   const [isHoveringSidebar, setIsHoveringSidebar] = useState(false)
   const [isDark, setIsDark] = useState(false)
 
-  const handleNav = useCallback((s: Screen) => setScreen(s), [])
+  // The intent is consumed by the screen it was aimed at and then dropped, so navigating
+  // back later does not silently re-apply an old filter.
+  const [navIntent, setNavIntent] = useState<NavIntent | null>(null)
+  const handleNav = useCallback((s: Screen, intent?: NavIntent) => {
+    setNavIntent(intent ?? null)
+    setScreen(s)
+  }, [])
 
   // Roles without a dashboard land on their own home screen instead.
   useEffect(() => {
@@ -78,7 +84,7 @@ export default function AppShell({ session, currentProfile }: AppShellProps) {
       case 'sales-tracker':       return <SalesTracker />
       case 'active-clients':      return <ActiveClientsDashboard role={currentProfile?.role} onNav={handleNav} />
       case 'customers':           return <CustomerAccounts role={currentProfile?.role} />
-      case 'contact-outreach':    return <ContactOutreach />
+      case 'contact-outreach':    return <ContactOutreach intent={navIntent} onIntentApplied={() => setNavIntent(null)} />
       case 'contracts':           return <Contracts role={currentProfile?.role} />
       case 'daily-tasks':         return <DailyTasks />
       case 'removed':             return <RemovedSheet />
