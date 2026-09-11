@@ -182,11 +182,49 @@ const validateCandidates = (
   return { rows, submitRows, errors, sourceRows }
 }
 
+const isEmailCell = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) || (v.includes('@') && v.includes('.') && !v.includes(' '))
+const isPhoneCell = (v: string) => {
+  const digits = v.replace(/\D/g, '')
+  return digits.length >= 7 && digits.length <= 15 && /^[\d\s\-+().ext#/]+$/i.test(v)
+}
+
+const inferHeaderlessColumns = (rows: { row: unknown[]; rowNumber: number }[]): (keyof ProspectImportRow | undefined)[] => {
+  if (!rows.length) return []
+  const maxCols = Math.max(...rows.map(r => r.row.length))
+  if (maxCols === 0) return []
+
+  const colStats = Array.from({ length: maxCols }, (_, c) => {
+    const values = rows.map(r => clean(r.row[c])).filter(Boolean)
+    const emailCount = values.filter(isEmailCell).length
+    const phoneCount = values.filter(isPhoneCell).length
+    return { c, total: values.length, emailCount, phoneCount }
+  })
+
+  const mapping: (keyof ProspectImportRow | undefined)[] = new Array(maxCols).fill(undefined)
+
+  // 1. Map email column
+  const emailCol = colStats.find(s => s.emailCount > 0 && s.emailCount >= s.total * 0.3)
+  if (emailCol) mapping[emailCol.c] = 'email_active'
+
+  // 2. Map phone column
+  const phoneCol = colStats.find(s => s.c !== emailCol?.c && s.phoneCount > 0 && s.phoneCount >= s.total * 0.3)
+  if (phoneCol) mapping[phoneCol.c] = 'contact_number_direct'
+
+  // 3. Map remaining text columns
+  const unassigned = colStats.filter(s => mapping[s.c] === undefined && s.total > 0)
+  if (unassigned.length > 0) mapping[unassigned[0].c] = 'company_name'
+  if (unassigned.length > 1) mapping[unassigned[1].c] = 'contact_person'
+  if (unassigned.length > 2) mapping[unassigned[2].c] = 'city'
+  if (unassigned.length > 3) mapping[unassigned[3].c] = 'state_province'
+
+  return mapping
+}
+
 export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport => {
   const nonEmpty = matrix
     .map((row, index) => ({ row, rowNumber: index + 1 }))
     .filter(item => item.row.some(cell => clean(cell)))
-  if (nonEmpty.length < 2) return { rows: [], submitRows: [], errors: [{ message: 'The sheet must contain prospect data.', kind: 'issue' }], sourceRows: 0 }
+  if (nonEmpty.length === 0) return { rows: [], submitRows: [], errors: [{ message: 'The sheet must contain prospect data.', kind: 'issue' }], sourceRows: 0 }
 
   // Accept transposed sheets too: field labels run downward while prospects run
   // across columns. A two-column key/value form is the one-record version of this.
@@ -214,35 +252,29 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
     .slice(0, 25)
     .map(item => ({ ...item, recognized: item.row.filter(cell => resolveField(cell)).length }))
     .sort((a, b) => b.recognized - a.recognized)[0]
-  const hasHeader = headerCandidate.recognized >= 2
-  const positional = !hasHeader && nonEmpty[0].row.length >= 11
-  if (!hasHeader && !positional) {
-    const detected = [...new Set(nonEmpty.slice(0, 10).flatMap(item => item.row.map(clean).filter(Boolean)))].slice(0, 6)
-    const detail = detected.length ? ` Found: ${detected.join(', ')}.` : ''
-    return {
-      rows: [],
-      submitRows: [],
-      errors: [{
-        message: `Recognizable CRM prospect fields were not found.${detail} The importer needs a Company Name and at least one email or phone (Contact Person is optional); records may run across rows or columns. This file appears to describe a different kind of data, so it was not converted into false prospects.`,
-        kind: 'issue',
-      }],
-      sourceRows: 0,
-    }
+  
+  const hasMultiHeader = headerCandidate && headerCandidate.recognized >= 2 && nonEmpty.length > 1
+  const hasSingleHeader = headerCandidate && headerCandidate.recognized === 1 && headerCandidate.rowNumber === 1 && nonEmpty.length > 1
+  const hasHeader = Boolean(hasMultiHeader || hasSingleHeader)
+
+  let mapped: (keyof ProspectImportRow | undefined)[]
+  let dataRows: { row: unknown[]; rowNumber: number }[]
+
+  if (hasHeader) {
+    mapped = resolveHeaderFields(headerCandidate.row)
+    dataRows = nonEmpty.filter(item => item.rowNumber > headerCandidate.rowNumber)
+  } else {
+    mapped = inferHeaderlessColumns(nonEmpty)
+    dataRows = nonEmpty
   }
-  const header = hasHeader ? headerCandidate.row : nonEmpty[0].row
-  const mapped = hasHeader
-    ? resolveHeaderFields(header)
-    : header.map((_, index) => fields[index])
-  const dataRows = hasHeader
-    ? nonEmpty.filter(item => item.rowNumber > headerCandidate.rowNumber)
-    : nonEmpty
+
   const cargoColumns = hasHeader
-    ? header
+    ? headerCandidate.row
       .map((cell, index) => ({ index, label: CARGO_TYPE_LABELS[key(cell)] }))
       .filter((entry): entry is { index: number; label: string } => Boolean(entry.label))
     : []
   const cargoOtherDescriptionIndex = hasHeader
-    ? header.findIndex(cell => key(cell) === 'cargootherdescription')
+    ? headerCandidate.row.findIndex(cell => key(cell) === 'cargootherdescription')
     : -1
 
   const candidates = dataRows.map(({ row: source, rowNumber }) => {
@@ -269,9 +301,9 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
 
   const result = validateCandidates(candidates, dataRows.length)
   if (!result.rows.length && result.sourceRows > 0 && !mapped.includes('company_name')) {
-    const headerText = header.map(clean).filter(Boolean).join(', ')
+    const headerText = (hasHeader ? headerCandidate.row : nonEmpty[0].row).map(clean).filter(Boolean).join(', ')
     result.errors.unshift({
-      message: `Couldn't find a Company Name column in this sheet's header row (${headerText || 'no header text detected'}). `
+      message: `Couldn't find a Company Name column in this sheet (${headerText || 'no recognizable columns detected'}). `
         + `Rename that column to something like "Company", or use the CRM template below, then re-import.`,
       kind: 'issue',
     })

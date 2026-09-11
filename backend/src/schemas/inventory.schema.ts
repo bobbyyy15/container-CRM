@@ -40,6 +40,18 @@ export const AdjustStockSchema = z.object({
   delta_reserved:  z.number().int().optional().default(0),
 });
 
+const optInt = z.preprocess(v => {
+  if (v === null || v === undefined || v === '') return undefined;
+  const clean = String(v).replace(/[^0-9-]/g, '');
+  return clean === '' ? undefined : parseInt(clean, 10);
+}, z.number().int().min(0).optional());
+
+const optNum = z.preprocess(v => {
+  if (v === null || v === undefined || v === '') return undefined;
+  const clean = String(v).replace(/[^0-9.-]/g, '');
+  return clean === '' ? undefined : Number(clean);
+}, z.number().min(0).optional());
+
 // Bulk import: array of rows (same shape as create, all fields optional except the 3 required)
 export const BulkInventoryRowSchema = z.object({
   container_size:      z.string().min(1),
@@ -50,10 +62,10 @@ export const BulkInventoryRowSchema = z.object({
   city:                z.string().optional(),
   state_province:      z.string().optional(),
   country:             z.string().optional(),
-  quantity_available:  z.coerce.number().int().min(0).optional(),
-  quantity_reserved:   z.coerce.number().int().min(0).optional(),
-  unit_cost:           z.coerce.number().min(0).optional(),
-  target_sell_price:   z.coerce.number().min(0).optional(),
+  quantity_available:  optInt,
+  quantity_reserved:   optInt,
+  unit_cost:           optNum,
+  target_sell_price:   optNum,
   unit_serial_numbers: z.array(z.string()).optional(),
   notes:               z.string().optional(),
 });

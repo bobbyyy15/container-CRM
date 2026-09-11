@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { api } from '../../lib/api'
 import {
   parseProspectFile,
@@ -25,7 +25,25 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
   const [message, setMessage] = useState('')
   const [recorded, setRecorded] = useState<any[] | null>(null)
   const [loadingRecorded, setLoadingRecorded] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Auto-parse pasted text when it changes so the Import button is immediately active
+  useEffect(() => {
+    if (mode !== 'paste') return
+    if (!paste.trim()) {
+      setParsed(empty)
+      return
+    }
+    const timer = setTimeout(() => {
+      setFilename('pasted-spreadsheet')
+      setRecorded(null)
+      parseProspectPaste(paste).then(setParsed).catch(e => {
+        setParsed({ ...empty, errors: [{ message: e.message, kind: 'issue' }] })
+      })
+    }, 120)
+    return () => clearTimeout(timer)
+  }, [paste, mode])
 
   if (!open) return null
 
@@ -38,6 +56,8 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
       setParsed(await parseProspectFile(file))
     } catch (error: any) {
       setParsed({ ...empty, errors: [{ message: error.message, kind: 'issue' }] })
+    } finally {
+      if (inputRef.current) inputRef.current.value = ''
     }
   }
 
@@ -48,7 +68,13 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
   }
 
   const importRows = async () => {
-    if (!parsed.submitRows.length) return
+    let currentSubmit = parsed.submitRows
+    if (!currentSubmit.length && mode === 'paste' && paste.trim()) {
+      const fresh = await parseProspectPaste(paste)
+      setParsed(fresh)
+      currentSubmit = fresh.submitRows
+    }
+    if (!currentSubmit.length) return
     setWorking(true)
     setMessage('')
     setRecorded(null)
@@ -56,7 +82,7 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
       // Submit every parsed row, not just the "ready" ones -- a row missing a company name
       // or contact still gets recorded in import history with a specific reason instead of
       // being silently discarded (see process_prospect_import_batch).
-      const response = await api.post('/data/imports', { rows: parsed.submitRows, filename })
+      const response = await api.post('/data/imports', { rows: currentSubmit, filename })
       const result = response.data.data
       const withoutContact = result.withoutContactCount ? ` (${result.withoutContactCount} without a named contact)` : ''
       // Skipped and "recorded for review" are different things and are counted
@@ -111,9 +137,28 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
           </div>
 
           {mode === 'file' ? (
-            <div onClick={() => inputRef.current?.click()} style={{ border: '1.5px dashed var(--border)', borderRadius: 12, padding: 28, textAlign: 'center', cursor: 'pointer', background: 'var(--s2)' }}>
+            <div
+              onClick={() => inputRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
+              onDragLeave={e => { e.preventDefault(); setIsDragging(false) }}
+              onDrop={e => {
+                e.preventDefault()
+                setIsDragging(false)
+                const droppedFile = e.dataTransfer.files?.[0]
+                if (droppedFile) chooseFile(droppedFile)
+              }}
+              style={{
+                border: isDragging ? '2px dashed var(--brand)' : '1.5px dashed var(--border)',
+                borderRadius: 12,
+                padding: 28,
+                textAlign: 'center',
+                cursor: 'pointer',
+                background: isDragging ? 'var(--brand-bg)' : 'var(--s2)',
+                transition: 'all 0.15s ease',
+              }}
+            >
               <input ref={inputRef} type="file" accept=".xls,.xlsx,.csv" hidden onChange={event => chooseFile(event.target.files?.[0])} />
-              <div style={{ fontWeight: 700, color: 'var(--t1)' }}>{filename ?? 'Choose .xls, .xlsx, or .csv'}</div>
+              <div style={{ fontWeight: 700, color: isDragging ? 'var(--brand)' : 'var(--t1)' }}>{filename ?? (isDragging ? 'Drop file to import' : 'Choose or drop .xls, .xlsx, or .csv')}</div>
               <div style={{ color: 'var(--t3)', fontSize: 12, marginTop: 5 }}>All worksheets are scanned for recognizable prospect fields.</div>
             </div>
           ) : (

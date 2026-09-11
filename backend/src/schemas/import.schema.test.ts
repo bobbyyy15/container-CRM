@@ -44,11 +44,21 @@ test('prospect import schema no longer blocks rows missing a contact channel', (
   assert.equal(result.success, true);
 });
 
-test('prospect import accepts a phone when email is unavailable', () => {
+test('prospect import accepts empty strings, whitespace, and nulls without throwing', () => {
   const result = ImportRowSchema.safeParse({
-    company_name: 'Northwind',
-    contact_person: 'Taylor Morgan',
-    contact_number_direct: '+1 (206) 555-0100',
+    company_name: 'Acme Corp',
+    contact_person: '',
+    email_active: '   ',
+    email_2: null,
+    contact_number_direct: 5551234,
   });
   assert.equal(result.success, true);
+  if (result.success) {
+    assert.equal(result.data.company_name, 'Acme Corp');
+    assert.equal(result.data.contact_person, undefined);
+    assert.equal(result.data.email_active, undefined);
+    assert.equal(result.data.email_2, undefined);
+    assert.equal(result.data.contact_number_direct, '5551234');
+  }
 });
+

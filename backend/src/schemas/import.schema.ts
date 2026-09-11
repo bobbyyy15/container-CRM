@@ -1,28 +1,33 @@
 import { z } from 'zod';
 
+const optString = z.preprocess(
+  val => (val === null || val === undefined ? undefined : String(val).trim() || undefined),
+  z.string().optional()
+);
+
 export const ImportRowSchema = z.object({
-  date_added: z.string().optional(),
-  pic: z.string().optional(),
-  category: z.string().optional(),
-  sms_deliverability: z.string().optional(),
-  email_deliverability: z.string().optional(),
-  industry: z.string().optional(),
-  service_locations: z.string().optional(),
-  country: z.string().optional(),
-  state_province: z.string().optional(),
-  city: z.string().optional(),
+  date_added: optString,
+  pic: optString,
+  category: optString,
+  sms_deliverability: optString,
+  email_deliverability: optString,
+  industry: optString,
+  service_locations: optString,
+  country: optString,
+  state_province: optString,
+  city: optString,
   // Company Name, Contact Person, and a contact channel are no longer enforced here: a row
   // missing any of these is still worth preserving in import history (see
   // process_prospect_import_batch) rather than rejecting the whole batch at the API
   // boundary. The database function is the authority on what's importable vs. recorded for
   // review, since it can give each row its own specific reason instead of one generic 400.
-  company_name: z.string().trim().optional(),
-  contact_person: z.string().trim().min(1).optional(),
-  contact_number_direct: z.string().optional(),
-  contact_number_2: z.string().optional(),
-  email_active: z.string().optional(),
-  email_2: z.string().optional(),
-  address: z.string().optional(),
+  company_name: optString,
+  contact_person: optString,
+  contact_number_direct: optString,
+  contact_number_2: optString,
+  email_active: optString,
+  email_2: optString,
+  address: optString,
 });
 
 export const BulkImportPayloadSchema = z.object({
