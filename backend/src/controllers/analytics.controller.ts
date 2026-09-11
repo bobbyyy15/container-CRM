@@ -1,6 +1,64 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 
+/**
+ * The dashboard's date range. Sales figures are the only period-shaped numbers on it --
+ * the funnel counts what is open right now and outreach is always month to date -- so this
+ * decides which sales a KPI counts, and which earlier window it is compared against.
+ *
+ * 'all' has no previous window by definition, which is why the comparison is nullable
+ * rather than zero: nothing to compare is not the same as no change.
+ */
+type RangeKey = 'month' | 'quarter' | 'year' | 'all';
+
+const RANGE_KEYS: RangeKey[] = ['month', 'quarter', 'year', 'all'];
+
+const RANGE_LABELS: Record<RangeKey, { label: string; previousLabel: string }> = {
+  month:   { label: 'This month',   previousLabel: 'last month' },
+  quarter: { label: 'This quarter', previousLabel: 'last quarter' },
+  year:    { label: 'This year',    previousLabel: 'last year' },
+  all:     { label: 'All time',     previousLabel: '' },
+};
+
+/** How many months of the configured monthly target the selected range covers. */
+const TARGET_MONTHS: Record<RangeKey, number | null> = { month: 1, quarter: 3, year: 12, all: null };
+
+const startOf = (range: RangeKey, from: Date): Date | null => {
+  const date = new Date(from);
+  date.setHours(0, 0, 0, 0);
+  switch (range) {
+    case 'month':   return new Date(date.getFullYear(), date.getMonth(), 1);
+    case 'quarter': return new Date(date.getFullYear(), Math.floor(date.getMonth() / 3) * 3, 1);
+    case 'year':    return new Date(date.getFullYear(), 0, 1);
+    case 'all':     return null;
+  }
+};
+
+/** The window immediately before `start`, the same length as the range. */
+const previousStartOf = (range: RangeKey, start: Date): Date => {
+  switch (range) {
+    case 'month':   return new Date(start.getFullYear(), start.getMonth() - 1, 1);
+    case 'quarter': return new Date(start.getFullYear(), start.getMonth() - 3, 1);
+    case 'year':    return new Date(start.getFullYear() - 1, 0, 1);
+    case 'all':     return start;
+  }
+};
+
+type SaleTotals = { total_units: number; total_revenue: number; total_gross_profit: number; profit_margin: number; sales_count: number };
+
+const sumSales = (rows: any[]): SaleTotals => {
+  const totals = rows.reduce((acc, sale) => ({
+    total_units: acc.total_units + (sale.total_units || 0),
+    total_revenue: acc.total_revenue + Number(sale.revenue || 0),
+    total_gross_profit: acc.total_gross_profit + Number(sale.gross_profit || 0),
+  }), { total_units: 0, total_revenue: 0, total_gross_profit: 0 });
+  return {
+    ...totals,
+    profit_margin: totals.total_revenue > 0 ? (totals.total_gross_profit / totals.total_revenue) * 100 : 0,
+    sales_count: rows.length,
+  };
+};
+
 export class AnalyticsController {
   
   static async getDashboardMetrics(req: Request, res: Response) {
@@ -8,27 +66,38 @@ export class AnalyticsController {
       const isAdmin = req.auth?.profile.role === 'admin';
       const picId = req.auth?.profile.pic_id;
 
-      // 1. Sales metrics
+      const requested = String(req.query.range ?? 'month') as RangeKey;
+      const range: RangeKey = RANGE_KEYS.includes(requested) ? requested : 'month';
+      const now = new Date();
+      const rangeStart = startOf(range, now);
+      const previousStart = rangeStart ? previousStartOf(range, rangeStart) : null;
+
+      // 1. Sales metrics, for the selected window and the one before it. Both windows come
+      //    from one query so the two figures can never be read at different moments.
       let salesQuery = supabaseAdmin
         .from('sales')
-        .select('total_units, revenue, gross_profit, company_id')
+        .select('total_units, revenue, gross_profit, company_id, created_at')
         .eq('status', 'Won');
 
       if (!isAdmin) salesQuery = salesQuery.eq('pic_id', picId);
+      if (previousStart) salesQuery = salesQuery.gte('created_at', previousStart.toISOString());
 
-      const { data: sales, error: salesErr } = await salesQuery;
+      const { data: salesRows, error: salesErr } = await salesQuery;
 
       if (salesErr) throw salesErr;
 
-      let total_units = 0;
-      let total_revenue = 0;
-      let total_gross_profit = 0;
+      const inWindow = (row: any, from: Date | null, until: Date | null) => {
+        const at = new Date(row.created_at);
+        return (!from || at >= from) && (!until || at < until);
+      };
 
-      for (const sale of (sales || [])) {
-        total_units += sale.total_units;
-        total_revenue += Number(sale.revenue);
-        total_gross_profit += Number(sale.gross_profit);
-      }
+      const sales = rangeStart ? (salesRows || []).filter(row => inWindow(row, rangeStart, null)) : (salesRows || []);
+      const current = sumSales(sales);
+      const previous = rangeStart && previousStart
+        ? sumSales((salesRows || []).filter(row => inWindow(row, previousStart, rangeStart)))
+        : null;
+
+      const { total_units, total_revenue, total_gross_profit } = current;
 
       let activeClientsQuery = supabaseAdmin
         .from('customer_accounts_view')
@@ -39,7 +108,7 @@ export class AnalyticsController {
       const { count: active_clients_count } = await activeClientsQuery;
       
       const active_clients = active_clients_count || 0;
-      const profit_margin = total_revenue > 0 ? (total_gross_profit / total_revenue) * 100 : 0;
+      const profit_margin = current.profit_margin;
 
       // 2. Funnel metrics (Counts)
       let pQuery = supabaseAdmin.from('prospect_clients').select('*', { count: 'exact', head: true }).eq('lifecycle_status', 'active');
@@ -97,11 +166,25 @@ export class AnalyticsController {
         calls_unanswered: acc.calls_unanswered + (row.calls_unanswered || 0),
       }), { emails: 0, calls: 0, texts: 0, email_replies: 0, text_replies: 0, calls_answered: 0, calls_unanswered: 0 });
 
+      const targetMonths = TARGET_MONTHS[range];
+      const monthlyTarget = Number((targetsRow as any)?.monthly_gross_profit_target) || 0;
+
       res.json({
         success: true,
         data: {
           outreach,
           targets: targetsRow || {},
+          range: {
+            key: range,
+            label: RANGE_LABELS[range].label,
+            previousLabel: RANGE_LABELS[range].previousLabel,
+            start: rangeStart ? rangeStart.toISOString() : null,
+            // The configured target is monthly, so a longer range is measured against the
+            // same target multiplied out. All time has no meaningful target.
+            profitTarget: targetMonths && monthlyTarget > 0 ? monthlyTarget * targetMonths : 0,
+            targetMonths,
+          },
+          previous,
           metrics: {
             total_units,
             total_revenue,

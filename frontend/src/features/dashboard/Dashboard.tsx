@@ -11,11 +11,35 @@ import { useContracts } from '../../hooks/useContracts'
 import { downloadPdfDocument } from '../../lib/exporters'
 import type { Screen, ProfitChartPoint, ChartSlice, PicPerformanceRow, LossReasonRow } from '../../app/types'
 
-const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: any }) => {
-  const analytics = useAnalytics();
+// The only period-shaped numbers here are the sales figures. The funnel counts what is
+// open right now and outreach is always month to date, so those carry their own wording
+// rather than following this selection.
+const RANGES = [
+  { key: 'month', label: 'This month' },
+  { key: 'quarter', label: 'This quarter' },
+  { key: 'year', label: 'This year' },
+  { key: 'all', label: 'All time' },
+] as const
+type RangeKey = typeof RANGES[number]['key']
+
+/** Percent change against the previous window, or null when there is nothing to compare. */
+const delta = (current: number, previous: number | undefined | null): string | null => {
+  if (previous === undefined || previous === null) return null
+  if (previous === 0) return current === 0 ? '0%' : null
+  return `${Math.round(((current - previous) / Math.abs(previous)) * 100)}%`
+}
+
+const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; session?: any; role?: string }) => {
+  const [range, setRange] = useState<RangeKey>('month')
+  const analytics = useAnalytics(range);
   const m = analytics?.metrics || {};
-  const monthlyProfitTarget = Number(analytics?.targets?.monthly_gross_profit_target) || 0;
-  const profitTargetPct = monthlyProfitTarget > 0 ? Math.round(((m.total_gross_profit || 0) / monthlyProfitTarget) * 100) : 0;
+  const previous = analytics?.previous ?? null;
+  const rangeLabel = RANGES.find(r => r.key === range)?.label ?? 'This month';
+  const previousLabel = analytics?.range?.previousLabel || '';
+  // The configured target is monthly; the API multiplies it out for longer windows and
+  // sends 0 for All time, where a target means nothing.
+  const profitTarget = Number(analytics?.range?.profitTarget) || 0;
+  const profitTargetPct = profitTarget > 0 ? Math.round(((m.total_gross_profit || 0) / profitTarget) * 100) : 0;
   const funnel = analytics?.funnel || {};
   const c = analytics?.charts || {};
   
@@ -40,16 +64,30 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
   const timeGreeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
   const userName = session?.user?.user_metadata?.full_name?.split(' ')[0] || session?.user?.email?.split('@')[0] || 'User'
 
-  const [dateRange, setDateRange] = useState('This month')
   const [showDateMenu, setShowDateMenu] = useState(false)
 
-  const rangePrefixMap: Record<string, string> = {
-    'This month': 'Monthly',
-    'This quarter': 'Quarterly',
-    'This year': 'Annual',
-    'All time': 'All Time'
+  // Real movement against the window before this one. All time has no previous window, so
+  // these come back null and the chips are left off rather than showing a flat zero.
+  const loaded = Boolean(analytics)
+  const profitDelta = delta(m.total_gross_profit || 0, previous?.total_gross_profit)
+  const revenueDelta = delta(m.total_revenue || 0, previous?.total_revenue)
+  const unitsDelta = delta(m.total_units || 0, previous?.total_units)
+  // Margin is already a percentage, so the honest comparison is in points, not percent.
+  const marginDelta = previous ? (m.profit_margin || 0) - (previous.profit_margin || 0) : null
+  /**
+   * Says why a comparison is missing rather than leaving a caption that implies one.
+   * Three cases: there is a delta; the range is All time and has no earlier window; or the
+   * earlier window exists but sold nothing, which makes a percentage meaningless.
+   */
+  const caption = (hasDelta: boolean) => {
+    if (!loaded) return 'loading…'
+    if (hasDelta) return `vs ${previousLabel}`
+    if (range === 'all') return 'every won sale on record'
+    return `nothing sold in ${previousLabel}`
   }
-  const prefix = rangePrefixMap[dateRange] || 'Monthly'
+  const money = (value: number | undefined) => loaded ? `$${(value || 0).toLocaleString()}` : '—'
+  const count = (value: number | undefined) => loaded ? String(value || 0) : '—'
+  const isAdmin = role === 'admin'
 
   return (
     <div className="page-scroll">
@@ -57,21 +95,21 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
       <div className="greeting-bar">
         <div>
           <p className="greeting-title">{timeGreeting}, {userName}!</p>
-          <p className="greeting-sub">Here's what's happening across your sales pipeline {dateRange.toLowerCase()}.</p>
+          <p className="greeting-sub">Sales figures cover {rangeLabel.toLowerCase()}. Pipeline and outreach always show where things stand now.</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
           <div className="date-range" onClick={() => setShowDateMenu(!showDateMenu)}>
             <Ic n={I.calendar} size={13} />
-            <span>{dateRange}</span>
+            <span>{rangeLabel}</span>
             <Ic n={I.chevDown} size={12} />
           </div>
           {showDateMenu && (
             <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowDateMenu(false)} />
               <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, width: 160, background: 'var(--ws)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-                {['This month', 'This quarter', 'This year', 'All time'].map(opt => (
-                  <div key={opt} onClick={() => { setDateRange(opt); setShowDateMenu(false); }} style={{ padding: '8px 12px', borderRadius: 4, cursor: 'pointer', background: dateRange === opt ? 'var(--s2)' : 'transparent', color: dateRange === opt ? 'var(--brand)' : 'var(--t2)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = dateRange === opt ? 'var(--s2)' : 'transparent'}>
-                    {opt}
+                {RANGES.map(opt => (
+                  <div key={opt.key} onClick={() => { setRange(opt.key); setShowDateMenu(false); }} style={{ padding: '8px 12px', borderRadius: 4, cursor: 'pointer', background: range === opt.key ? 'var(--s2)' : 'transparent', color: range === opt.key ? 'var(--brand)' : 'var(--t2)', fontSize: 13, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'} onMouseLeave={e => e.currentTarget.style.background = range === opt.key ? 'var(--s2)' : 'transparent'}>
+                    {opt.label}
                   </div>
                 ))}
               </div>
@@ -79,36 +117,36 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           )}
           <Btn variant="ghost" sm onClick={() => void downloadPdfDocument({
             title: 'EXECUTIVE OVERVIEW REPORT',
-            scope: `Container CRM | ${dateRange}`,
+            scope: `Container CRM | Sales figures: ${rangeLabel}`,
             filename: 'executive-overview',
             sections: [
-              { title: 'Performance Summary', rows: [
+              { title: `Won sales - ${rangeLabel}`, rows: [
                 { Metric: 'Gross Profit',   Value: `$${(m.total_gross_profit || 0).toLocaleString()}` },
                 { Metric: 'Revenue',        Value: `$${(m.total_revenue || 0).toLocaleString()}` },
                 { Metric: 'Units Sold',     Value: m.total_units || 0 },
-                { Metric: 'Active Clients', Value: m.active_clients || 0 },
                 { Metric: 'Profit Margin',  Value: `${(m.profit_margin || 0).toFixed(1)}%` },
-                { Metric: 'Monthly Target', Value: monthlyProfitTarget > 0 ? `$${monthlyProfitTarget.toLocaleString()} (${profitTargetPct}%)` : 'Not configured' },
+                { Metric: 'Profit Target',  Value: profitTarget > 0 ? `$${profitTarget.toLocaleString()} (${profitTargetPct}% reached)` : 'No target applies to this range' },
+                { Metric: 'Active clients (bought in the last 3 months)', Value: m.active_clients || 0 },
               ]},
-              { title: 'Sales Pipeline', rows: [
+              { title: 'Pipeline open now', rows: [
                 { Stage: 'Prospects',  Count: funnel.prospects || 0 },
                 { Stage: 'Warm Leads', Count: funnel.warm_leads || 0 },
                 { Stage: 'Inquiries',  Count: funnel.inquiries || 0 },
                 { Stage: 'Quotations', Count: funnel.quotations || 0 },
-                { Stage: 'Sales Won',  Count: funnel.sales || 0 },
+                { Stage: `Sales won (${rangeLabel.toLowerCase()})`, Count: funnel.sales || 0 },
               ]},
               { title: 'Outreach Activity (This Month)', rows: [
                 { Channel: 'Emails', Completed: analytics?.outreach?.emails || 0 },
                 { Channel: 'Calls',  Completed: analytics?.outreach?.calls || 0 },
                 { Channel: 'Texts',  Completed: analytics?.outreach?.texts || 0 },
               ]},
-              { title: 'Performance by PIC', rows: (PIC_DATA || []).map(p => ({
+              { title: 'Performance by PIC - this month', rows: (PIC_DATA || []).map(p => ({
                 PIC: p.name, Sales: p.sales, Units: p.units,
                 Revenue: `$${(p.revenue || 0).toLocaleString()}`,
                 'Gross Profit': `$${(p.profit || 0).toLocaleString()}`,
                 Emails: p.emails, Calls: p.calls, Texts: p.texts,
               })) },
-              { title: 'Inquiry Status', rows: inquiryStatusData.map(d => ({ Status: d.name, Count: d.value })) },
+              { title: 'Inquiries on record, by status', rows: inquiryStatusData.map(d => ({ Status: d.name, Count: d.value })) },
             ],
           })}><Ic n={I.export} size={13} /> Export PDF</Btn>
         </div>
@@ -121,48 +159,59 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           {/* Featured KPI */}
           <div className="kpi-featured" style={{ background: 'linear-gradient(145deg, #2D4FE0 0%, #4C6FFF 100%)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 500 }}>{prefix} Gross Profit</span>
+              <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 500 }}>Gross profit · {rangeLabel.toLowerCase()}</span>
             </div>
             <div>
-              <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginBottom: 6 }}>${m.total_gross_profit?.toLocaleString() || 0}</div>
-              <Trend val="0" white />
+              <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginBottom: 6 }}>{money(m.total_gross_profit)}</div>
+              {profitDelta ? <Trend val={profitDelta} white /> : null}
               <div style={{ fontSize: 11, opacity: 0.65, marginTop: 6 }}>
-                {monthlyProfitTarget > 0 ? `Target: $${monthlyProfitTarget.toLocaleString()} · ${profitTargetPct}%` : 'No monthly target configured'}
+                {caption(Boolean(profitDelta))}
               </div>
-              <div style={{ marginTop: 10, height: 5, background: 'rgba(255,255,255,0.2)', borderRadius: 99, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${Math.min(100, profitTargetPct)}%`, background: 'rgba(255,255,255,0.8)', borderRadius: 99 }} />
+              <div style={{ fontSize: 11, opacity: 0.65, marginTop: 4 }}>
+                {!loaded
+                  ? ''
+                  : profitTarget > 0
+                    ? `Target: $${profitTarget.toLocaleString()} · ${profitTargetPct}% reached`
+                    : (range === 'all' ? 'Targets are set per month, so none applies here' : 'No monthly target configured')}
               </div>
+              {profitTarget > 0 && (
+                <div style={{ marginTop: 10, height: 5, background: 'rgba(255,255,255,0.2)', borderRadius: 99, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${Math.min(100, profitTargetPct)}%`, background: 'rgba(255,255,255,0.8)', borderRadius: 99 }} />
+                </div>
+              )}
             </div>
           </div>
 
           {/* Secondary KPIs stacked */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">{prefix} Revenue</div>
-              <div className="kpi-value" style={{ fontSize: 22 }}>${m.total_revenue?.toLocaleString() || 0}</div>
-              <Trend val="0"/>
-              <div className="kpi-sub">vs last month</div>
+              <div className="kpi-label">Revenue · {rangeLabel.toLowerCase()}</div>
+              <div className="kpi-value" style={{ fontSize: 22 }}>{money(m.total_revenue)}</div>
+              {revenueDelta ? <Trend val={revenueDelta}/> : null}
+              <div className="kpi-sub">{caption(Boolean(revenueDelta))}</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">Units Sold</div>
-              <div className="kpi-value" style={{ fontSize: 22 }}>{m.total_units || 0}</div>
-              <Trend val="0"/>
-              <div className="kpi-sub">containers {dateRange.toLowerCase()}</div>
+              <div className="kpi-label">Units sold · {rangeLabel.toLowerCase()}</div>
+              <div className="kpi-value" style={{ fontSize: 22 }}>{count(m.total_units)}</div>
+              {unitsDelta ? <Trend val={unitsDelta}/> : null}
+              <div className="kpi-sub">containers · {caption(Boolean(unitsDelta))}</div>
             </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* Deliberately not tied to the range picker: this is the Existing Accounts
+                definition -- a company counts as active while its last won sale is inside
+                three months -- and it has to agree with the Active Clients screen. */}
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">Active Clients</div>
-              <div className="kpi-value" style={{ fontSize: 22 }}>{m.active_clients || 0}</div>
-              <Trend val="0"/>
-              <div className="kpi-sub">purchased {dateRange.toLowerCase()}</div>
+              <div className="kpi-label">Active clients</div>
+              <div className="kpi-value" style={{ fontSize: 22 }}>{count(m.active_clients)}</div>
+              <div className="kpi-sub" style={{ marginTop: 6 }}>{loaded ? 'bought in the last 3 months' : 'loading…'}</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">{prefix} Profit Margin</div>
-              <div className="kpi-value" style={{ fontSize: 22 }}>{m.profit_margin?.toFixed(1) || 0}%</div>
-              <Trend val="0"/>
-              <div className="kpi-sub">vs previous {dateRange.replace('This ', '')}</div>
+              <div className="kpi-label">Profit margin · {rangeLabel.toLowerCase()}</div>
+              <div className="kpi-value" style={{ fontSize: 22 }}>{loaded ? `${(m.profit_margin || 0).toFixed(1)}%` : '—'}</div>
+              {marginDelta !== null ? <Trend val={`${marginDelta > 0 ? '+' : ''}${marginDelta.toFixed(1)}pts`}/> : null}
+              <div className="kpi-sub">{!loaded ? 'loading…' : marginDelta !== null ? `vs ${previousLabel}` : 'gross profit as a share of revenue'}</div>
             </div>
           </div>
 
@@ -170,8 +219,8 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           <div className="chart-card">
             <div className="chart-header">
               <div>
-                <div className="chart-title">Gross Profit Performance</div>
-                <div className="chart-sub">{prefix} trend — all PICs combined</div>
+                <div className="chart-title">Gross profit by month</div>
+                <div className="chart-sub">Last 6 months · won sales{isAdmin ? ', all PICs' : ', your sales'} · not affected by the range above</div>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
                 {(['profit', 'revenue', 'cost'] as const).map(m => (
@@ -202,8 +251,13 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
         {/* ── Row 2: Pipeline ── */}
         <div className="card" style={{ overflow: 'hidden' }}>
           <div style={{ padding: '14px 20px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>Sales Pipeline</span>
-            <span style={{ fontSize: 11.5, color: 'var(--t3)' }}>Click a stage to navigate</span>
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t1)' }}>Pipeline open now</span>
+              <span style={{ fontSize: 11.5, color: 'var(--t3)', marginLeft: 8 }}>
+                Records still open at each stage · Sales counts what was won {range === 'all' ? 'at any time' : rangeLabel.toLowerCase()}
+              </span>
+            </div>
+            <span style={{ fontSize: 11.5, color: 'var(--t3)' }}>Click a stage to open it</span>
           </div>
           <div className="pipeline-row">
             {[
@@ -211,7 +265,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
               { label: 'Warm Leads', count: funnel.warm_leads || 0, pct: conversion(funnel.warm_leads || 0, funnel.prospects || 0), change: '0%', screen: 'warm-leads' as Screen, color: '#7C3AED' },
               { label: 'Inquiries', count: funnel.inquiries || 0, pct: conversion(funnel.inquiries || 0, funnel.warm_leads || 0), change: '0%', screen: 'inquiries' as Screen, color: '#D97706' },
               { label: 'Quotations', count: funnel.quotations || 0, pct: conversion(funnel.quotations || 0, funnel.inquiries || 0), change: '0%', screen: 'quotations' as Screen, color: '#EA580C' },
-              { label: 'Sales', count: funnel.sales || 0, pct: conversion(funnel.sales || 0, funnel.quotations || 0), change: '0%', screen: 'sales-tracker' as Screen, color: '#059669' },
+              { label: 'Sales won', count: funnel.sales || 0, pct: conversion(funnel.sales || 0, funnel.quotations || 0), change: '0%', screen: 'sales-tracker' as Screen, color: '#059669' },
             ].map((s, i) => (
               <div key={s.label} className="pipeline-stage" onClick={() => onNav(s.screen)}>
                 {i > 0 && (
@@ -219,8 +273,11 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
                 )}
                 <div style={{ width: 36, height: 36, borderRadius: 10, background: `${s.color}18`, color: s.color, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8, fontSize: 15, fontWeight: 800 }}>{s.count}</div>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t1)', marginBottom: 4 }}>{s.label}</div>
-                <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 4 }}>{s.pct} conversion</div>
-                <Trend val={s.change} />
+                {/* A ratio of what is sitting at each stage today, not a conversion rate
+                    followed through over time -- so it is labelled for what it is. */}
+                <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 4 }}>
+                  {i === 0 ? 'start of pipeline' : `${s.pct} of previous stage`}
+                </div>
               </div>
             ))}
           </div>
@@ -230,8 +287,8 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
           {/* Outreach progress */}
           <div className="chart-card">
-            <div className="chart-title">Outreach Progress — This Month</div>
-            <div className="chart-sub">Recorded on Daily Tasks, vs monthly target</div>
+            <div className="chart-title">Outreach · month to date</div>
+            <div className="chart-sub">Logged on Daily Tasks, against the daily target × working days</div>
             {[
               { label: 'Emails', done: analytics?.outreach?.emails || 0, target: (Number(analytics?.targets?.daily_email_target) || 0) * (Number(analytics?.targets?.working_days_per_month) || 22), color: '#315EF6' },
               { label: 'Calls', done: analytics?.outreach?.calls || 0, target: (Number(analytics?.targets?.daily_call_target_preferred) || 0) * (Number(analytics?.targets?.working_days_per_month) || 22), color: '#0D9488' },
@@ -251,8 +308,8 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
 
           {/* Inquiry status donut */}
           <div className="chart-card">
-            <div className="chart-title">Inquiry Status</div>
-            <div className="chart-sub">All open inquiries by status</div>
+            <div className="chart-title">Inquiries by status</div>
+            <div className="chart-sub">Every inquiry on record, open or closed</div>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <ResponsiveContainer width={110} height={110}>
                 <PieChart>
@@ -275,8 +332,8 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
 
           {/* Category donut */}
           <div className="chart-card">
-            <div className="chart-title">Sales by Container Category</div>
-            <div className="chart-sub">{dateRange} · units</div>
+            <div className="chart-title">Container sizes sold</div>
+            <div className="chart-sub">Units on won sales · all time · size comes from the inquiry</div>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <ResponsiveContainer width={110} height={110}>
                 <PieChart>
@@ -290,7 +347,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
                   <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
                     <div style={{ width: 7, height: 7, borderRadius: 2, background: d.color, flexShrink: 0 }} />
                     <span style={{ fontSize: 11.5, flex: 1, color: 'var(--t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
-                    <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--t1)' }}>{d.value}%</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--t1)' }}>{d.value}</span>
                   </div>
                 ))}
               </div>
@@ -304,8 +361,8 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           <div className="chart-card" style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div className="chart-title">Best Clients by Quantity</div>
-                <div className="chart-sub" style={{ marginBottom: 0 }}>Top 5 this month</div>
+                <div className="chart-title">Best clients by units</div>
+                <div className="chart-sub" style={{ marginBottom: 0 }}>Top 5 across all time</div>
               </div>
               <Btn variant="ghost" sm onClick={() => onNav('best-clients')}>View All →</Btn>
             </div>
@@ -329,7 +386,10 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           {/* PIC Performance */}
           <div className="chart-card" style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{ padding: '14px 18px 10px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div className="chart-title">PIC Performance</div>
+              <div>
+                <div className="chart-title">PIC performance</div>
+                <div className="chart-sub" style={{ marginBottom: 0 }}>Won sales this month</div>
+              </div>
               <Btn variant="ghost" sm onClick={() => onNav('pic-performance')}>View All →</Btn>
             </div>
             <div style={{ padding: '10px 18px 14px' }}>
@@ -357,7 +417,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
                   <Ic n={I.warning} size={13} style={{ color: OVERDUE_PICKUPS.length > 0 ? 'var(--red)' : 'var(--t4)' }} />
                   Overdue Pickups
                 </div>
-                <div className="chart-sub" style={{ marginBottom: 0 }}>{OVERDUE_PICKUPS.length > 0 ? 'Requires immediate action' : 'All clear'}</div>
+                <div className="chart-sub" style={{ marginBottom: 0 }}>{OVERDUE_PICKUPS.length > 0 ? 'Past their scheduled pickup date' : 'Nothing past its pickup date'}</div>
               </div>
               <Btn variant="ghost" sm onClick={() => onNav('pickups')}>View All →</Btn>
             </div>
@@ -372,9 +432,9 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
                 </div>
               ))}
               <div style={{ marginTop: 10, padding: '8px 12px', background: OVERDUE_PICKUPS.length > 0 ? 'var(--red-bg)' : 'var(--s2)', borderRadius: 8, fontSize: 12, color: OVERDUE_PICKUPS.length > 0 ? 'var(--red)' : 'var(--t3)', fontWeight: 500 }}>
-                {OVERDUE_PICKUPS.length > 0 
-                  ? `${OVERDUE_PICKUPS.length} overdue · Total delay risk on ${OVERDUE_PICKUPS.reduce((acc, curr) => acc + curr.qty, 0)} containers`
-                  : '0 overdue pickups · No current delay risk'}
+                {OVERDUE_PICKUPS.length > 0
+                  ? `${OVERDUE_PICKUPS.length} overdue, covering ${OVERDUE_PICKUPS.reduce((acc, curr) => acc + curr.qty, 0)} containers`
+                  : 'No overdue pickups'}
               </div>
             </div>
           </div>
