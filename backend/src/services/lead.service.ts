@@ -67,7 +67,10 @@ export class LeadService {
       })
       .single();
 
-    if (error) throw new Error(`Failed to create prospect: ${error.message}`);
+    // P0001 is what the rule checks in create_manual_prospect raise: a sentence written
+    // for the person adding the record ("already an active client of ..."). Wrapping it in
+    // "Failed to create prospect:" buries the part they need to act on.
+    if (error) throw new Error(error.code === 'P0001' ? error.message : `Failed to create prospect: ${error.message}`);
     return data;
   }
 
@@ -90,7 +93,7 @@ export class LeadService {
       })
       .single();
 
-    if (error) throw new Error(`Failed to create warm lead: ${error.message}`);
+    if (error) throw new Error(error.code === 'P0001' ? error.message : `Failed to create warm lead: ${error.message}`);
     const convertedCompanyId = (data as { company_id?: string } | null)?.company_id;
     if (convertedCompanyId) {
       await supabaseAdmin
