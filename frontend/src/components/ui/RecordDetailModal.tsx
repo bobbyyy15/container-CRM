@@ -3,9 +3,20 @@ import Btn from './Button'
 import { Ic, I } from './icons'
 import type { DetailField } from '../../app/types'
 
-const RecordDetailModal = ({ title, fields, onClose, footerExtra }: { title: string; fields: DetailField[]; onClose: () => void; footerExtra?: React.ReactNode }) => (
+/**
+ * `extra` renders under the fields, full width -- for anything that is a block rather than
+ * a label and a value, such as the customer's earlier inquiries.
+ */
+const RecordDetailModal = ({ title, fields, onClose, footerExtra, extra, width = 480 }: {
+  title: string
+  fields: DetailField[]
+  onClose: () => void
+  footerExtra?: React.ReactNode
+  extra?: React.ReactNode
+  width?: number
+}) => (
   <div className="overlay" onClick={onClose}>
-    <div className="modal" style={{ width: 480 }} onClick={e => e.stopPropagation()}>
+    <div className="modal" style={{ width }} onClick={e => e.stopPropagation()}>
       <div className="modal-header">
         <div className="modal-title">{title}</div>
         <Btn variant="ghost" sm onClick={onClose} ariaLabel="Close"><Ic n={I.x} size={16} /></Btn>
@@ -17,6 +28,7 @@ const RecordDetailModal = ({ title, fields, onClose, footerExtra }: { title: str
             <div style={{ fontSize: 13, color: 'var(--t1)', fontWeight: 500 }}>{f.value ?? <span style={{ color: 'var(--t4)' }}>—</span>}</div>
           </div>
         ))}
+        {extra && <div style={{ gridColumn: '1 / -1' }}>{extra}</div>}
       </div>
       <div className="modal-footer">
         <Btn variant="ghost" onClick={onClose}>Close</Btn>

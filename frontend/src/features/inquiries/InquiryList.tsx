@@ -22,6 +22,10 @@ const InquiryList = () => {
   const [quotationInquiryId, setQuotationInquiryId] = useState<string | null>(null)
   const [viewRow, setViewRow] = useState<any>(null)
   const INQUIRIES = useInquiries(revision)
+  // History has to include the ones that closed -- converted to a sale, or lost -- since
+  // those are exactly what a repeat offer is based on. The working list holds only open
+  // inquiries, so read the full set separately for it.
+  const ALL_INQUIRIES = useInquiries(revision, 'all')
   const warmLeads = useWarmLeads(revision)
   const [tab, setTab] = useState('All')
   const [lookup, setLookup] = useState('')
@@ -79,7 +83,21 @@ const InquiryList = () => {
     return tabMatch && channelMatch && picMatch && (!term
       || phoneMatch
       || [r.company, r.contact, r.ref, r.category, r.phone, r.email].some(value => String(value).toLowerCase().includes(term)))
-  })
+  }).sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
+
+  /**
+   * What this customer asked for before, newest first.
+   *
+   * Quoting a repeat customer means knowing what they took last time and at what size and
+   * condition, so the detail view lists their earlier inquiries rather than making someone
+   * search the list for the company by hand. Matched on the company, falling back to the
+   * contact for a customer recorded without one.
+   */
+  const historyFor = (row: any) => ALL_INQUIRIES
+    .filter(r => r.id !== row.id && (
+      (row.companyId && r.companyId === row.companyId) || (row.contactId && r.contactId === row.contactId)
+    ))
+    .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
 
   const selection = useRowSelection(filtered.map(r => r.id))
 
@@ -334,6 +352,9 @@ const InquiryList = () => {
             { label: 'Condition', value: viewRow.condition },
             { label: 'Quantity', value: viewRow.qty },
             { label: 'Needed by', value: viewRow.neededBy },
+            { label: 'City', value: viewRow.city },
+            { label: 'State / Province', value: viewRow.state },
+            { label: 'Country', value: viewRow.country },
             { label: 'PIC', value: viewRow.pic },
             { label: 'Received', value: `${viewRow.date} ${viewRow.time}` },
             ...(viewRow.rejectionReason ? [{ label: 'Rejection reason', value: viewRow.rejectionReason }] : []),
@@ -343,6 +364,39 @@ const InquiryList = () => {
             ...(viewRow.altAskingPrice != null ? [{ label: 'Alternative asking price', value: `$${viewRow.altAskingPrice.toLocaleString()}` }] : []),
             ...(viewRow.altNotes ? [{ label: 'Alternative offer notes', value: viewRow.altNotes }] : []),
           ]}
+          width={620}
+          extra={(() => {
+            const history = historyFor(viewRow)
+            return (
+              <div style={{ borderTop: '1px solid var(--border-s)', paddingTop: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 6 }}>
+                  Earlier inquiries from this customer
+                </div>
+                {history.length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: 'var(--t4)' }}>None — this is their first inquiry on record.</div>
+                ) : (
+                  <div style={{ maxHeight: 210, overflow: 'auto', border: '1px solid var(--border-s)', borderRadius: 8 }}>
+                    <table className="crm" style={{ width: '100%' }}>
+                      <thead><tr>
+                        <th>Date</th><th>Size</th><th>Condition</th><th className="r">Qty</th><th>Status</th>
+                      </tr></thead>
+                      <tbody>
+                        {history.map(h => (
+                          <tr key={h.id}>
+                            <td className="mono" style={{ fontSize: 11.5 }}>{h.date}</td>
+                            <td style={{ fontSize: 12 }}>{h.size}</td>
+                            <td style={{ fontSize: 12 }}>{h.condition}</td>
+                            <td className="r mono" style={{ fontSize: 12 }}>{h.qty}</td>
+                            <td><Badge status={h.status as BadgeStatus} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         />
       )}
     </div>
