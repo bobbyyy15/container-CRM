@@ -17,6 +17,26 @@ type Props = {
 
 const empty: ParsedProspectImport = { rows: [], submitRows: [], errors: [], sourceRows: 0 }
 
+/**
+ * Rows per request.
+ *
+ * The API and the database function both refuse more than 5,000 rows in one call, and at
+ * roughly 2.4 ms a row even 5,000 would hold the request open for about twelve seconds --
+ * longer than the serverless function that serves the API is allowed to run. A thousand
+ * rows lands near two and a half seconds, which leaves room for a slow connection without
+ * making a 17,000-row sheet take dozens of round trips.
+ */
+const CHUNK_SIZE = 1000
+
+/** Adds up the per-chunk summaries into the one the dialog reports. */
+const addTotals = (a: Record<string, number>, b: Record<string, number>) => {
+  const out = { ...a }
+  for (const key of ['importedCount', 'duplicateCount', 'removedCount', 'conflictCount', 'skippedCount', 'errorCount', 'withoutContactCount', 'totalCount']) {
+    out[key] = (a[key] ?? 0) + (b[key] ?? 0)
+  }
+  return out
+}
+
 export default function ProspectImportDialog({ open, initialMode, onClose, onImported }: Props) {
   const [mode, setMode] = useState<'file' | 'paste'>(initialMode)
   const [parsed, setParsed] = useState<ParsedProspectImport>(empty)
@@ -25,6 +45,8 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
   const [working, setWorking] = useState(false)
   const [message, setMessage] = useState('')
   const [recorded, setRecorded] = useState<any[] | null>(null)
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+  const [reading, setReading] = useState(false)
   const [loadingRecorded, setLoadingRecorded] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -52,12 +74,18 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
     if (!file) return
     setMessage('')
     setRecorded(null)
+    setParsed(empty)
+    setFilename(file.name)
+    setReading(true)
+    // Parsing a large workbook is synchronous and holds the UI thread -- 17,000 rows takes
+    // about five seconds -- so let the browser paint "Reading..." before it starts.
+    await new Promise(resolve => setTimeout(resolve, 0))
     try {
-      setFilename(file.name)
       setParsed(await parseProspectFile(file))
     } catch (error: any) {
       setParsed({ ...empty, errors: [{ message: error.message, kind: 'issue' }] })
     } finally {
+      setReading(false)
       if (inputRef.current) inputRef.current.value = ''
     }
   }
@@ -83,8 +111,18 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
       // Submit every parsed row, not just the "ready" ones -- a row missing a company name
       // or contact still gets recorded in import history with a specific reason instead of
       // being silently discarded (see process_prospect_import_batch).
-      const response = await api.post('/data/imports', { rows: currentSubmit, filename })
-      const result = response.data.data
+      // One batch id for the whole sheet, so however many chunks it takes, import history
+      // shows a single entry for the file.
+      const batchId = crypto.randomUUID()
+      let result: any = {}
+      for (let index = 0; index < currentSubmit.length; index += CHUNK_SIZE) {
+        const chunk = currentSubmit.slice(index, index + CHUNK_SIZE)
+        setProgress({ done: index, total: currentSubmit.length })
+        const response = await api.post('/data/imports', { rows: chunk, filename, batch_id: batchId })
+        result = addTotals(result, response.data.data ?? {})
+        result.batchId = batchId
+      }
+      setProgress(null)
       const withoutContact = result.withoutContactCount ? ` (${result.withoutContactCount} without a named contact)` : ''
       // Skipped and "recorded for review" are different things and are counted
       // separately by the database: skipped rows were incomplete in the source sheet and
@@ -109,6 +147,7 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
       setMessage(summary)
       toast(`Import finished with ${result.conflictCount} conflicts. Review them in the import dialog.`, 'error')
     } catch (error: any) {
+      setProgress(null)
       setMessage(error.response?.data?.error?.message ?? error.message ?? 'Import failed.')
     } finally {
       setWorking(false)
@@ -172,7 +211,11 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
             >
               <input ref={inputRef} type="file" accept=".xls,.xlsx,.csv" hidden onChange={event => chooseFile(event.target.files?.[0])} />
               <div style={{ fontWeight: 700, color: isDragging ? 'var(--brand)' : 'var(--t1)' }}>{filename ?? (isDragging ? 'Drop file to import' : 'Choose or drop .xls, .xlsx, or .csv')}</div>
-              <div style={{ color: 'var(--t3)', fontSize: 12, marginTop: 5 }}>All worksheets are scanned for recognizable prospect fields.</div>
+              <div style={{ color: 'var(--t3)', fontSize: 12, marginTop: 5 }}>
+                {reading
+                  ? 'Reading the file… a large sheet can take a few seconds.'
+                  : 'All worksheets are scanned for recognizable prospect fields.'}
+              </div>
             </div>
           ) : (
             <div>
@@ -246,7 +289,9 @@ export default function ProspectImportDialog({ open, initialMode, onClose, onImp
             <button className="btn btn-secondary btn-sm" onClick={onClose}>Cancel</button>
             <button className="btn btn-primary btn-sm" disabled={working || !parsed.submitRows.length} onClick={importRows}>
               {working
-                ? 'Importing…'
+                ? (progress && progress.total > CHUNK_SIZE
+                  ? `Importing ${progress.done.toLocaleString()} of ${progress.total.toLocaleString()}…`
+                  : 'Importing…')
                 : parsed.submitRows.length > parsed.rows.length
                   ? `Import ${parsed.rows.length} as prospects (+${parsed.submitRows.length - parsed.rows.length} recorded for review)`
                   : `Import ${parsed.rows.length} valid rows`}
