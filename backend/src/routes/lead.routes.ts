@@ -40,6 +40,9 @@ router.post('/:stage/:entityId/remove', requireRoles('admin', 'sales_manager'), 
 // Hard delete, as opposed to /remove above, which files the record on the Removed
 // Sheet and is reversible. Declared after '/removed/:removedId' so that route,
 // which has the same shape, keeps matching first.
+// Batch delete. Declared before the per-record route so "bulk-delete" is not read as an
+// entity id, and POST because a DELETE carrying a body is not reliably forwarded.
+router.post('/:stage/bulk-delete', requireRoles('admin', 'sales_manager'), DeleteController.deletePipelineEntries);
 router.delete('/:stage/:entityId', requireRoles('admin', 'sales_manager'), DeleteController.deletePipelineEntry);
 router.patch('/:stage/:entityId/pic', requireRoles('admin', 'sales_manager'), LeadController.assignPic);
 router.patch('/:stage/:entityId/cell', requireRoles('admin', 'sales_manager'), LeadController.updateLeadCell);

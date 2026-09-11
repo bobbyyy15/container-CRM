@@ -31,6 +31,21 @@ export class DeleteController {
     await send(res, () => DeleteService.deletePipelineEntry(stage, String(req.params.entityId), actorFrom(req)));
   }
 
+  static async deletePipelineEntries(req: Request, res: Response) {
+    const stage = String(req.params.stage);
+    if (!isDeletableStage(stage)) {
+      return res.status(404).json({ success: false, error: { message: `Cannot delete "${stage}" records.` } });
+    }
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    if (!ids.length) {
+      return res.status(400).json({ success: false, error: { message: 'No records were selected.' } });
+    }
+    if (ids.length > 5000) {
+      return res.status(400).json({ success: false, error: { message: 'Delete at most 5000 records per request.' } });
+    }
+    await send(res, () => DeleteService.deletePipelineEntries(stage, ids, actorFrom(req)));
+  }
+
   static async deleteQuotation(req: Request, res: Response) {
     await send(res, () => DeleteService.deleteQuotation(String(req.params.id), actorFrom(req)));
   }

@@ -77,6 +77,30 @@ export class DeleteService {
     return { message: `${label} deleted successfully.` };
   }
 
+  /**
+   * The same rules as deletePipelineEntry, applied to a batch in one database call.
+   *
+   * Deleting a long selection one record at a time meant four queries and a round trip
+   * each; a selection of thousands took longer than anyone would wait. The counts come
+   * back so the caller can say what happened without asking again.
+   */
+  static async deletePipelineEntries(stage: DeletableStage, ids: string[], actor: Actor) {
+    const { label } = STAGES[stage];
+    const { data, error } = await supabaseAdmin.rpc('delete_pipeline_entries', {
+      p_stage: stage,
+      p_ids: ids,
+      p_actor_pic_id: actor.picId ?? null,
+      p_is_admin: actor.role === 'admin',
+    });
+    if (error) throw new DeleteError(error.message, error.code === 'P0001' ? 400 : 500);
+
+    const result = (data ?? {}) as { requested: number; deleted: number; blocked: number; notOwned: number };
+    const parts = [`${result.deleted} ${label}${result.deleted === 1 ? '' : 's'} deleted`];
+    if (result.blocked) parts.push(`${result.blocked} protected by a later pipeline stage`);
+    if (result.notOwned) parts.push(`${result.notOwned} not yours to delete`);
+    return { message: `${parts.join(' · ')}.`, ...result };
+  }
+
   /** Quotation items cascade; a Sale converted from the quotation does not. */
   static async deleteQuotation(id: string, actor: Actor) {
     const { data: existing, error } = await supabaseAdmin

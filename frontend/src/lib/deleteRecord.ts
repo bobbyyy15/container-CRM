@@ -58,19 +58,22 @@ export const confirmDelete = async ({
 /**
  * Delete every selected row, shared by the grids that offer checkbox selection.
  *
- * Per-record endpoints are what the API exposes, so this fans out over them in
- * small batches: enough parallelism for a long selection without flooding the API
- * with hundreds of simultaneous requests.
+ * `bulkEndpoint` takes a whole batch of ids in one request and is what the pipeline
+ * stages use: deleting one record at a time meant four queries and a round trip each, so
+ * a selection of thousands ran for over half an hour. Screens whose API only exposes a
+ * per-record delete still pass `endpoint` and fan out over it, five at a time.
  *
- * A selection normally mixes deletable rows with ones the backend protects (a
- * Prospect that became a Warm Lead, a Quotation that became a Sale). Those answer
- * 409 with a sentence naming the blocker, so failures are counted and the first
- * reason is surfaced rather than aborting the whole run on the first refusal.
+ * A selection normally mixes deletable rows with ones the backend protects (a Prospect
+ * that became a Warm Lead, a Quotation that became a Sale). Those are counted and
+ * reported rather than aborting the run.
  */
 export const confirmBulkDelete = async ({
   what,
   ids,
   endpoint,
+  bulkEndpoint,
+  bulkChunkSize = 1000,
+  onProgress,
   cacheKey,
   detail,
   onDeleted,
@@ -78,8 +81,14 @@ export const confirmBulkDelete = async ({
   /** Record type as the user sees it, lowercase, e.g. 'prospect', 'quotation'. */
   what: string
   ids: string[]
-  /** API path to DELETE for one id. */
-  endpoint: (id: string) => string
+  /** API path to DELETE for one id. Used when there is no bulk endpoint. */
+  endpoint?: (id: string) => string
+  /** Path that accepts { ids } and deletes them in one request. Preferred when present. */
+  bulkEndpoint?: string
+  /** Ids per bulk request; the API refuses more than 5000. */
+  bulkChunkSize?: number
+  /** Told how far along a long delete is, so the caller can show progress. */
+  onProgress?: (done: number, total: number) => void
   cacheKey?: string
   /** Extra consequence worth spelling out before the user commits. */
   detail?: string
@@ -101,11 +110,43 @@ export const confirmBulkDelete = async ({
   const deletedIds: string[] = []
   const failures: string[] = []
 
+  if (bulkEndpoint) {
+    let deleted = 0
+    let blocked = 0
+    let notOwned = 0
+    for (let index = 0; index < ids.length; index += bulkChunkSize) {
+      const chunk = ids.slice(index, index + bulkChunkSize)
+      onProgress?.(index, ids.length)
+      try {
+        const res = await api.post(bulkEndpoint, { ids: chunk })
+        deleted += res.data?.deleted ?? 0
+        blocked += res.data?.blocked ?? 0
+        notOwned += res.data?.notOwned ?? 0
+        // The database reports counts, not which ids survived. A chunk that deleted
+        // everything it was given is clear; anything protected stays selected so the
+        // rows still on screen match the selection.
+        if ((res.data?.deleted ?? 0) === chunk.length) deletedIds.push(...chunk)
+      } catch (e: any) {
+        failures.push(e?.response?.data?.error?.message ?? e?.message ?? 'Delete failed.')
+      }
+    }
+    onProgress?.(ids.length, ids.length)
+    if (deleted && cacheKey) invalidateCache(cacheKey)
+    onDeleted(deletedIds)
+
+    const notes = [`${deleted} ${what}${deleted === 1 ? '' : 's'} permanently deleted`]
+    if (blocked) notes.push(`${blocked} protected by a later stage`)
+    if (notOwned) notes.push(`${notOwned} not yours to delete`)
+    if (failures.length) notes.push(failures[0])
+    toast(notes.join(' · '), blocked || notOwned || failures.length ? 'error' : 'success')
+    return deletedIds
+  }
+
   for (let index = 0; index < ids.length; index += 5) {
     const batch = ids.slice(index, index + 5)
     const results = await Promise.all(batch.map(async id => {
       try {
-        await api.delete(endpoint(id))
+        await api.delete(endpoint!(id))
         return { id, deleted: true as const }
       } catch (e: any) {
         return {

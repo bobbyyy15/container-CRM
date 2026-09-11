@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 import { useRealtimeRevision } from '../lib/realtime'
 import { fetchCached, getFromCache } from '../lib/dataCache'
 import { mapPipelineRow } from './mapPipelineRow'
+import { fetchAllPages } from '../lib/fetchAllPages'
 
 export const useWarmLeads = (revision = 0, enabled = true) => {
   const cacheKey = 'leads:warm-leads:active'
@@ -15,7 +16,8 @@ export const useWarmLeads = (revision = 0, enabled = true) => {
   useEffect(() => {
     if (!enabled) return
     let cancelled = false
-    fetchCached(cacheKey, () => api.get('/leads/warm-leads', { params: { limit: 500 } }).then(res => res.data.data || []), 60_000)
+    // Every warm lead, not the first page.
+    fetchCached(cacheKey, () => fetchAllPages('/leads/warm-leads'), 60_000)
       .then(raw => {
         if (!cancelled) setData((raw || []).map(mapPipelineRow))
       })

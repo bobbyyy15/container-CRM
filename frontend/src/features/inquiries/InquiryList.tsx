@@ -90,7 +90,7 @@ const InquiryList = () => {
       await confirmBulkDelete({
         what: 'inquiry',
         ids: selection.selected,
-        endpoint: id => `/leads/inquiries/${id}`,
+        bulkEndpoint: '/leads/inquiries/bulk-delete',
         cacheKey: 'leads:inquiries',
         onDeleted: deletedIds => {
           selection.remove(deletedIds)

@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 import { useRealtimeRevision } from '../lib/realtime'
 import { fetchCached, getFromCache } from '../lib/dataCache'
 import { mapInquiryRow } from './mappers'
+import { fetchAllPages } from '../lib/fetchAllPages'
 
 export const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') => {
   const cacheKey = `leads:inquiries:${status}`
@@ -14,7 +15,8 @@ export const useInquiries = (revision = 0, status: 'active' | 'all' = 'active') 
 
   useEffect(() => {
     let cancelled = false
-    fetchCached(cacheKey, () => api.get('/leads/inquiries', { params: { limit: 500, status } }).then(res => res.data.data || []), 60_000)
+    // Every inquiry, not the first page: the same cap that hid most of the prospect list.
+    fetchCached(cacheKey, () => fetchAllPages('/leads/inquiries', { status }), 60_000)
       .then(raw => {
         if (!cancelled) setData((raw || []).map(mapInquiryRow))
       })

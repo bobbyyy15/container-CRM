@@ -39,6 +39,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);
   const [showAssignPic, setShowAssignPic] = useState(false)
   const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [deleteProgress, setDeleteProgress] = useState<{ done: number; total: number } | null>(null)
   const selectAllRef = useRef<HTMLInputElement>(null)
 
   // Distinct from Remove, next to it in every row: Remove files the record on the
@@ -59,7 +60,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
       await confirmBulkDelete({
         what: mode === 'warm' ? 'warm lead' : 'prospect',
         ids: [...selected],
-        endpoint: id => `/leads/${mode === 'warm' ? 'warm-leads' : 'prospects'}/${id}`,
+        // One request per thousand records rather than one per record.
+        bulkEndpoint: `/leads/${mode === 'warm' ? 'warm-leads' : 'prospects'}/bulk-delete`,
+        onProgress: (done, total) => setDeleteProgress(done < total ? { done, total } : null),
         cacheKey: mode === 'warm' ? 'leads:warm-leads' : 'leads:prospects',
         onDeleted: deletedIds => {
           const done = new Set(deletedIds)
@@ -69,6 +72,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
       })
     } finally {
       setBulkDeleting(false)
+      setDeleteProgress(null)
     }
   }
   const pics = usePics()
@@ -468,7 +472,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
               : <Btn variant="ghost" sm disabled={bulkDeleting} onClick={() => setInquiryWarmLeadId(selected[0])}>Create Inquiry</Btn>
             }
             <Btn variant="danger" sm disabled={bulkDeleting} onClick={handleBulkDelete}>
-              <Ic n={I.removed} size={12} /> {bulkDeleting ? 'Deleting…' : `Delete (${selected.length})`}
+              <Ic n={I.removed} size={12} /> {bulkDeleting
+                ? (deleteProgress ? `Deleting ${deleteProgress.done.toLocaleString()} of ${deleteProgress.total.toLocaleString()}…` : 'Deleting…')
+                : `Delete (${selected.length})`}
             </Btn>
           </div>
         )}
