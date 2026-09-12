@@ -815,8 +815,14 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
   const [saleDate, setSaleDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [containerSizeId, setContainerSizeId] = useState('')
   const [containerConditionId, setContainerConditionId] = useState('')
+  // Their own reference. Left blank, the database allocates the next WAVE number, so the
+  // field is optional but always editable.
+  const [saleNumber, setSaleNumber] = useState('')
+  const [invoiceNumber, setInvoiceNumber] = useState('')
+  const [containerCategoryId, setContainerCategoryId] = useState('')
   const sizes = useCatalog('/catalog/sizes')
   const conditions = useCatalog('/catalog/conditions')
+  const types = useCatalog('/catalog/categories')
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
 
@@ -845,6 +851,9 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
         city: city.trim() || undefined,
         containerSizeId: containerSizeId || undefined,
         containerConditionId: containerConditionId || undefined,
+        containerCategoryId: containerCategoryId || undefined,
+        saleNumber: saleNumber.trim().toUpperCase() || undefined,
+        invoiceNumber: invoiceNumber.trim() || undefined,
         saleDate: saleDate || undefined,
       })
       onSaved()
@@ -894,6 +903,21 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
           <div>
             <FieldLabel label="Country" optional />
             <input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" />
+          </div>
+          <div>
+            <FieldLabel label="Sale number" optional />
+            <input className="inp" value={saleNumber} onChange={event => setSaleNumber(event.target.value)} placeholder="WAVE-10317 (blank allocates the next)" />
+          </div>
+          <div>
+            <FieldLabel label="Invoice number" optional />
+            <input className="inp" value={invoiceNumber} onChange={event => setInvoiceNumber(event.target.value)} placeholder="From the invoice" />
+          </div>
+          <div>
+            <FieldLabel label="Type" optional />
+            <select className="inp" value={containerCategoryId} onChange={event => setContainerCategoryId(event.target.value)}>
+              <option value="">Not specified</option>
+              {types.map(type => <option key={type.id} value={type.id}>{(type as any).code ? `${(type as any).code} — ${type.name}` : type.name}</option>)}
+            </select>
           </div>
           <div>
             <FieldLabel label="Date of sale" required />

@@ -84,7 +84,18 @@ export const mapSaleRow = (row: any) => {
   const companyContact = (companyLinks.find((l: any) => l.is_primary) ?? companyLinks[0])?.contacts
   return {
     id: row.id,
-    ref: `SAL-${row.id.slice(0, 8).toUpperCase()}`,
+    // The sale's own number, which the client sets and edits. It used to be derived from
+    // the row id -- "SAL-CF0C7B82" -- which is why it looked random and could not be
+    // changed; sales have carried a real sale_number since migration 036.
+    ref: row.sale_number || `SAL-${row.id.slice(0, 8).toUpperCase()}`,
+    saleNumber: row.sale_number || '',
+    invoiceNumber: row.invoice_number || '',
+    type: row.container_categories?.code || row.container_categories?.name || '—',
+    containerCategoryId: row.container_category_id || '',
+    containerSizeId: row.container_size_id || '',
+    containerConditionId: row.container_condition_id || '',
+    saleDate: row.sale_date || null,
+    picId: row.pic_id || '',
     // sale_date is the day the sale happened; created_at is when the row was typed in.
     date: new Date(row.sale_date ?? row.created_at).toLocaleDateString(),
     createdAt: row.sale_date ?? row.created_at,

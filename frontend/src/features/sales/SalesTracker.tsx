@@ -15,12 +15,19 @@ import { invalidateCache } from '../../lib/dataCache'
 import type { Screen, BadgeStatus } from '../../app/types'
 import { NewManualSaleDialog, SaleDialog, type QuotationOption } from '../pipeline/PipelineDialogs'
 import { useSales } from '../../hooks/useSales'
+import EditSaleDialog from './EditSaleDialog'
+import SalesImportDialog from './SalesImportDialog'
+import { usePics } from '../pipeline/PipelineDialogs'
 import { useQuotations } from '../../hooks/useQuotations'
 
 const SalesTracker = () => {
   const [revision, setRevision] = useState(0)
   const [showSale, setShowSale] = useState(false)
   const [showManualSale, setShowManualSale] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [editingSale, setEditingSale] = useState<any>(null)
+  const [statusFilter, setStatusFilter] = useState('')
+  const pics = usePics()
   const [viewRow, setViewRow] = useState<any>(null)
   const [search, setSearch] = useState('')
   const [picFilter, setPicFilter] = useState('')
@@ -48,13 +55,20 @@ const SalesTracker = () => {
         dateMatch = saleDate.getFullYear() === lastMonth.getFullYear() && saleDate.getMonth() === lastMonth.getMonth()
       }
     }
-    return searchMatch && picMatch && categoryMatch && dateMatch
+    const statusMatch = !statusFilter || s.status === statusFilter
+    return searchMatch && picMatch && categoryMatch && dateMatch && statusMatch
   })
 
-  const totalBuy = filteredSales.reduce((s, r) => s + r.totalBuy, 0)
-  const totalSell = filteredSales.reduce((s, r) => s + r.totalSell, 0)
-  const totalProfit = filteredSales.reduce((s, r) => s + r.profit, 0)
-  const totalUnits = filteredSales.reduce((s, r) => s + r.qty, 0)
+  // Cancelled sales stay on the list -- they are history -- but they are not money. The
+  // totals above the table count only the sales that actually stand, the same rule the
+  // dashboards apply by filtering on status = 'Won'.
+  const countedSales = filteredSales.filter(s => s.status !== 'Cancelled')
+  const cancelledCount = filteredSales.length - countedSales.length
+
+  const totalBuy = countedSales.reduce((s, r) => s + r.totalBuy, 0)
+  const totalSell = countedSales.reduce((s, r) => s + r.totalSell, 0)
+  const totalProfit = countedSales.reduce((s, r) => s + r.profit, 0)
+  const totalUnits = countedSales.reduce((s, r) => s + r.qty, 0)
 
   const handleUpdateSaleStatus = async (id: string, ref: string, newStatus: string) => {
     try {
@@ -123,6 +137,20 @@ const SalesTracker = () => {
           onSaved={() => setRevision(value => value + 1)}
         />
       )}
+      {showImport && (
+        <SalesImportDialog
+          onClose={() => setShowImport(false)}
+          onImported={() => setRevision(value => value + 1)}
+        />
+      )}
+      {editingSale && (
+        <EditSaleDialog
+          sale={editingSale}
+          pics={pics}
+          onClose={() => setEditingSale(null)}
+          onSaved={() => setRevision(value => value + 1)}
+        />
+      )}
       {/* Financial KPI strip */}
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-s)', display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, flexShrink: 0 }}>
         {[
@@ -143,11 +171,18 @@ const SalesTracker = () => {
         <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search sales…" value={search} onChange={e => setSearch(e.target.value)} /></div>
         <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{salesPics.map(p => <option key={p} value={p}>{p}</option>)}</select>
         <select className="sel" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">All Categories</option>{salesCategories.map(c => <option key={c} value={c}>{c}</option>)}</select>
+        <select className="sel" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} aria-label="Sale status">
+          <option value="">All statuses</option>
+          <option value="Won">Won</option>
+          <option value="Pending">Pending</option>
+          <option value="Cancelled">Cancelled</option>
+        </select>
         <select className="sel" value={dateRange} onChange={e => setDateRange(e.target.value)}><option>This Month</option><option>Last Month</option><option>All Time</option></select>
         <BulkBar count={selection.selected.length} busy={bulkDeleting} onDelete={handleBulkDelete} />
         <div className="toolbar-right">
           <RefreshButton cacheKey="deals:sales" label="Sales" onRefresh={() => setRevision(value => value + 1)} />
           <ExportMenu data={filteredSales} filename="sales" />
+          <Btn variant="secondary" sm onClick={() => setShowImport(true)}><Ic n={I.export} size={13} /> Import Sales</Btn>
           <Btn variant="secondary" sm onClick={() => setShowManualSale(true)}><Ic n={I.plus} size={13} /> Record Sale Manually</Btn>
           <Btn variant="primary" sm onClick={() => setShowSale(true)}><Ic n={I.plus} size={13} /> From Quotation</Btn>
         </div>
@@ -167,7 +202,7 @@ const SalesTracker = () => {
                 onChange={e => selection.toggleAll(e.target.checked)}
               />
             </th>
-            <th>Sale #</th><th>Date</th><th>Company</th><th>Category</th><th>Size</th>
+            <th>Sale #</th><th>Invoice #</th><th>Date</th><th>Company</th><th>Type</th><th>Size</th>
             <th>Condition</th><th className="r">Qty</th><th className="r">Buy/Unit</th>
             <th className="r">Sell/Unit</th><th className="r">Total Buy</th><th className="r">Total Sell</th>
             <th className="r">Profit</th><th className="r">Margin</th><th>PIC</th><th>Status</th>
@@ -176,7 +211,7 @@ const SalesTracker = () => {
           <tbody>
             {filteredSales.length === 0 && (
               <EmptyTableState
-                colSpan={17}
+                colSpan={18}
                 icon={I.sales}
                 title="No sales records found"
                 subtitle={search || picFilter || categoryFilter || dateRange !== 'This Month'
@@ -199,12 +234,13 @@ const SalesTracker = () => {
                   />
                 </td>
                 <td><span className="ref-id">{s.ref}</span></td>
+                <td className="mono" style={{ fontSize: 12 }}>{s.invoiceNumber || <span style={{ color: 'var(--t4)' }}>—</span>}</td>
                 <td style={{ fontSize: 12.5 }}>{s.date}</td>
                 <td>
                   <div style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--t1)' }}>{s.company}</div>
                   <div style={{ fontSize: 11, color: 'var(--t4)' }}>{s.contact}</div>
                 </td>
-                <td style={{ fontSize: 12.5 }}>{s.category}</td>
+                <td style={{ fontSize: 12.5 }}>{s.type}</td>
                 <td className="mono">{s.size}</td>
                 <td style={{ fontSize: 11.5, color: 'var(--t3)' }}>{s.condition}</td>
                 <td className="r mono bold">{s.qty}</td>
@@ -224,6 +260,7 @@ const SalesTracker = () => {
                 <td className="col-actions">
                   <div className="row-actions">
                     <Btn variant="ghost" sm onClick={() => setViewRow(s)}>View</Btn>
+                    <Btn variant="ghost" sm style={{ color: 'var(--brand)' }} onClick={() => setEditingSale(s)}>Edit</Btn>
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
@@ -240,7 +277,9 @@ const SalesTracker = () => {
           </tbody>
           <tfoot>
             <tr style={{ background: 'var(--s2)' }}>
-              <td colSpan={7} style={{ padding: '10px 14px', fontWeight: 700, color: 'var(--t1)' }}>Totals ({filteredSales.length} sales)</td>
+              <td colSpan={8} style={{ padding: '10px 14px', fontWeight: 700, color: 'var(--t1)' }}>
+                Totals ({countedSales.length} sales{cancelledCount ? `, ${cancelledCount} cancelled not counted` : ''})
+              </td>
               <td className="r mono bold" style={{ color: 'var(--t1)' }}>{totalUnits}</td>
               <td colSpan={2} />
               <td className="r cost-cell" style={{ fontWeight: 700 }}>${totalBuy.toLocaleString()}</td>
@@ -257,10 +296,13 @@ const SalesTracker = () => {
           title={`Sale ${viewRow.ref}`}
           onClose={() => setViewRow(null)}
           fields={[
+            { label: 'Sale number', value: viewRow.saleNumber || viewRow.ref },
+            { label: 'Invoice number', value: viewRow.invoiceNumber },
             { label: 'Company', value: viewRow.company },
             { label: 'Contact', value: viewRow.contact },
             { label: 'Status', value: <Badge status={viewRow.status as BadgeStatus} /> },
-            { label: 'Category', value: viewRow.category },
+            { label: 'Type', value: viewRow.type },
+            { label: 'Size', value: viewRow.size },
             { label: 'Condition', value: viewRow.condition },
             { label: 'Quantity', value: viewRow.qty },
             { label: 'Total buy', value: `$${viewRow.totalBuy.toLocaleString()}` },

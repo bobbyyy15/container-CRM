@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+/** Their format, the only shape a sale number may be entered in. */
+export const WAVE_SALE_NUMBER = /^WAVE-\d{3,10}$/;
+const saleNumber = z.string().trim().toUpperCase().regex(WAVE_SALE_NUMBER, 'Sale number must look like WAVE-10317');
+export const SALE_STATUSES = ['Pending', 'Won', 'Cancelled'] as const;
+
 export const CreateQuotationSchema = z.object({
   inquiry_id: z.string().uuid(),
   valid_until: z.string().date().optional(),
@@ -37,7 +42,40 @@ export const CreateManualSaleSchema = z.object({
   // person entering it, not by the clock.
   containerSizeId: z.string().uuid().optional(),
   containerConditionId: z.string().uuid().optional(),
+  containerCategoryId: z.string().uuid().optional(),
   saleDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional(),
+  // Left out, the database allocates the next WAVE number.
+  saleNumber: saleNumber.optional(),
+  invoiceNumber: z.string().trim().max(60).optional(),
+  status: z.enum(SALE_STATUSES).optional(),
+});
+
+/**
+ * Editing an existing sale. Every field is optional -- a request changes what it names.
+ *
+ * Revenue and profit are deliberately absent: they follow from quantity, buying rate and
+ * selling price, and are recalculated server-side so a hand-typed total can never reach
+ * the dashboards.
+ */
+export const UpdateSaleSchema = z.object({
+  saleNumber: saleNumber.optional(),
+  invoiceNumber: z.string().trim().max(60).nullable().optional(),
+  saleDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').nullable().optional(),
+  totalUnits: z.number().int().min(1).optional(),
+  buyingRate: z.number().min(0).optional(),
+  sellingPrice: z.number().min(0).optional(),
+  containerSizeId: z.string().uuid().nullable().optional(),
+  containerConditionId: z.string().uuid().nullable().optional(),
+  containerCategoryId: z.string().uuid().nullable().optional(),
+  picId: z.string().uuid().nullable().optional(),
+  status: z.enum(SALE_STATUSES).optional(),
+}).refine(payload => Object.keys(payload).length > 0, { message: 'Nothing to update' });
+
+/** A parsed spreadsheet on its way in: raw rows, and whether to commit or only report. */
+export const ImportSalesSchema = z.object({
+  rows: z.array(z.record(z.string(), z.unknown())).min(1).max(5000),
+  dryRun: z.boolean().default(true),
+  filename: z.string().trim().max(255).optional(),
 });
 
 export const UpdateSaleStatusSchema = z.object({
@@ -49,3 +87,5 @@ export type ConvertToSalePayload = z.infer<typeof ConvertToSaleSchema>;
 export type UpdateQuotationStatusPayload = z.infer<typeof UpdateQuotationStatusSchema>;
 export type CreateManualSalePayload = z.infer<typeof CreateManualSaleSchema>;
 export type UpdateSaleStatusPayload = z.infer<typeof UpdateSaleStatusSchema>;
+export type UpdateSalePayload = z.infer<typeof UpdateSaleSchema>;
+export type ImportSalesPayload = z.infer<typeof ImportSalesSchema>;

@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { DealService } from '../services/deal.service';
-import { CreateQuotationSchema, UpdateQuotationStatusSchema, ConvertToSaleSchema, CreateManualSaleSchema, UpdateSaleStatusSchema } from '../schemas/deal.schema';
+import { CreateQuotationSchema, UpdateQuotationStatusSchema, ConvertToSaleSchema, CreateManualSaleSchema, UpdateSaleStatusSchema, UpdateSaleSchema, ImportSalesSchema } from '../schemas/deal.schema';
 
 // A record created with no PIC stamped on it is invisible under the pic_id-based data
 // silos (NULL never equals NULL for row-ownership checks), so it becomes unreachable the
@@ -16,6 +16,19 @@ const requirePicId = (req: Request, res: Response): string | null => {
     return null;
   }
   return picId;
+};
+
+/**
+ * A ZodError's `message` is the raw issue array, which is what the sale endpoints were
+ * answering with when a sale number was in the wrong shape. Read the first issue instead,
+ * naming the field, so the dialog can show the sentence as it is.
+ */
+const readableError = (error: any): string => {
+  const issues = error?.issues;
+  if (!Array.isArray(issues) || issues.length === 0) return error?.message ?? 'The request could not be processed.';
+  const [issue] = issues;
+  const field = Array.isArray(issue.path) && issue.path.length ? `${issue.path.join('.')}: ` : '';
+  return `${field}${issue.message}`;
 };
 
 export class DealController {
@@ -58,7 +71,7 @@ export class DealController {
         // Size and condition are recorded on a manual sale and live on the inquiry behind
         // the quotation otherwise, so both are embedded and the mapper prefers the sale's own.
         .select('*, companies(*, company_contacts(is_primary, contacts(*))), pics(name), '
-          + 'container_sizes(name), container_conditions(name), '
+          + 'container_sizes(name), container_conditions(name), container_categories(code, name), '
           // An inquiry has two size and two condition FKs -- the requirement and the
           // Procurement-suggested alternative -- so the embed has to name the column.
           + 'quotations(*, contacts(*), quotation_items(*), '
@@ -111,7 +124,37 @@ export class DealController {
       const sale = await DealService.createManualSale(payload, userId);
       res.status(201).json({ success: true, data: sale });
     } catch (error: any) {
-      res.status(400).json({ success: false, error: { message: error.message } });
+      res.status(400).json({ success: false, error: { message: readableError(error) } });
+    }
+  }
+
+  /** Edits an existing sale. Financial totals are recalculated, never accepted as given. */
+  static async updateSale(req: Request, res: Response) {
+    try {
+      const payload = UpdateSaleSchema.parse(req.body);
+      const sale = await DealService.updateSale(String(req.params.id), payload, {
+        role: req.auth?.profile.role,
+        picId: req.auth?.profile.pic_id,
+      });
+      res.json({ success: true, data: sale });
+    } catch (error: any) {
+      res.status(error.status ?? 400).json({ success: false, error: { message: readableError(error) } });
+    }
+  }
+
+  /**
+   * Imports a sales spreadsheet. Defaults to a dry run: the response describes what would
+   * happen to every row, and nothing is written until the caller asks for it explicitly.
+   */
+  static async importSales(req: Request, res: Response) {
+    try {
+      const payload = ImportSalesSchema.parse(req.body);
+      const picId = requirePicId(req, res);
+      if (!picId) return;
+      const result = await DealService.importSales(payload, req.auth!.user.id, picId);
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      res.status(error.status ?? 400).json({ success: false, error: { message: readableError(error) } });
     }
   }
 

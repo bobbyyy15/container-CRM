@@ -15,7 +15,9 @@ router.delete('/quotations/:id', requireRoles('admin', 'sales_manager'), DeleteC
 // Sales
 router.get('/sales', DealController.getSales);
 router.post('/sales', requireRoles('admin', 'sales_manager'), DealController.createManualSale);
+router.post('/sales/import', requireRoles('admin', 'sales_manager'), DealController.importSales);
 router.patch('/sales/:id/status', requireRoles('admin', 'sales_manager', 'operations'), DealController.updateSaleStatus);
+router.patch('/sales/:id', requireRoles('admin', 'sales_manager'), DealController.updateSale);
 router.delete('/sales/:id', requireRoles('admin', 'sales_manager'), DealController.deleteSale);
 
 export default router;
