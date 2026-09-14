@@ -9,6 +9,7 @@ import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import type { Screen, BadgeStatus } from '../../app/types'
 import AssignPicModal from '../../components/ui/AssignPicModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
+import { TableSkeleton } from '../../components/ui/SkeletonLoader'
 import RefreshButton from '../../components/ui/RefreshButton'
 import { confirmDelete } from '../../lib/deleteRecord'
 const ProspectImportDialog = lazy(() => import('../import/ProspectImportDialog'))
@@ -17,6 +18,7 @@ import { mapPipelineRow } from '../../hooks/mapPipelineRow'
 import { useProspects } from '../../hooks/useProspects'
 import { useWarmLeads } from '../../hooks/useWarmLeads'
 import { exportToCSV, readDensity, writeDensity } from '../../lib/exporters'
+import { formatPhoneNumber, formatPhoneAsYouType } from '../../lib/formatters'
 import type { DensityOption } from '../../app/types'
 
 const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm'; onNav?: (s: Screen) => void }) => {
@@ -62,18 +64,21 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
   const _prospectsData = useProspects(revision, mode === 'prospect' ? status : 'active', mode === 'prospect')
   const _warmData = useWarmLeads(revision, mode === 'warm')
   const prospectsData = mode === 'warm' ? _warmData : _prospectsData
+  const isLoading = mode === 'warm' ? _warmData.loading : _prospectsData.loading
 
   const commitCellEdit = async (rowId: string, field: string, newValue: string, oldValue: string) => {
     setEditingCell(null);
-    if (newValue === oldValue) return;
+    const isPhone = field === 'phone' || field === 'phone2';
+    const finalValue = isPhone ? formatPhoneNumber(newValue) : newValue;
+    if (finalValue === oldValue) return;
     setLocalOverrides(prev => ({
       ...prev,
-      [rowId]: { ...(prev[rowId] || {}), [field]: newValue },
+      [rowId]: { ...(prev[rowId] || {}), [field]: finalValue },
     }));
     try {
       await api.patch(`/leads/${mode === 'prospect' ? 'prospect' : 'warm_lead'}/${rowId}/cell`, {
         field,
-        value: newValue,
+        value: finalValue,
       });
       toast('Saved', 'success');
     } catch (err: any) {
@@ -477,7 +482,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           </div>
 
           {/* Data rows */}
-          {filtered.length === 0 && (
+          {isLoading && filtered.length === 0 ? (
+            <TableSkeleton rows={10} cols={visibleCols.length + 2} asTable={false} />
+          ) : filtered.length === 0 ? (
             <EmptyTableState
               icon={mode === 'warm' ? I.lead : I.prospect}
               title={mode === 'warm' ? 'No warm leads found' : 'No prospect clients found'}
@@ -487,7 +494,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
               actionLabel={mode === 'warm' ? 'New Warm Lead' : 'New Prospect'}
               onAction={() => mode === 'warm' ? setShowNewWarmLead(true) : setShowNewProspect(true)}
             />
-          )}
+          ) : null}
           {filtered.map((row, ri) => {
             const isRemoved = row.cat === 'Removed'
             const isSel = selected.includes(row.id)
@@ -648,7 +655,10 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                               className="inp"
                               style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 8px', fontSize: 12.5, background: 'transparent' }}
                               value={editingCell.value}
-                              onChange={e => setEditingCell({ ...editingCell, value: e.target.value })}
+                              onChange={e => {
+                                const isPhone = ['phone', 'phone2'].includes(col.field)
+                                setEditingCell({ ...editingCell, value: isPhone ? formatPhoneAsYouType(e.target.value) : e.target.value })
+                              }}
                               onFocus={e => e.target.select()}
                               onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
                               onKeyDown={e => {

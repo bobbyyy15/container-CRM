@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../../lib/api'
 import { fetchCached, getFromCache } from '../../lib/dataCache'
+import { formatPhoneNumber, formatPhoneAsYouType } from '../../lib/formatters'
 
 type CatalogOption = { id: string; name: string }
 
@@ -126,7 +127,7 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
           setCompanyName(match.company_name ?? '')
           setContactPerson(match.contact_person ?? '')
           setEmail(match.email ?? '')
-          setPhone(match.phone ?? '')
+          setPhone(formatPhoneNumber(match.phone ?? ''))
           setStateProvince(match.state_province ?? '')
           setCountry(match.country ?? '')
           // Keep the inquiry with whoever already owns the relationship.
@@ -185,7 +186,7 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
           ...shared,
           companyName: companyName.trim(),
           contactPerson: contactPerson.trim() || undefined,
-          phone: phone.trim() || undefined,
+          phone: formatPhoneNumber(phone).trim() || undefined,
           email: email.trim() || undefined,
           stateProvince: stateProvince.trim() || undefined,
           country: country.trim() || undefined,
@@ -322,7 +323,13 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
               </div>
               <div>
                 <FieldLabel label="Phone" optional />
-                <input className="inp" value={phone} onChange={event => setPhone(event.target.value)} placeholder="(555) 000-0000" />
+                <input
+                  className="inp"
+                  value={phone}
+                  onChange={event => setPhone(formatPhoneAsYouType(event.target.value))}
+                  onBlur={() => setPhone(formatPhoneNumber(phone))}
+                  placeholder="(555) 000-0000"
+                />
               </div>
               <div>
                 <FieldLabel label="Email" optional />
@@ -435,7 +442,7 @@ export const NewWarmLeadDialog = ({ initialIdentity, onClose, onSaved }: {
           setCompanyName(match.company_name ?? '')
           setContactPerson(match.contact_person ?? '')
           setEmail(match.email ?? '')
-          setPhone(match.phone ?? '')
+          setPhone(formatPhoneNumber(match.phone ?? ''))
           setStateProvince(match.state_province ?? '')
           setCountry(match.country ?? '')
           if (match.pic_id) setPicId(match.pic_id)
@@ -468,7 +475,7 @@ export const NewWarmLeadDialog = ({ initialIdentity, onClose, onSaved }: {
       await api.post('/leads/warm-leads', {
         companyName: companyName.trim(),
         contactPerson: contactPerson.trim() || undefined,
-        phone: phone.trim() || undefined,
+        phone: formatPhoneNumber(phone).trim() || undefined,
         email: email.trim() || undefined,
         stateProvince: stateProvince.trim() || undefined,
         country: country.trim() || undefined,
@@ -588,7 +595,13 @@ export const NewWarmLeadDialog = ({ initialIdentity, onClose, onSaved }: {
           </div>
           <div>
             <FieldLabel label="Phone" optional />
-            <input className="inp" value={phone} onChange={event => setPhone(event.target.value)} placeholder="(555) 000-0000" />
+            <input
+              className="inp"
+              value={phone}
+              onChange={event => setPhone(formatPhoneAsYouType(event.target.value))}
+              onBlur={() => setPhone(formatPhoneNumber(phone))}
+              placeholder="(555) 000-0000"
+            />
           </div>
           <div>
             <FieldLabel label="Email" optional />
@@ -666,7 +679,7 @@ export const NewProspectDialog = ({ onClose, onSaved }: {
       await api.post('/leads/prospects', {
         companyName: companyName.trim(),
         contactPerson: contactPerson.trim() || undefined,
-        phone: phone.trim() || undefined,
+        phone: formatPhoneNumber(phone).trim() || undefined,
         email: email.trim() || undefined,
         picId: picId || undefined,
         category,
@@ -705,7 +718,13 @@ export const NewProspectDialog = ({ onClose, onSaved }: {
           </div>
           <div>
             <FieldLabel label="Phone" optional />
-            <input className="inp" value={phone} onChange={event => setPhone(event.target.value)} placeholder="(555) 000-0000" />
+            <input
+              className="inp"
+              value={phone}
+              onChange={event => setPhone(formatPhoneAsYouType(event.target.value))}
+              onBlur={() => setPhone(formatPhoneNumber(phone))}
+              placeholder="(555) 000-0000"
+            />
           </div>
           <div>
             <FieldLabel label="Email" optional />
@@ -817,7 +836,7 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
       await api.post('/deals/sales', {
         companyName: companyName.trim(),
         contactPerson: contactPerson.trim() || undefined,
-        phone: phone.trim() || undefined,
+        phone: formatPhoneNumber(phone).trim() || undefined,
         email: email.trim() || undefined,
         picId: picId || undefined,
         totalUnits,
@@ -856,7 +875,13 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
           </div>
           <div>
             <FieldLabel label="Phone" optional />
-            <input className="inp" value={phone} onChange={event => setPhone(event.target.value)} placeholder="(555) 000-0000" />
+            <input
+              className="inp"
+              value={phone}
+              onChange={event => setPhone(formatPhoneAsYouType(event.target.value))}
+              onBlur={() => setPhone(formatPhoneNumber(phone))}
+              placeholder="(555) 000-0000"
+            />
           </div>
           <div>
             <FieldLabel label="Email" optional />

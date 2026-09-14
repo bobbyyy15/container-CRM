@@ -420,6 +420,19 @@ export class LeadController {
       if (error) throw error;
 
       const match = Array.isArray(data) ? data[0] : data;
+      if (match) {
+        const caller = req.auth?.profile;
+        const isPrivileged = caller?.role === 'admin' || caller?.role === 'procurement';
+        const callerPicId = caller?.pic_id;
+        // If caller is a sales manager and doesn't own this record, and did not search with an exact email/phone
+        if (!isPrivileged && match.pic_id && match.pic_id !== callerPicId) {
+          const isEmailOrPhone = identity.includes('@') || digits(identity).length >= 7;
+          if (!isEmailOrPhone) {
+            match.email = match.email ? match.email.replace(/(?<=.).(?=.*@)/g, '*') : '';
+            match.phone = match.phone ? match.phone.replace(/\d(?=\d{3})/g, '*') : '';
+          }
+        }
+      }
       res.json({ success: true, data: match ?? null });
     } catch (error: any) {
       res.status(500).json({ success: false, error: { message: error.message } });

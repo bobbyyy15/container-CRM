@@ -7,6 +7,7 @@ import { Badge, ChipPIC } from '../../components/ui/primitives'
 import ExportMenu from '../../components/ui/ExportMenu'
 import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
+import { TableSkeleton } from '../../components/ui/SkeletonLoader'
 import RefreshButton from '../../components/ui/RefreshButton'
 import { confirmDelete } from '../../lib/deleteRecord'
 import type { Screen, BadgeStatus } from '../../app/types'
@@ -201,19 +202,22 @@ const InquiryList = () => {
               <th className="col-actions">Actions</th>
             </tr>
           </thead>
-          <tbody>
-            {filtered.length === 0 && (
-              <EmptyTableState
-                colSpan={13}
-                icon={I.inquiry}
-                title="No inquiries found"
-                subtitle={lookup || channel || picFilter || tab !== 'All'
-                  ? 'No inquiries match your filters. Try clearing the search or filter tab.'
-                  : 'No inquiries have been raised yet.'}
-                actionLabel="New Inquiry"
-                onAction={() => setShowNewInquiry(true)}
-              />
-            )}
+          {INQUIRIES.loading && filtered.length === 0 ? (
+            <TableSkeleton rows={8} cols={13} asTable={true} />
+          ) : (
+            <tbody>
+              {filtered.length === 0 && (
+                <EmptyTableState
+                  colSpan={13}
+                  icon={I.inquiry}
+                  title="No inquiries found"
+                  subtitle={lookup || channel || picFilter || tab !== 'All'
+                    ? 'No inquiries match your filters. Try clearing the search or filter tab.'
+                    : 'No inquiries have been raised yet.'}
+                  actionLabel="New Inquiry"
+                  onAction={() => setShowNewInquiry(true)}
+                />
+              )}
             {filtered.map(row => (
               <tr key={row.ref}>
                 <td><span className="ref-id">{row.ref}</span></td>
@@ -271,6 +275,7 @@ const InquiryList = () => {
               </tr>
             ))}
           </tbody>
+          )}
         </table>
       </div>
       {viewRow && (

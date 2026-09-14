@@ -1,3 +1,5 @@
+import { formatPhoneNumber } from '../../lib/formatters'
+
 export type ProspectImportRow = {
   date_added?: string
   pic?: string
@@ -283,8 +285,13 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
     // (e.g. two phone-like headers) can't blank out an already-populated field.
     mapped.forEach((field, index) => {
       if (!field || record[field]) return
-      const value = clean(source[index])
-      if (value) record[field] = value
+      let value = clean(source[index])
+      if (value) {
+        if (field === 'contact_number_direct' || field === 'contact_number_2') {
+          value = formatPhoneNumber(value)
+        }
+        record[field] = value
+      }
     })
     if (!record.industry && cargoColumns.length) {
       const active = cargoColumns

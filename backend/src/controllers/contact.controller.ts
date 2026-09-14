@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { CreateContactSchema, UpdateContactSchema } from '../schemas/contact.schema';
+import { formatPhoneNumber } from '../utils/formatters';
 
 export class ContactController {
   static async getContacts(req: Request, res: Response) {
@@ -40,7 +41,8 @@ export class ContactController {
     try {
       const validatedData = CreateContactSchema.parse(req.body);
 
-      // Normalization of phone and email could happen here before insert
+      if (validatedData.phone_direct) validatedData.phone_direct = formatPhoneNumber(validatedData.phone_direct);
+      if (validatedData.phone_2) validatedData.phone_2 = formatPhoneNumber(validatedData.phone_2);
       
       const { data, error } = await supabaseAdmin
         .from('contacts')
@@ -60,6 +62,9 @@ export class ContactController {
     try {
       const id = req.params.id as string;
       const validatedData = UpdateContactSchema.parse(req.body);
+
+      if (validatedData.phone_direct) validatedData.phone_direct = formatPhoneNumber(validatedData.phone_direct);
+      if (validatedData.phone_2) validatedData.phone_2 = formatPhoneNumber(validatedData.phone_2);
 
       const { data, error } = await supabaseAdmin
         .from('contacts')

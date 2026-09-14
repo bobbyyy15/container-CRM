@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../config/supabase';
 import { CreateInquiryPayload, CreateManualWarmLeadPayload, CreateManualInquiryPayload, CreateManualProspectPayload } from '../schemas/lead.schema';
+import { formatPhoneNumber } from '../utils/formatters';
 
 export class LeadService {
   static async convertProspectToWarmLead(prospectId: string, actorId: string, reason?: string, channel?: string) {
@@ -53,7 +54,7 @@ export class LeadService {
         p_actor_id: actorId,
         p_company_name: payload.companyName,
         p_contact_person: payload.contactPerson ?? null,
-        p_phone: payload.phone ?? null,
+        p_phone: payload.phone ? formatPhoneNumber(payload.phone) : null,
         p_email: payload.email ?? null,
         p_pic_id: payload.picId ?? null,
         p_category: payload.category,
@@ -77,7 +78,7 @@ export class LeadService {
         p_actor_id: actorId,
         p_company_name: payload.companyName,
         p_contact_person: payload.contactPerson ?? null,
-        p_phone: payload.phone ?? null,
+        p_phone: payload.phone ? formatPhoneNumber(payload.phone) : null,
         p_email: payload.email ?? null,
         p_state_province: payload.stateProvince ?? null,
         p_country: payload.country ?? null,
@@ -109,7 +110,7 @@ export class LeadService {
         p_warm_lead_id: payload.warmLeadId ?? null,
         p_company_name: payload.companyName ?? null,
         p_contact_person: payload.contactPerson ?? null,
-        p_phone: payload.phone ?? null,
+        p_phone: payload.phone ? formatPhoneNumber(payload.phone) : null,
         p_email: payload.email ?? null,
         p_state_province: payload.stateProvince ?? null,
         p_country: payload.country ?? null,
@@ -696,9 +697,9 @@ export class LeadService {
             contactUpdates.last_name = null;
           }
         } else if (field === 'phone') {
-          contactUpdates.phone_direct = value;
+          contactUpdates.phone_direct = formatPhoneNumber(value);
         } else if (field === 'phone2') {
-          contactUpdates.phone_2 = value;
+          contactUpdates.phone_2 = formatPhoneNumber(value);
         } else if (field === 'emailAddr') {
           contactUpdates.email_active = value;
         } else if (field === 'email2') {
@@ -719,9 +720,9 @@ export class LeadService {
           firstName = parts[0];
           lastName = parts.slice(1).join(' ') || null;
         } else if (field === 'phone') {
-          phoneDirect = value;
+          phoneDirect = formatPhoneNumber(value);
         } else if (field === 'phone2') {
-          phone2 = value;
+          phone2 = formatPhoneNumber(value);
         } else if (field === 'emailAddr') {
           emailActive = value;
         } else if (field === 'email2') {

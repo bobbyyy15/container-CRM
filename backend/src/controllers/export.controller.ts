@@ -5,15 +5,16 @@ import { ExportService } from '../services/export.service';
 const GoogleSheetExportSchema = z.object({
   title: z.string({ error: 'A sheet title is required.' }).min(1, 'A sheet title is required.').max(200),
   rows:  z.array(z.record(z.string(), z.any()), { error: 'There is nothing to export.' })
-          .min(1, 'There is nothing to export.'),
+          .min(1, 'There is nothing to export.')
+          .max(10_000, 'Single export limit is 10,000 rows. Please filter your export.'),
 });
 
 const GoogleWorkbookExportSchema = z.object({
   title: z.string({ error: 'A sheet title is required.' }).min(1, 'A sheet title is required.').max(200),
   tabs:  z.array(z.object({
     name: z.string().min(1),
-    rows: z.array(z.record(z.string(), z.any())),
-  }), { error: 'There is nothing to export.' }).min(1, 'There is nothing to export.'),
+    rows: z.array(z.record(z.string(), z.any())).max(10_000, 'Single export tab limit is 10,000 rows.'),
+  }), { error: 'There is nothing to export.' }).min(1, 'There is nothing to export.').max(20, 'Maximum 20 tabs per workbook.'),
 });
 
 export class ExportController {

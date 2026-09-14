@@ -7,6 +7,7 @@ import { Badge, ChipPIC } from '../../components/ui/primitives'
 import ExportMenu from '../../components/ui/ExportMenu'
 import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
+import { TableSkeleton } from '../../components/ui/SkeletonLoader'
 import RefreshButton from '../../components/ui/RefreshButton'
 import { confirmDelete } from '../../lib/deleteRecord'
 import type { Screen, BadgeStatus } from '../../app/types'
@@ -146,19 +147,22 @@ const QuotationList = () => {
             <th className="r">Qty</th><th className="r">Total Sell</th><th className="r">Est. Profit</th>
             <th className="r">Margin</th><th>Status</th><th>Source</th><th>PIC</th><th className="col-actions">Actions</th>
           </tr></thead>
-          <tbody>
-            {filteredQuotes.length === 0 && (
-              <EmptyTableState
-                colSpan={13}
-                icon={I.quote}
-                title="No quotations found"
-                subtitle={search || statusFilter || picFilter
-                  ? 'No quotations match your filters. Try clearing the search or dropdowns.'
-                  : 'No quotations have been raised yet.'}
-                actionLabel="Create Quotation"
-                onAction={() => setShowQuotation(true)}
-              />
-            )}
+          {quotes.loading && filteredQuotes.length === 0 ? (
+            <TableSkeleton rows={8} cols={13} asTable={true} />
+          ) : (
+            <tbody>
+              {filteredQuotes.length === 0 && (
+                <EmptyTableState
+                  colSpan={13}
+                  icon={I.quote}
+                  title="No quotations found"
+                  subtitle={search || statusFilter || picFilter
+                    ? 'No quotations match your filters. Try clearing the search or dropdowns.'
+                    : 'No quotations have been raised yet.'}
+                  actionLabel="Create Quotation"
+                  onAction={() => setShowQuotation(true)}
+                />
+              )}
             {filteredQuotes.map(q => (
               <tr key={q.ref}>
                 <td><span className="ref-id" style={{ color: 'var(--purple)' }}>{q.ref}</span></td>
@@ -195,6 +199,7 @@ const QuotationList = () => {
               </tr>
             ))}
           </tbody>
+          )}
         </table>
       </div>
       {viewRow && (

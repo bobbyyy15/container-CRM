@@ -9,6 +9,7 @@ import EmptyTableState from '../../components/ui/EmptyTableState'
 import RefreshButton from '../../components/ui/RefreshButton'
 import type { Screen, BadgeStatus } from '../../app/types'
 import { exportToCSV } from '../../lib/exporters'
+import { formatPhoneNumber } from '../../lib/formatters'
 
 const RemovedSheet = () => {
   const [showPaste, setShowPaste] = useState(false)
@@ -100,7 +101,7 @@ const RemovedSheet = () => {
         id: row.id,
         date: new Date(row.created_at).toLocaleDateString(),
         type: row.identity_type,
-        phone: row.contacts?.phone_direct || row.contacts?.phone_2 || (row.identity_type === 'phone' ? row.normalized_value : ''),
+        phone: formatPhoneNumber(row.contacts?.phone_direct || row.contacts?.phone_2 || (row.identity_type === 'phone' ? row.normalized_value : '')),
         email: row.contacts?.email_active || row.contacts?.email_2 || (row.identity_type === 'email' ? row.normalized_value : ''),
         co: row.companies?.name || '',
         contact: `${row.contacts?.first_name || ''} ${row.contacts?.last_name || ''}`.trim(),

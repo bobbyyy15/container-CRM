@@ -6,6 +6,7 @@ import Btn from '../../components/ui/Button'
 import { Badge, ChipPIC, StatusSmartChip } from '../../components/ui/primitives'
 import ExportMenu from '../../components/ui/ExportMenu'
 import EmptyTableState from '../../components/ui/EmptyTableState'
+import { TableSkeleton } from '../../components/ui/SkeletonLoader'
 import RefreshButton from '../../components/ui/RefreshButton'
 import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import type { Screen, BadgeStatus } from '../../app/types'
@@ -131,19 +132,22 @@ const SalesTracker = () => {
             <th className="r">Profit</th><th className="r">Margin</th><th>PIC</th><th>Status</th>
             <th className="col-actions">Actions</th>
           </tr></thead>
-          <tbody>
-            {filteredSales.length === 0 && (
-              <EmptyTableState
-                colSpan={16}
-                icon={I.sales}
-                title="No sales records found"
-                subtitle={search || picFilter || categoryFilter || dateRange !== 'This Month'
-                  ? 'No sales match your filters. Try widening the date range or clearing the search.'
-                  : 'No sales recorded yet. Convert an accepted quotation, or record one manually.'}
-                actionLabel="Record Sale Manually"
-                onAction={() => setShowManualSale(true)}
-              />
-            )}
+          {SALES.loading && filteredSales.length === 0 ? (
+            <TableSkeleton rows={8} cols={16} asTable={true} />
+          ) : (
+            <tbody>
+              {filteredSales.length === 0 && (
+                <EmptyTableState
+                  colSpan={16}
+                  icon={I.sales}
+                  title="No sales records found"
+                  subtitle={search || picFilter || categoryFilter || dateRange !== 'This Month'
+                    ? 'No sales match your filters. Try widening the date range or clearing the search.'
+                    : 'No sales recorded yet. Convert an accepted quotation, or record one manually.'}
+                  actionLabel="Record Sale Manually"
+                  onAction={() => setShowManualSale(true)}
+                />
+              )}
             {filteredSales.map(s => (
               <tr key={s.ref}>
                 <td><span className="ref-id">{s.ref}</span></td>
@@ -186,6 +190,7 @@ const SalesTracker = () => {
               </tr>
             ))}
           </tbody>
+          )}
           <tfoot>
             <tr style={{ background: 'var(--s2)' }}>
               <td colSpan={6} style={{ padding: '10px 14px', fontWeight: 700, color: 'var(--t1)' }}>Totals ({filteredSales.length} sales)</td>

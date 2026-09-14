@@ -4,6 +4,7 @@ import { toast, askConfirm, askReason } from '../../lib/notify'
 import { Ic, I } from '../../components/ui/icons'
 import Btn from '../../components/ui/Button'
 import EmptyTableState from '../../components/ui/EmptyTableState'
+import { TableSkeleton } from '../../components/ui/SkeletonLoader'
 import RefreshButton from '../../components/ui/RefreshButton'
 import { Badge } from '../../components/ui/primitives'
 import ExportMenu from '../../components/ui/ExportMenu'
@@ -314,42 +315,46 @@ const InventoryManagement = ({ role }: { role?: string }) => {
               <th className="r">Unit Cost</th><th className="r">Target Price</th>
               <th>Status</th>{canWrite && <th>Actions</th>}
             </tr></thead>
-            <tbody>
-              {inventory.length === 0 ? (
-                <EmptyTableState
-                  colSpan={canWrite ? 10 : 9}
-                  icon={I.container}
-                  title="No inventory records found"
-                  subtitle={canWrite
-                    ? 'Add a record by hand, or import a vendor sheet to load stock in bulk.'
-                    : 'No container stock has been loaded yet.'}
-                  actionLabel={canWrite ? 'Add Inventory' : undefined}
-                  onAction={canWrite ? () => setShowNew(true) : undefined}
-                />
-              ) : inventory.map((row: any) => {
-                const sc = STATUS_COLORS[row.status] || { bg:'var(--s3)', color:'var(--t3)' }
-                return (
-                  <tr key={row.id}>
-                    <td><div style={{ fontWeight:600, fontSize:13 }}>{row.container_size}</div><div style={{ fontSize:11, color:'var(--t4)' }}>{row.container_category}</div></td>
-                    <td style={{ fontSize:12.5 }}>{row.container_condition}</td>
-                    <td><div style={{ fontWeight:500, fontSize:13 }}>{row.depot_name}</div>{(row.city||row.state_province) && <div style={{ fontSize:11, color:'var(--t4)' }}>{[row.city,row.state_province,row.country].filter(Boolean).join(', ')}</div>}</td>
-                    <td style={{ fontSize:12.5, color:'var(--t3)' }}>{row.vendor_supplier||'—'}</td>
-                    <td className="r">
-                      <div style={{ display:'flex', alignItems:'center', justifyContent:'flex-end', gap:4 }}>
-                        {canWrite && <button style={{ background:'none', border:'1px solid var(--border)', borderRadius:4, width:20, height:20, cursor:'pointer', fontSize:13, color:'var(--t3)', display:'flex', alignItems:'center', justifyContent:'center' }} onClick={() => handleStockDelta(row.id,'available',-1)}>−</button>}
-                        <span style={{ fontWeight:700, fontFamily:'var(--mono)', minWidth:24, textAlign:'center' }}>{row.quantity_available}</span>
-                        {canWrite && <button style={{ background:'none', border:'1px solid var(--border)', borderRadius:4, width:20, height:20, cursor:'pointer', fontSize:13, color:'var(--t3)', display:'flex', alignItems:'center', justifyContent:'center' }} onClick={() => handleStockDelta(row.id,'available',1)}>+</button>}
-                      </div>
-                    </td>
-                    <td className="r mono">{row.quantity_reserved}</td>
-                    <td className="r mono">${Number(row.unit_cost).toLocaleString()}</td>
-                    <td className="r mono">${Number(row.target_sell_price||0).toLocaleString()}</td>
-                    <td><span style={{ padding:'3px 8px', borderRadius:5, fontSize:11, fontWeight:600, background:sc.bg, color:sc.color }}>{row.status}</span></td>
-                    {canWrite && <td><div style={{ display:'flex', gap:4 }}><Btn variant="ghost" sm title="Edit" onClick={() => setEditRow(row)}><Ic n={I.edit} size={13} /></Btn>{role==='admin' && <Btn variant="ghost" sm title="Delete" onClick={() => handleDelete(row.id)}><Ic n={I.removed} size={13} /></Btn>}</div></td>}
-                  </tr>
-                )
-              })}
-            </tbody>
+            {inventory.loading && inventory.length === 0 ? (
+              <TableSkeleton rows={8} cols={canWrite ? 10 : 9} asTable={true} />
+            ) : (
+              <tbody>
+                {inventory.length === 0 ? (
+                  <EmptyTableState
+                    colSpan={canWrite ? 10 : 9}
+                    icon={I.container}
+                    title="No inventory records found"
+                    subtitle={canWrite
+                      ? 'Add a record by hand, or import a vendor sheet to load stock in bulk.'
+                      : 'No container stock has been loaded yet.'}
+                    actionLabel={canWrite ? 'Add Inventory' : undefined}
+                    onAction={canWrite ? () => setShowNew(true) : undefined}
+                  />
+                ) : inventory.map((row: any) => {
+                  const sc = STATUS_COLORS[row.status] || { bg:'var(--s3)', color:'var(--t3)' }
+                  return (
+                    <tr key={row.id}>
+                      <td><div style={{ fontWeight:600, fontSize:13 }}>{row.container_size}</div><div style={{ fontSize:11, color:'var(--t4)' }}>{row.container_category}</div></td>
+                      <td style={{ fontSize:12.5 }}>{row.container_condition}</td>
+                      <td><div style={{ fontWeight:500, fontSize:13 }}>{row.depot_name}</div>{(row.city||row.state_province) && <div style={{ fontSize:11, color:'var(--t4)' }}>{[row.city,row.state_province,row.country].filter(Boolean).join(', ')}</div>}</td>
+                      <td style={{ fontSize:12.5, color:'var(--t3)' }}>{row.vendor_supplier||'—'}</td>
+                      <td className="r">
+                        <div style={{ display:'flex', alignItems:'center', justifyContent:'flex-end', gap:4 }}>
+                          {canWrite && <button style={{ background:'none', border:'1px solid var(--border)', borderRadius:4, width:20, height:20, cursor:'pointer', fontSize:13, color:'var(--t3)', display:'flex', alignItems:'center', justifyContent:'center' }} onClick={() => handleStockDelta(row.id,'available',-1)}>−</button>}
+                          <span style={{ fontWeight:700, fontFamily:'var(--mono)', minWidth:24, textAlign:'center' }}>{row.quantity_available}</span>
+                          {canWrite && <button style={{ background:'none', border:'1px solid var(--border)', borderRadius:4, width:20, height:20, cursor:'pointer', fontSize:13, color:'var(--t3)', display:'flex', alignItems:'center', justifyContent:'center' }} onClick={() => handleStockDelta(row.id,'available',1)}>+</button>}
+                        </div>
+                      </td>
+                      <td className="r mono">{row.quantity_reserved}</td>
+                      <td className="r mono">${Number(row.unit_cost).toLocaleString()}</td>
+                      <td className="r mono">${Number(row.target_sell_price||0).toLocaleString()}</td>
+                      <td><span style={{ padding:'3px 8px', borderRadius:5, fontSize:11, fontWeight:600, background:sc.bg, color:sc.color }}>{row.status}</span></td>
+                      {canWrite && <td><div style={{ display:'flex', gap:4 }}><Btn variant="ghost" sm title="Edit" onClick={() => setEditRow(row)}><Ic n={I.edit} size={13} /></Btn>{role==='admin' && <Btn variant="ghost" sm title="Delete" onClick={() => handleDelete(row.id)}><Ic n={I.removed} size={13} /></Btn>}</div></td>}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            )}
           </table>
         </div>
       </div>

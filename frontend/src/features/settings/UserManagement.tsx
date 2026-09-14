@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../../lib/api';
 import { toast, askReason } from '../../lib/notify';
 import RefreshButton from '../../components/ui/RefreshButton';
+import { TableSkeleton } from '../../components/ui/SkeletonLoader';
 
 type Profile = {
   id: string;
@@ -96,8 +97,11 @@ export const UserManagement = () => {
                 <th>Created</th>
               </tr>
             </thead>
-            <tbody>
-              {users.map(u => {
+            {loading && users.length === 0 ? (
+              <TableSkeleton rows={4} cols={5} asTable={true} />
+            ) : (
+              <tbody>
+                {users.map(u => {
                 const isSelf = u.id === selfId;
                 const isSaving = savingId === u.id;
                 const hasPic = u.pics && u.pics.length > 0;
@@ -148,6 +152,7 @@ export const UserManagement = () => {
                 );
               })}
             </tbody>
+            )}
           </table>
         </div>
       </div>

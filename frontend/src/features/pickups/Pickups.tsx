@@ -8,6 +8,7 @@ import ExportMenu from '../../components/ui/ExportMenu'
 import type { Screen, BadgeStatus } from '../../app/types'
 import { useContracts } from '../../hooks/useContracts'
 import EmptyTableState from '../../components/ui/EmptyTableState'
+import { TableSkeleton } from '../../components/ui/SkeletonLoader'
 import RefreshButton from '../../components/ui/RefreshButton'
 import { confirmDelete } from '../../lib/deleteRecord'
 
@@ -95,17 +96,20 @@ const Pickups = ({ role }: { role?: string }) => {
             <th>Contract #</th><th>Company</th><th>Container</th><th className="r">Qty</th>
             <th>Target Date</th><th>Status</th><th>PIC</th><th className="col-actions">Actions</th>
           </tr></thead>
-          <tbody>
-            {contracts.length === 0 && (
-              <EmptyTableState
-                colSpan={8}
-                icon={I.pickup}
-                title="No pickups found"
-                subtitle={search || pickStatus !== 'All Pickup Statuses'
-                  ? 'No pickups match your filters. Try clearing the search or dropdown.'
-                  : 'Pickups appear here once contracts are raised against Won sales.'}
-              />
-            )}
+          {contracts.loading && contracts.length === 0 ? (
+            <TableSkeleton rows={8} cols={8} asTable={true} />
+          ) : (
+            <tbody>
+              {contracts.length === 0 && (
+                <EmptyTableState
+                  colSpan={8}
+                  icon={I.pickup}
+                  title="No pickups found"
+                  subtitle={search || pickStatus !== 'All Pickup Statuses'
+                    ? 'No pickups match your filters. Try clearing the search or dropdown.'
+                    : 'Pickups appear here once contracts are raised against Won sales.'}
+                />
+              )}
             {contracts.map(c => (
               <tr key={c.id} style={{ background: c.pickStatus === 'Overdue' ? 'var(--red-bg)' : undefined }}>
                 <td><span className="ref-id" style={{ color: 'var(--teal)' }}>{c.ref}</span></td>
@@ -146,6 +150,7 @@ const Pickups = ({ role }: { role?: string }) => {
               </tr>
             ))}
           </tbody>
+          )}
         </table>
       </div>
     </div>
