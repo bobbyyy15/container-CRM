@@ -325,7 +325,11 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
       const target = event.target as HTMLElement | null
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
 
-      if (event.key === 'Enter' || event.key === 'F2') {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setAnchor(null)
+        setFocusCell(null)
+      } else if (event.key === 'Enter' || event.key === 'F2') {
         if (bounds.r1 === bounds.r2 && bounds.c1 === bounds.c2) {
           const row = filtered[bounds.r1]
           const col = visibleCols[bounds.c1]
@@ -344,29 +348,82 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
         }
       } else if (event.key === 'ArrowDown') {
         event.preventDefault()
-        const nextR = Math.min(filtered.length - 1, bounds.r2 + 1)
-        setAnchor({ r: nextR, c: bounds.c1 })
-        setFocusCell({ r: nextR, c: bounds.c1 })
+        if (event.shiftKey) {
+          const currR = focusCell?.r ?? bounds.r2
+          const nextR = Math.min(filtered.length - 1, currR + 1)
+          setFocusCell(prev => prev ? { ...prev, r: nextR } : { r: nextR, c: bounds.c1 })
+        } else {
+          const currR = focusCell?.r ?? bounds.r2
+          const currC = focusCell?.c ?? bounds.c1
+          const nextR = Math.min(filtered.length - 1, currR + 1)
+          setAnchor({ r: nextR, c: currC })
+          setFocusCell({ r: nextR, c: currC })
+        }
       } else if (event.key === 'ArrowUp') {
         event.preventDefault()
-        const nextR = Math.max(0, bounds.r1 - 1)
-        setAnchor({ r: nextR, c: bounds.c1 })
-        setFocusCell({ r: nextR, c: bounds.c1 })
+        if (event.shiftKey) {
+          const currR = focusCell?.r ?? bounds.r1
+          const nextR = Math.max(0, currR - 1)
+          setFocusCell(prev => prev ? { ...prev, r: nextR } : { r: nextR, c: bounds.c1 })
+        } else {
+          const currR = focusCell?.r ?? bounds.r1
+          const currC = focusCell?.c ?? bounds.c1
+          const nextR = Math.max(0, currR - 1)
+          setAnchor({ r: nextR, c: currC })
+          setFocusCell({ r: nextR, c: currC })
+        }
       } else if (event.key === 'ArrowRight') {
         event.preventDefault()
-        const nextC = Math.min(visibleCols.length - 1, bounds.c2 + 1)
-        setAnchor({ r: bounds.r1, c: nextC })
-        setFocusCell({ r: bounds.r1, c: nextC })
+        if (event.shiftKey) {
+          const currC = focusCell?.c ?? bounds.c2
+          const nextC = Math.min(visibleCols.length - 1, currC + 1)
+          setFocusCell(prev => prev ? { ...prev, c: nextC } : { r: bounds.r1, c: nextC })
+        } else {
+          const currR = focusCell?.r ?? bounds.r1
+          const currC = focusCell?.c ?? bounds.c2
+          const nextC = Math.min(visibleCols.length - 1, currC + 1)
+          setAnchor({ r: currR, c: nextC })
+          setFocusCell({ r: currR, c: nextC })
+        }
       } else if (event.key === 'ArrowLeft') {
         event.preventDefault()
-        const nextC = Math.max(0, bounds.c1 - 1)
-        setAnchor({ r: bounds.r1, c: nextC })
-        setFocusCell({ r: bounds.r1, c: nextC })
+        if (event.shiftKey) {
+          const currC = focusCell?.c ?? bounds.c1
+          const nextC = Math.max(0, currC - 1)
+          setFocusCell(prev => prev ? { ...prev, c: nextC } : { r: bounds.r1, c: nextC })
+        } else {
+          const currR = focusCell?.r ?? bounds.r1
+          const currC = focusCell?.c ?? bounds.c1
+          const nextC = Math.max(0, currC - 1)
+          setAnchor({ r: currR, c: nextC })
+          setFocusCell({ r: currR, c: nextC })
+        }
+      } else if (event.key === 'Tab') {
+        event.preventDefault()
+        const currR = focusCell?.r ?? bounds.r1
+        const currC = focusCell?.c ?? bounds.c1
+        if (event.shiftKey) {
+          if (currC > 0) {
+            setAnchor({ r: currR, c: currC - 1 })
+            setFocusCell({ r: currR, c: currC - 1 })
+          } else if (currR > 0) {
+            setAnchor({ r: currR - 1, c: visibleCols.length - 1 })
+            setFocusCell({ r: currR - 1, c: visibleCols.length - 1 })
+          }
+        } else {
+          if (currC < visibleCols.length - 1) {
+            setAnchor({ r: currR, c: currC + 1 })
+            setFocusCell({ r: currR, c: currC + 1 })
+          } else if (currR < filtered.length - 1) {
+            setAnchor({ r: currR + 1, c: 0 })
+            setFocusCell({ r: currR + 1, c: 0 })
+          }
+        }
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [bounds, editingCell, filtered, visibleCols, localOverrides])
+  }, [bounds, anchor, focusCell, editingCell, filtered, visibleCols, localOverrides])
 
   // Ctrl/Cmd+C over the grid copies the selected block, not the whole page.
   useEffect(() => {
@@ -526,37 +583,48 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
             <div style={{ width: 44, minWidth: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--border)', background: 'var(--s2)', position: 'sticky', left: 0, zIndex: 6 }}>
               <input type="checkbox" className="cb" onChange={e => setSelected(e.target.checked ? filtered.map(r => r.id) : [])} />
             </div>
-            {visibleCols.map((col, ci) => (
-              <div
-                key={col.key}
-                style={{
-                  minWidth: col.w, width: col.w, padding: '7px 12px',
-                  borderRight: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none',
-                  display: 'flex', alignItems: 'center',
-                  // Highlight the header when its whole column is the active selection.
-                  background: bounds && bounds.c1 === ci && bounds.c2 === ci && bounds.r1 === 0 && bounds.r2 === filtered.length - 1
-                    ? 'rgba(49,94,246,0.14)' : undefined,
-                }}
-                title={`Click to select all ${col.label} · Ctrl+C to copy`}
-                // One click selects the entire column -- copying "all the numbers"
-                // shouldn't mean dragging through every row.
-                onClick={() => {
-                  if (!filtered.length) return
-                  setAnchor({ r: 0, c: ci })
-                  setFocusCell({ r: filtered.length - 1, c: ci })
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setContextMenu({ x: e.clientX, y: e.clientY, colField: col.field, colLabel: col.label });
-                }}
-              >
-                <div>
-                  <span className="col-header-letter">{col.key}</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{col.label}</span>
+            {visibleCols.map((col, ci) => {
+              const isColSelected = !!(bounds && ci >= bounds.c1 && ci <= bounds.c2 && bounds.r1 === 0 && bounds.r2 === filtered.length - 1)
+              return (
+                <div
+                  key={col.key}
+                  style={{
+                    minWidth: col.w, width: col.w, padding: '7px 12px',
+                    borderRight: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none',
+                    display: 'flex', alignItems: 'center',
+                    // Highlight the header when its whole column is the active selection.
+                    background: isColSelected ? 'rgba(49,94,246,0.14)' : undefined,
+                  }}
+                  title={`Click or drag to select ${col.label} · Ctrl+C to copy`}
+                  onMouseDown={(e) => {
+                    if (e.button !== 0) return
+                    if (!filtered.length) return
+                    draggingRef.current = true
+                    if (e.shiftKey && anchor) {
+                      setFocusCell({ r: filtered.length - 1, c: ci })
+                    } else {
+                      setAnchor({ r: 0, c: ci })
+                      setFocusCell({ r: filtered.length - 1, c: ci })
+                    }
+                  }}
+                  onMouseEnter={() => {
+                    if (draggingRef.current && anchor) {
+                      setFocusCell({ r: filtered.length - 1, c: ci })
+                    }
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setContextMenu({ x: e.clientX, y: e.clientY, colField: col.field, colLabel: col.label });
+                  }}
+                >
+                  <div>
+                    <span className="col-header-letter">{col.key}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{col.label}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
             <div style={{ minWidth: 232, width: 232, padding: '7px 12px' }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)' }}>ACTIONS</span>
             </div>
@@ -596,9 +664,31 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                   {/* Row number selects the whole row's cells, mirroring the header
                       selecting a whole column. */}
                   <span
-                    style={{ fontSize: 10, color: 'var(--t4)', fontFamily: 'var(--mono)', cursor: 'pointer', userSelect: 'none' }}
-                    title="Click to select this row · Ctrl+C to copy"
-                    onClick={() => { setAnchor({ r: ri, c: 0 }); setFocusCell({ r: ri, c: visibleCols.length - 1 }) }}
+                    style={{
+                      fontSize: 10,
+                      color: bounds && ri >= bounds.r1 && ri <= bounds.r2 && bounds.c1 === 0 && bounds.c2 === visibleCols.length - 1 ? 'var(--brand)' : 'var(--t4)',
+                      fontWeight: bounds && ri >= bounds.r1 && ri <= bounds.r2 && bounds.c1 === 0 && bounds.c2 === visibleCols.length - 1 ? 700 : 400,
+                      fontFamily: 'var(--mono)',
+                      cursor: 'pointer',
+                      userSelect: 'none'
+                    }}
+                    title="Click or drag to select this row · Ctrl+C to copy"
+                    onMouseDown={(e) => {
+                      if (e.button !== 0) return
+                      e.stopPropagation()
+                      draggingRef.current = true
+                      if (e.shiftKey && anchor) {
+                        setFocusCell({ r: ri, c: visibleCols.length - 1 })
+                      } else {
+                        setAnchor({ r: ri, c: 0 })
+                        setFocusCell({ r: ri, c: visibleCols.length - 1 })
+                      }
+                    }}
+                    onMouseEnter={() => {
+                      if (draggingRef.current && anchor) {
+                        setFocusCell({ r: ri, c: visibleCols.length - 1 })
+                      }
+                    }}
                   >{ri + 1}</span>
                 </div>
                 {visibleCols.map((col, ci) => {
@@ -615,11 +705,12 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                       key={col.key}
                       onMouseDown={event => {
                         if (isEditing) return
+                        if (event.button !== 0) return
                         event.preventDefault()
                         beginSelect(ri, ci, event.shiftKey)
                       }}
-                      onMouseEnter={event => {
-                        if (draggingRef.current && anchor && !isEditing) setFocusCell({ r: ri, c: event.shiftKey ? ci : anchor.c })
+                      onMouseEnter={() => {
+                        if (draggingRef.current && anchor && !isEditing) setFocusCell({ r: ri, c: ci })
                       }}
                       onDoubleClick={event => {
                         event.stopPropagation()
@@ -638,6 +729,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                         display: 'flex', alignItems: 'center', overflow: isEditing ? 'visible' : 'hidden',
                         cursor: isEditing ? 'text' : isEditable ? 'cell' : 'default', userSelect: isEditing ? 'auto' : 'none',
                         position: 'relative',
+                        zIndex: picked ? 2 : undefined,
                         background: picked ? 'rgba(49,94,246,0.14)' : undefined,
                         // Outline the block edges so a range reads as one selection.
                         borderRight: picked && bounds && ci === bounds.c2 ? '1px solid var(--brand)' : '1px solid var(--border-s)',

@@ -68,7 +68,7 @@ export default function AppShell({ session, currentProfile }: AppShellProps) {
 
   const renderScreen = () => {
     switch (screen) {
-      case 'dashboard':           return <Dashboard onNav={handleNav} session={session} />
+      case 'dashboard':           return <Dashboard onNav={handleNav} session={session} role={currentProfile?.role} />
       case 'outreach-dashboard':  return <OutreachDashboard />
       case 'inquiry-dashboard':   return <InquiryDashboard />
       case 'prospects':           return <ProspectSheet mode="prospect" onNav={handleNav} />
@@ -90,14 +90,14 @@ export default function AppShell({ session, currentProfile }: AppShellProps) {
       case 'service-territories': return <ServiceTerritories />
       case 'system-settings':     return <SystemSettings onNav={handleNav} />
       case 'profile-settings':    return <UserProfileSettings session={session} />
-      case 'user-management':     return currentProfile?.role === 'admin' ? <UserManagement /> : <Dashboard onNav={handleNav} session={session} />
-      case 'inquiry-validation':  return ['admin', 'procurement'].includes(currentProfile?.role ?? '') ? <InquiryValidation /> : <Dashboard onNav={handleNav} session={session} />
+      case 'user-management':     return currentProfile?.role === 'admin' ? <UserManagement /> : <Dashboard onNav={handleNav} session={session} role={currentProfile?.role} />
+      case 'inquiry-validation':  return ['admin', 'procurement'].includes(currentProfile?.role ?? '') ? <InquiryValidation /> : <Dashboard onNav={handleNav} session={session} role={currentProfile?.role} />
       case 'inventory-management': return <InventoryManagement role={currentProfile?.role} />
       case 'pickups':             return <Pickups role={currentProfile?.role} />
       case 'best-clients':        return <BestClients />
       case 'inquiry-funnel':      return <InquiryFunnel />
       case 'monthly-report':     return <MonthlyReport />
-      default:                    return <Dashboard onNav={handleNav} session={session} />
+      default:                    return <Dashboard onNav={handleNav} session={session} role={currentProfile?.role} />
     }
   }
 

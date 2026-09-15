@@ -3,7 +3,7 @@ import { api } from '../../lib/api'
 import { toast, askConfirm, askReason } from '../../lib/notify'
 import { Ic, I } from '../../components/ui/icons'
 import Btn from '../../components/ui/Button'
-import { Badge, ChipPIC } from '../../components/ui/primitives'
+import { Badge, ChipPIC, RankBadge } from '../../components/ui/primitives'
 import ExportMenu from '../../components/ui/ExportMenu'
 import type { Screen, BadgeStatus } from '../../app/types'
 import { useCustomers } from '../../hooks/useCustomers'
@@ -40,7 +40,7 @@ const BestClients = () => {
               {ranked.map((c, i) => (
                 <tr key={c.id}>
                   <td>
-                    <span style={{ width: 22, height: 22, borderRadius: 6, background: i === 0 ? '#FEF3C7' : 'var(--s3)', color: i === 0 ? '#D97706' : 'var(--t4)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{i + 1}</span>
+                    <RankBadge index={i} />
                   </td>
                   <td style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{c.co}</td>
                   <td style={{ fontSize: 12.5 }}>{c.contact}</td>

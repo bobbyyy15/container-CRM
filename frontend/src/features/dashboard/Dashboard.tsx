@@ -4,14 +4,87 @@ import { api } from '../../lib/api'
 import { toast } from '../../lib/notify'
 import { Ic, I } from '../../components/ui/icons'
 import Btn from '../../components/ui/Button'
-import { Badge, Trend, Prog } from '../../components/ui/primitives'
+import { Badge, Trend, Prog, RankBadge } from '../../components/ui/primitives'
 import { useAnalytics } from '../../hooks/useAnalytics'
 import { useCustomers } from '../../hooks/useCustomers'
 import { useContracts } from '../../hooks/useContracts'
 import { downloadPdfDocument } from '../../lib/exporters'
 import type { Screen, ProfitChartPoint, ChartSlice, PicPerformanceRow, LossReasonRow } from '../../app/types'
 
-const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: any }) => {
+const INQUIRY_STATUS_COLORS: Record<string, string> = {
+  'Pending Validation': '#D97706',   // Amber
+  'Under Review': '#315EF6',         // Brand Blue
+  'Validation Rejected': '#DC2626',  // Red
+  'Quotation Created': '#7C3AED',    // Purple
+  'Quotation Rejected': '#EA580C',   // Deep Orange
+  'Converted to Sale': '#059669',    // Emerald Green
+  'New': '#2563EB',                  // Royal Blue
+  'Contacted': '#0D9488',            // Teal
+  'Quoting': '#8B5CF6',              // Indigo
+  'Lost': '#94A3B8',                 // Slate
+  'Removed': '#64748B',              // Gray
+}
+
+const CATEGORY_PALETTE: Record<string, string> = {
+  '20ft': '#315EF6',     // Blue
+  '40ft': '#0D9488',     // Teal
+  '40HC': '#7C3AED',     // Purple
+  '40ft HC': '#7C3AED',  // Purple
+  '10ft': '#EA580C',     // Orange
+  '45ft': '#D97706',     // Amber
+  'Dry Van': '#059669',  // Emerald
+  'Reefer': '#0284C7',   // Sky Blue
+  'Specialized': '#EC4899', // Pink
+  'Others': '#8B5CF6',   // Violet
+  'Unknown': '#6366F1',  // Indigo
+}
+
+const VIBRANT_PALETTE = [
+  '#315EF6', // Brand Blue
+  '#0D9488', // Teal
+  '#7C3AED', // Purple
+  '#D97706', // Amber
+  '#059669', // Emerald
+  '#EA580C', // Orange
+  '#EC4899', // Pink
+  '#0284C7', // Sky Blue
+  '#8B5CF6', // Violet
+  '#10B981', // Mint Green
+]
+
+const isDullColor = (color?: string) => {
+  if (!color) return true
+  const c = color.toLowerCase().trim()
+  return ['#6b7280', '#9ca3af', '#4b5563', '#64748b', '#888', '#888888', '#999', '#777', 'gray', 'grey'].includes(c)
+}
+
+const getInquirySliceColor = (name: string, index: number, originalColor?: string) => {
+  if (INQUIRY_STATUS_COLORS[name]) return INQUIRY_STATUS_COLORS[name]
+  if (originalColor && !isDullColor(originalColor)) return originalColor
+  return VIBRANT_PALETTE[index % VIBRANT_PALETTE.length]
+}
+
+const getCategorySliceColor = (name: string, index: number, originalColor?: string) => {
+  if (CATEGORY_PALETTE[name]) return CATEGORY_PALETTE[name]
+  if (originalColor && !isDullColor(originalColor)) return originalColor
+  return VIBRANT_PALETTE[index % VIBRANT_PALETTE.length]
+}
+
+const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; session?: any; role?: string }) => {
+  const [userRole, setUserRole] = useState<string | undefined>(role)
+
+  useEffect(() => {
+    if (role) {
+      setUserRole(role)
+    } else {
+      api.get('/auth/me').then(res => {
+        if (res.data?.data?.role) setUserRole(res.data.data.role)
+      }).catch(() => {})
+    }
+  }, [role])
+
+  const isAdmin = userRole === 'admin'
+
   const analytics = useAnalytics();
   const m = analytics?.metrics || {};
   const monthlyProfitTarget = Number(analytics?.targets?.monthly_gross_profit_target) || 0;
@@ -57,7 +130,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
       <div className="greeting-bar">
         <div>
           <p className="greeting-title">{timeGreeting}, {userName}!</p>
-          <p className="greeting-sub">Here's what's happening across your sales pipeline {dateRange.toLowerCase()}.</p>
+          <p className="greeting-sub">Here's what's happening across {isAdmin ? "the team's" : 'your'} sales pipeline {dateRange.toLowerCase()}.</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
           <div className="date-range" onClick={() => setShowDateMenu(!showDateMenu)}>
@@ -78,16 +151,16 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
             </>
           )}
           <Btn variant="ghost" sm onClick={() => void downloadPdfDocument({
-            title: 'EXECUTIVE OVERVIEW REPORT',
+            title: isAdmin ? 'EXECUTIVE OVERVIEW REPORT' : 'PERSONAL PERFORMANCE REPORT',
             scope: `Container CRM | ${dateRange}`,
-            filename: 'executive-overview',
+            filename: isAdmin ? 'executive-overview' : 'personal-performance',
             sections: [
               { title: 'Performance Summary', rows: [
-                { Metric: 'Gross Profit',   Value: `$${(m.total_gross_profit || 0).toLocaleString()}` },
-                { Metric: 'Revenue',        Value: `$${(m.total_revenue || 0).toLocaleString()}` },
-                { Metric: 'Units Sold',     Value: m.total_units || 0 },
-                { Metric: 'Active Clients', Value: m.active_clients || 0 },
-                { Metric: 'Profit Margin',  Value: `${(m.profit_margin || 0).toFixed(1)}%` },
+                { Metric: `${isAdmin ? '' : 'Your '}Gross Profit`,   Value: `$${(m.total_gross_profit || 0).toLocaleString()}` },
+                { Metric: `${isAdmin ? '' : 'Your '}Revenue`,        Value: `$${(m.total_revenue || 0).toLocaleString()}` },
+                { Metric: `${isAdmin ? '' : 'Your '}Units Sold`,     Value: m.total_units || 0 },
+                { Metric: `${isAdmin ? '' : 'Your '}Active Clients`, Value: m.active_clients || 0 },
+                { Metric: `${isAdmin ? '' : 'Your '}Profit Margin`,  Value: `${(m.profit_margin || 0).toFixed(1)}%` },
                 { Metric: 'Monthly Target', Value: monthlyProfitTarget > 0 ? `$${monthlyProfitTarget.toLocaleString()} (${profitTargetPct}%)` : 'Not configured' },
               ]},
               { title: 'Sales Pipeline', rows: [
@@ -102,12 +175,15 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
                 { Channel: 'Calls',  Completed: analytics?.outreach?.calls || 0 },
                 { Channel: 'Texts',  Completed: analytics?.outreach?.texts || 0 },
               ]},
-              { title: 'Performance by PIC', rows: (PIC_DATA || []).map(p => ({
-                PIC: p.name, Sales: p.sales, Units: p.units,
-                Revenue: `$${(p.revenue || 0).toLocaleString()}`,
-                'Gross Profit': `$${(p.profit || 0).toLocaleString()}`,
-                Emails: p.emails, Calls: p.calls, Texts: p.texts,
-              })) },
+              ...(isAdmin ? [{
+                title: 'Performance by PIC',
+                rows: (PIC_DATA || []).map(p => ({
+                  PIC: p.name, Sales: p.sales, Units: p.units,
+                  Revenue: `$${(p.revenue || 0).toLocaleString()}`,
+                  'Gross Profit': `$${(p.profit || 0).toLocaleString()}`,
+                  Emails: p.emails, Calls: p.calls, Texts: p.texts,
+                }))
+              }] : []),
               { title: 'Inquiry Status', rows: inquiryStatusData.map(d => ({ Status: d.name, Count: d.value })) },
             ],
           })}><Ic n={I.export} size={13} /> Export PDF</Btn>
@@ -121,7 +197,7 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           {/* Featured KPI */}
           <div className="kpi-featured" style={{ background: 'linear-gradient(145deg, #2D4FE0 0%, #4C6FFF 100%)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 500 }}>{prefix} Gross Profit</span>
+              <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 500 }}>{isAdmin ? `${prefix} Gross Profit` : `Your ${prefix} Gross Profit`}</span>
             </div>
             <div>
               <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginBottom: 6 }}>${m.total_gross_profit?.toLocaleString() || 0}</div>
@@ -138,13 +214,13 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           {/* Secondary KPIs stacked */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">{prefix} Revenue</div>
+              <div className="kpi-label">{isAdmin ? `${prefix} Revenue` : `Your ${prefix} Revenue`}</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>${m.total_revenue?.toLocaleString() || 0}</div>
               <Trend val="0"/>
               <div className="kpi-sub">vs last month</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">Units Sold</div>
+              <div className="kpi-label">{isAdmin ? 'Units Sold' : 'Your Units Sold'}</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{m.total_units || 0}</div>
               <Trend val="0"/>
               <div className="kpi-sub">containers {dateRange.toLowerCase()}</div>
@@ -153,13 +229,13 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">Active Clients</div>
+              <div className="kpi-label">{isAdmin ? 'Active Clients' : 'Your Active Clients'}</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{m.active_clients || 0}</div>
               <Trend val="0"/>
               <div className="kpi-sub">purchased {dateRange.toLowerCase()}</div>
             </div>
             <div className="kpi-card" style={{ flex: 1 }}>
-              <div className="kpi-label">{prefix} Profit Margin</div>
+              <div className="kpi-label">{isAdmin ? `${prefix} Profit Margin` : `Your ${prefix} Profit Margin`}</div>
               <div className="kpi-value" style={{ fontSize: 22 }}>{m.profit_margin?.toFixed(1) || 0}%</div>
               <Trend val="0"/>
               <div className="kpi-sub">vs previous {dateRange.replace('This ', '')}</div>
@@ -170,8 +246,8 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           <div className="chart-card">
             <div className="chart-header">
               <div>
-                <div className="chart-title">Gross Profit Performance</div>
-                <div className="chart-sub">{prefix} trend — all PICs combined</div>
+                <div className="chart-title">{isAdmin ? 'Gross Profit Performance' : 'Your Gross Profit Performance'}</div>
+                <div className="chart-sub">{prefix} trend — {isAdmin ? 'all PICs combined' : 'your performance'}</div>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
                 {(['profit', 'revenue', 'cost'] as const).map(m => (
@@ -252,23 +328,28 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
           {/* Inquiry status donut */}
           <div className="chart-card">
             <div className="chart-title">Inquiry Status</div>
-            <div className="chart-sub">All open inquiries by status</div>
+            <div className="chart-sub">{isAdmin ? 'All open inquiries by status' : 'Your open inquiries by status'}</div>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <ResponsiveContainer width={110} height={110}>
                 <PieChart>
                   <Pie data={inquiryStatusData} cx="50%" cy="50%" innerRadius={30} outerRadius={52} dataKey="value" paddingAngle={2}>
-                    {inquiryStatusData.map((e, i) => <Cell key={i} fill={e.color} />)}
+                    {inquiryStatusData.map((e, i) => (
+                      <Cell key={i} fill={getInquirySliceColor(e.name, i, e.color)} />
+                    ))}
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>
               <div style={{ flex: 1 }}>
-                {inquiryStatusData.map(d => (
-                  <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-                    <div style={{ width: 7, height: 7, borderRadius: 2, background: d.color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 11.5, flex: 1, color: 'var(--t2)' }}>{d.name}</span>
-                    <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--t1)' }}>{d.value}</span>
-                  </div>
-                ))}
+                {inquiryStatusData.map((d, i) => {
+                  const sliceColor = getInquirySliceColor(d.name, i, d.color);
+                  return (
+                    <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                      <div style={{ width: 7, height: 7, borderRadius: 2, background: sliceColor, flexShrink: 0 }} />
+                      <span style={{ fontSize: 11.5, flex: 1, color: 'var(--t2)' }}>{d.name}</span>
+                      <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--t1)' }}>{d.value}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -281,30 +362,35 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
               <ResponsiveContainer width={110} height={110}>
                 <PieChart>
                   <Pie data={categoryData} cx="50%" cy="50%" innerRadius={30} outerRadius={52} dataKey="value" paddingAngle={2}>
-                    {categoryData.map((e, i) => <Cell key={i} fill={e.color} />)}
+                    {categoryData.map((e, i) => (
+                      <Cell key={i} fill={getCategorySliceColor(e.name, i, e.color)} />
+                    ))}
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>
               <div style={{ flex: 1 }}>
-                {categoryData.map(d => (
-                  <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-                    <div style={{ width: 7, height: 7, borderRadius: 2, background: d.color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 11.5, flex: 1, color: 'var(--t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
-                    <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--t1)' }}>{d.value}%</span>
-                  </div>
-                ))}
+                {categoryData.map((d, i) => {
+                  const sliceColor = getCategorySliceColor(d.name, i, d.color);
+                  return (
+                    <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                      <div style={{ width: 7, height: 7, borderRadius: 2, background: sliceColor, flexShrink: 0 }} />
+                      <span style={{ fontSize: 11.5, flex: 1, color: 'var(--t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+                      <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--t1)' }}>{d.value}%</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
         </div>
 
         {/* ── Row 4: Best Clients + PIC + Overdue ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isAdmin ? '1.6fr 1fr 1fr' : '1.3fr 1fr', gap: 12 }}>
           {/* Best Clients */}
           <div className="chart-card" style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div className="chart-title">Best Clients by Quantity</div>
+                <div className="chart-title">{isAdmin ? 'Best Clients by Quantity' : 'Your Top Clients by Quantity'}</div>
                 <div className="chart-sub" style={{ marginBottom: 0 }}>Top 5 this month</div>
               </div>
               <Btn variant="ghost" sm onClick={() => onNav('best-clients')}>View All →</Btn>
@@ -312,10 +398,10 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
             <table className="crm" style={{ width: '100%' }}>
               <thead><tr><th>#</th><th>Company</th><th className="r">Units</th><th className="r">Profit</th></tr></thead>
               <tbody>
-                                {topCustomers.map((row, idx) => (
+                {topCustomers.map((row, idx) => (
                   <tr key={row.id}>
                     <td style={{ width: 36 }}>
-                      <span style={{ width: 22, height: 22, borderRadius: 6, background: idx === 0 ? '#FEF3C7' : 'var(--s3)', color: idx === 0 ? '#D97706' : 'var(--t4)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{idx + 1}</span>
+                      <RankBadge index={idx} />
                     </td>
                     <td style={{ fontWeight: 600, fontSize: 12.5 }}>{row.co}</td>
                     <td className="r mono" style={{ fontWeight: 700 }}>{row.units}</td>
@@ -326,28 +412,30 @@ const Dashboard = ({ onNav, session }: { onNav: (s: Screen) => void; session?: a
             </table>
           </div>
 
-          {/* PIC Performance */}
-          <div className="chart-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '14px 18px 10px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div className="chart-title">PIC Performance</div>
-              <Btn variant="ghost" sm onClick={() => onNav('pic-performance')}>View All →</Btn>
-            </div>
-            <div style={{ padding: '10px 18px 14px' }}>
-              {PIC_DATA.map((p, i) => (
-                <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: i < PIC_DATA.length - 1 ? 12 : 0 }}>
-                  <div className="avatar" style={{ width: 30, height: 30, borderRadius: 8, fontSize: 10, background: ['#315EF620','#7C3AED20','#0D948820','#D9770620'][i], color: ['#315EF6','#7C3AED','#0D9488','#D97706'][i] }}>{p.initials}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t1)' }}>{p.name.split(' ')[0]}</span>
-                      <span className="profit-cell" style={{ fontSize: 12 }}>${p.profit.toLocaleString()}</span>
+          {/* PIC Performance (Admin only) */}
+          {isAdmin && (
+            <div className="chart-card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ padding: '14px 18px 10px', borderBottom: '1px solid var(--border-s)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="chart-title">PIC Performance</div>
+                <Btn variant="ghost" sm onClick={() => onNav('pic-performance')}>View All →</Btn>
+              </div>
+              <div style={{ padding: '10px 18px 14px' }}>
+                {PIC_DATA.map((p, i) => (
+                  <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: i < PIC_DATA.length - 1 ? 12 : 0 }}>
+                    <div className="avatar" style={{ width: 30, height: 30, borderRadius: 8, fontSize: 10, background: ['#315EF620','#7C3AED20','#0D948820','#D9770620'][i], color: ['#315EF6','#7C3AED','#0D9488','#D97706'][i] }}>{p.initials}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t1)' }}>{p.name.split(' ')[0]}</span>
+                        <span className="profit-cell" style={{ fontSize: 12 }}>${p.profit.toLocaleString()}</span>
+                      </div>
+                      <Prog pct={(p.sales / 10) * 100} color={['#315EF6','#7C3AED','#0D9488','#D97706'][i]} />
+                      <div style={{ fontSize: 10.5, color: 'var(--t4)', marginTop: 3 }}>{p.sales} sales · {p.units} units</div>
                     </div>
-                    <Prog pct={(p.sales / 10) * 100} color={['#315EF6','#7C3AED','#0D9488','#D97706'][i]} />
-                    <div style={{ fontSize: 10.5, color: 'var(--t4)', marginTop: 3 }}>{p.sales} sales · {p.units} units</div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Overdue Pickups */}
           <div className="chart-card" style={{ padding: 0, overflow: 'hidden' }}>
