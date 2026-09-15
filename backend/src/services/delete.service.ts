@@ -158,14 +158,14 @@ export class DeleteService {
   }
 
   /**
-   * A customer account is not a stored row -- customer_accounts_view rolls up a
-   * company's Won sales. Deleting the account therefore means deleting those
-   * sales, which is what makes the company appear on the list at all.
+   * An Active Client row is one customer account's Won sales, rolled up by
+   * customer_accounts_view. Deleting it deletes those sales -- of that account only,
+   * never of another account that happens to share the company name.
    *
    * Scoped by PIC for Sales Managers, so deleting from Active Clients removes only
-   * that manager's own sales for the company, not a colleague's.
+   * that manager's own sales for the account, not a colleague's.
    */
-  static async deleteCustomerAccount(companyId: string, actor: Actor, picId?: string) {
+  static async deleteCustomerAccount(accountId: string, actor: Actor, picId?: string) {
     const effectivePicId = actor.role === 'sales_manager' ? actor.picId : picId;
     if (actor.role === 'sales_manager' && !effectivePicId) {
       throw new DeleteError('You must be assigned a PIC identity by an admin before deleting records.', 403);
@@ -174,7 +174,7 @@ export class DeleteService {
     let query = supabaseAdmin
       .from('sales')
       .select('id')
-      .eq('company_id', companyId)
+      .eq('customer_account_id', accountId)
       .eq('status', 'Won');
     if (effectivePicId) query = query.eq('pic_id', effectivePicId);
 
@@ -197,8 +197,32 @@ export class DeleteService {
       );
     }
 
+    const { count: paymentCount, error: paymentError } = await supabaseAdmin
+      .from('masterpay_records')
+      .select('id', { count: 'exact', head: true })
+      .in('sale_id', saleIds);
+    if (paymentError) throw paymentError;
+    if ((paymentCount ?? 0) > 0) {
+      throw new DeleteError(
+        `This customer has ${paymentCount} Masterpay payment record${paymentCount === 1 ? '' : 's'} and cannot be deleted.`,
+        409,
+      );
+    }
+
     const { error: deleteError } = await supabaseAdmin.from('sales').delete().in('id', saleIds);
     if (deleteError) throw deleteError;
+
+    // The account itself goes once no sale refers to it; a Pending or Cancelled sale, or a
+    // colleague's sale, keeps it.
+    const { count: remaining, error: remainingError } = await supabaseAdmin
+      .from('sales')
+      .select('id', { count: 'exact', head: true })
+      .eq('customer_account_id', accountId);
+    if (remainingError) throw remainingError;
+    if (!remaining) {
+      const { error: accountError } = await supabaseAdmin.from('customer_accounts').delete().eq('id', accountId);
+      if (accountError) throw accountError;
+    }
 
     return {
       message: `Customer account deleted (${saleIds.length} sale${saleIds.length === 1 ? '' : 's'} removed).`,

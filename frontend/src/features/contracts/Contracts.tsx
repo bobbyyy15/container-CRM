@@ -83,7 +83,7 @@ const Contracts = ({ role }: { role?: string }) => {
           <thead><tr>
             <th>Contract #</th><th>Company</th><th>Container</th><th className="r">Qty</th>
             <th className="r">Value</th><th>Pickup Date</th><th>Pickup Status</th>
-            <th>Status</th><th>PIC</th><th>Source Sale</th><th className="col-actions">Actions</th>
+            <th>Status</th><th>PIC</th><th>Release #</th><th className="col-actions">Actions</th>
           </tr></thead>
           {contracts.loading && contracts.length === 0 ? (
             <TableSkeleton rows={8} cols={11} asTable={true} />

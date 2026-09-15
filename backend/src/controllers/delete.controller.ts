@@ -56,6 +56,6 @@ export class DeleteController {
 
   static async deleteCustomerAccount(req: Request, res: Response) {
     const picId = req.query.pic_id ? String(req.query.pic_id) : undefined;
-    await send(res, () => DeleteService.deleteCustomerAccount(String(req.params.companyId), actorFrom(req), picId));
+    await send(res, () => DeleteService.deleteCustomerAccount(String(req.params.accountId), actorFrom(req), picId));
   }
 }

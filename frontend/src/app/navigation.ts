@@ -18,6 +18,9 @@ export const NAV: NavGroup[] = [
       { id: 'inquiries', label: 'Inquiries', icon: I.inquiry, roles: ['admin', 'sales_manager'] },
       { id: 'quotations', label: 'Quotations', icon: I.quote, roles: ['admin', 'sales_manager'] },
       { id: 'sales-tracker', label: 'Sales Tracker', icon: I.sales, roles: ['admin', 'sales_manager'] },
+      // Contracts are raised against Won sales and still feed Pickup Tracking and stock
+      // allocation, so they stay -- with Sales, now that Masterpay replaces them in Operations.
+      { id: 'contracts', label: 'Customer Contracts', icon: I.contract, roles: ['admin', 'sales_manager'] },
       { id: 'active-clients', label: 'Active Clients', icon: I.customer, roles: ['admin', 'sales_manager'] },
     ],
   },
@@ -31,7 +34,7 @@ export const NAV: NavGroup[] = [
     label: 'Operations Core',
     items: [
       { id: 'pickups', label: 'Pickup Tracking', icon: I.pickup, roles: ['admin', 'operations', 'sales_manager'] },
-      { id: 'contracts', label: 'Customer Contracts', icon: I.contract, roles: ['admin', 'operations', 'sales_manager'] },
+      { id: 'masterpay', label: 'Masterpay', icon: I.profit, roles: ['admin', 'operations'] },
       { id: 'customers', label: 'Customer Accounts (Master)', icon: I.customer, roles: ['admin', 'operations', 'sales_manager'] },
     ],
   },
@@ -93,6 +96,7 @@ export const SCREEN_LABELS: Record<Screen, string> = {
   'contact-outreach': 'Contact Outreach Sheet',
   'contracts': 'Customer Contracts',
   'pickups': 'Pickup Tracking',
+  'masterpay': 'Masterpay',
   'daily-tasks': 'Daily Completed Tasks',
   'removed': 'Removed Sheet',
   'deliverability': 'Deliverability Management',

@@ -109,7 +109,7 @@ const run = async () => {
 
   await request(token, `/deals/quotations/${ids.quotation}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'Accepted' }) });
   const sale = await request(token, `/deals/quotations/${ids.quotation}/convert-to-sale`, {
-    method: 'POST', body: JSON.stringify({ total_units: 1, buying_cost: 3000, revenue: 5000 }),
+    method: 'POST', body: JSON.stringify({ total_units: 1, buying_rate: 3000, selling_price: 5000, first_transaction: true }),
   });
   ids.sale = sale.data.id;
 

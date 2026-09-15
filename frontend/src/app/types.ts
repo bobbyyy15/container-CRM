@@ -6,12 +6,17 @@ import type React from 'react'
  * the contacts that count as text eligible, optionally within one state.
  */
 export type OutreachChannel = 'all' | 'call' | 'text' | 'email'
-export type NavIntent = { channel?: OutreachChannel; state?: string }
+export type NavIntent = {
+  channel?: OutreachChannel
+  state?: string
+  /** Open this inquiry's detail on arrival, e.g. from an Active Client's inquiry list. */
+  inquiryId?: string
+}
 
 export type Screen =
   | 'dashboard' | 'outreach-dashboard' | 'inquiry-dashboard'
   | 'prospects' | 'warm-leads' | 'inquiries' | 'quotations' | 'sales-tracker' | 'active-clients'
-  | 'customers' | 'contact-outreach' | 'contracts' | 'pickups'
+  | 'customers' | 'contact-outreach' | 'contracts' | 'pickups' | 'masterpay'
   | 'daily-tasks' | 'removed' | 'deliverability'
   | 'container-catalog'
   | 'pic-performance' | 'best-clients' | 'profit-analytics' | 'inquiry-funnel'

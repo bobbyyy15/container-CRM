@@ -36,9 +36,10 @@ export class CustomerController {
         dbQuery = dbQuery.eq('status', status);
       }
 
-      // 3. SEARCH
+      // 3. SEARCH -- by company, or by the account's Client ID, since one company can hold several.
       if (search) {
-        dbQuery = dbQuery.ilike('company_name', `%${search}%`);
+        const term = search.replace(/[,()]/g, ' ').trim();
+        dbQuery = dbQuery.or(`company_name.ilike.%${term}%,client_code.ilike.%${term}%`);
       }
 
       const { data, error } = await dbQuery.order('total_revenue', { ascending: false }).limit(limit);

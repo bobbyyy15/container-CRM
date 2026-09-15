@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState } from 'react'
 import { api } from '../../lib/api'
-import { toast, askConfirm, askReason } from '../../lib/notify'
+import { toast, askConfirm } from '../../lib/notify'
 import { Ic, I } from '../../components/ui/icons'
 import Btn from '../../components/ui/Button'
 import { Badge, ChipPIC, StatusSmartChip } from '../../components/ui/primitives'
@@ -13,13 +13,18 @@ import BulkBar from '../../components/ui/BulkBar'
 import { useRowSelection } from '../../hooks/useRowSelection'
 import { confirmBulkDelete } from '../../lib/deleteRecord'
 import { invalidateCache } from '../../lib/dataCache'
-import type { Screen, BadgeStatus } from '../../app/types'
+import type { BadgeStatus } from '../../app/types'
 import { NewManualSaleDialog, SaleDialog, type QuotationOption } from '../pipeline/PipelineDialogs'
 import { useSales } from '../../hooks/useSales'
 import EditSaleDialog from './EditSaleDialog'
 import SalesImportDialog from './SalesImportDialog'
 import { usePics } from '../pipeline/PipelineDialogs'
 import { useQuotations } from '../../hooks/useQuotations'
+import { formatDateOnly } from '../../hooks/mappers'
+
+const COLUMN_COUNT = 19
+
+const money = (value: number) => `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
 
 const SalesTracker = () => {
   const [revision, setRevision] = useState(0)
@@ -28,6 +33,7 @@ const SalesTracker = () => {
   const [showImport, setShowImport] = useState(false)
   const [editingSale, setEditingSale] = useState<any>(null)
   const [statusFilter, setStatusFilter] = useState('')
+  const [paymentFilter, setPaymentFilter] = useState('')
   const pics = usePics()
   const [viewRow, setViewRow] = useState<any>(null)
   const [search, setSearch] = useState('')
@@ -42,7 +48,8 @@ const SalesTracker = () => {
 
   const filteredSales = SALES.filter(s => {
     const term = search.trim().toLowerCase()
-    const searchMatch = !term || [s.company, s.contact, s.ref, s.category].some(value => String(value).toLowerCase().includes(term))
+    const searchMatch = !term || [s.invoiceNumber, s.releaseNumber, s.clientCode, s.company, s.contact, s.category]
+      .some(value => String(value ?? '').toLowerCase().includes(term))
     const picMatch = !picFilter || s.pic === picFilter
     const categoryMatch = !categoryFilter || s.category === categoryFilter
     let dateMatch = true
@@ -57,7 +64,8 @@ const SalesTracker = () => {
       }
     }
     const statusMatch = !statusFilter || s.status === statusFilter
-    return searchMatch && picMatch && categoryMatch && dateMatch && statusMatch
+    const paymentMatch = !paymentFilter || s.paymentStatus === paymentFilter
+    return searchMatch && picMatch && categoryMatch && dateMatch && statusMatch && paymentMatch
   })
 
   // Cancelled sales stay on the list -- they are history -- but they are not money. The
@@ -70,6 +78,31 @@ const SalesTracker = () => {
   const totalSell = countedSales.reduce((s, r) => s + r.totalSell, 0)
   const totalProfit = countedSales.reduce((s, r) => s + r.profit, 0)
   const totalUnits = countedSales.reduce((s, r) => s + r.qty, 0)
+  const totalMargin = totalSell > 0 ? totalProfit / totalSell * 100 : 0
+
+  // Exported with the labels a person reads on screen, not the internal field names.
+  const exportRows = filteredSales.map(s => ({
+    'Invoice Number': s.invoiceNumber,
+    'Release Number': s.releaseNumber,
+    'Date': s.date,
+    'Payment Date': s.paymentDateLabel,
+    'Payment Status': s.paymentStatus,
+    'Client ID': s.clientCode,
+    'Company': s.company,
+    'Contact': s.contact,
+    'Type': s.type,
+    'Size': s.size,
+    'Condition': s.condition,
+    'Quantity': s.qty,
+    'Buy / Unit': s.buyPU,
+    'Sell / Unit': s.sellPU,
+    'Total Buy': s.totalBuy,
+    'Total Sell': s.totalSell,
+    'Profit': s.profit,
+    'Margin %': Number(s.margin.toFixed(1)),
+    'PIC': s.pic,
+    'Status': s.status,
+  }))
 
   const handleUpdateSaleStatus = async (id: string, ref: string, newStatus: string) => {
     try {
@@ -112,7 +145,7 @@ const SalesTracker = () => {
         ids: selection.selected,
         endpoint: id => `/deals/sales/${id}`,
         cacheKey: 'deals:sales',
-        detail: 'A sale with a contract or delivery against it is protected.',
+        detail: 'A sale with a contract, delivery or Masterpay payment against it is protected.',
         onDeleted: deletedIds => {
           selection.remove(deletedIds)
           if (deletedIds.length) setRevision(value => value + 1)
@@ -122,6 +155,8 @@ const SalesTracker = () => {
       setBulkDeleting(false)
     }
   }
+
+  const muted = (text: string) => <span style={{ color: 'var(--t4)' }}>{text}</span>
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -155,11 +190,11 @@ const SalesTracker = () => {
       {/* Financial KPI strip */}
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-s)', display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, flexShrink: 0 }}>
         {[
-          { label: 'Units Sold', val: totalUnits.toString(), color: '#7C3AED', fmt: false },
-          { label: 'Buying Cost', val: `$${totalBuy.toLocaleString()}`, color: 'var(--t3)', fmt: false },
-          { label: 'Total Revenue', val: `$${totalSell.toLocaleString()}`, color: 'var(--brand)', fmt: false },
-          { label: 'Gross Profit', val: `$${totalProfit.toLocaleString()}`, color: 'var(--green)', fmt: false },
-          { label: 'Avg Margin', val: `${(totalSell ? totalProfit / totalSell * 100 : 0).toFixed(1)}%`, color: '#0D9488', fmt: false },
+          { label: 'Units Sold', val: totalUnits.toString(), color: '#7C3AED' },
+          { label: 'Total Buy', val: money(totalBuy), color: 'var(--t3)' },
+          { label: 'Total Sell', val: money(totalSell), color: 'var(--brand)' },
+          { label: 'Profit', val: money(totalProfit), color: 'var(--green)' },
+          { label: 'Profit Margin', val: `${totalMargin.toFixed(1)}%`, color: '#0D9488' },
         ].map(k => (
           <div key={k.label} style={{ textAlign: 'center', padding: '8px 0', borderRight: '1px solid var(--border-s)' }}>
             <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--t4)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{k.label}</div>
@@ -169,7 +204,7 @@ const SalesTracker = () => {
       </div>
 
       <div className="toolbar">
-        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search sales…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search invoice, release, Client ID, company…" value={search} onChange={e => setSearch(e.target.value)} /></div>
         <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{salesPics.map(p => <option key={p} value={p}>{p}</option>)}</select>
         <select className="sel" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">All Categories</option>{salesCategories.map(c => <option key={c} value={c}>{c}</option>)}</select>
         <select className="sel" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} aria-label="Sale status">
@@ -178,11 +213,17 @@ const SalesTracker = () => {
           <option value="Pending">Pending</option>
           <option value="Cancelled">Cancelled</option>
         </select>
+        <select className="sel" value={paymentFilter} onChange={e => setPaymentFilter(e.target.value)} aria-label="Payment">
+          <option value="">All payments</option>
+          <option value="Paid">Paid</option>
+          <option value="Partially Paid">Partially paid</option>
+          <option value="Unpaid">Unpaid</option>
+        </select>
         <select className="sel" value={dateRange} onChange={e => setDateRange(e.target.value)}><option>This Month</option><option>Last Month</option><option>All Time</option></select>
         <BulkBar count={selection.selected.length} busy={bulkDeleting} onDelete={handleBulkDelete} />
         <div className="toolbar-right">
           <RefreshButton cacheKey="deals:sales" label="Sales" onRefresh={() => setRevision(value => value + 1)} />
-          <ExportMenu data={filteredSales} filename="sales" />
+          <ExportMenu data={exportRows} filename="sales" />
           <Btn variant="secondary" sm onClick={() => setShowImport(true)}><Ic n={I.export} size={13} /> Import Sales</Btn>
           <Btn variant="secondary" sm onClick={() => setShowManualSale(true)}><Ic n={I.plus} size={13} /> Record Sale Manually</Btn>
           <Btn variant="primary" sm onClick={() => setShowSale(true)}><Ic n={I.plus} size={13} /> From Quotation</Btn>
@@ -203,22 +244,22 @@ const SalesTracker = () => {
                 onChange={e => selection.toggleAll(e.target.checked)}
               />
             </th>
-            <th>Sale #</th><th>Invoice #</th><th>Date</th><th>Company</th><th>Type</th><th>Size</th>
-            <th>Condition</th><th className="r">Qty</th><th className="r">Buy/Unit</th>
+            <th>Invoice #</th><th>Release #</th><th>Date</th><th>Payment Date</th><th>Company / Account</th>
+            <th>Type</th><th>Size</th><th>Condition</th><th className="r">Qty</th><th className="r">Buy/Unit</th>
             <th className="r">Sell/Unit</th><th className="r">Total Buy</th><th className="r">Total Sell</th>
             <th className="r">Profit</th><th className="r">Margin</th><th>PIC</th><th>Status</th>
             <th className="col-actions">Actions</th>
           </tr></thead>
           {SALES.loading && filteredSales.length === 0 ? (
-            <TableSkeleton rows={8} cols={18} asTable={true} />
+            <TableSkeleton rows={8} cols={COLUMN_COUNT} asTable={true} />
           ) : (
             <tbody>
               {filteredSales.length === 0 && (
                 <EmptyTableState
-                  colSpan={18}
+                  colSpan={COLUMN_COUNT}
                   icon={I.sales}
                   title="No sales records found"
-                  subtitle={search || picFilter || categoryFilter || dateRange !== 'This Month'
+                  subtitle={search || picFilter || categoryFilter || paymentFilter || dateRange !== 'This Month'
                     ? 'No sales match your filters. Try widening the date range or clearing the search.'
                     : 'No sales recorded yet. Convert an accepted quotation, or record one manually.'}
                   actionLabel="Record Sale Manually"
@@ -226,7 +267,7 @@ const SalesTracker = () => {
                 />
               )}
             {filteredSales.map(s => (
-              <tr key={s.ref} style={selection.isSelected(s.id) ? { background: 'var(--brand-50)' } : undefined}>
+              <tr key={s.id} style={selection.isSelected(s.id) ? { background: 'var(--brand-50)' } : undefined}>
                 <td className="col-check">
                   <input
                     type="checkbox"
@@ -237,22 +278,32 @@ const SalesTracker = () => {
                     onChange={() => selection.toggle(s.id)}
                   />
                 </td>
-                <td><span className="ref-id">{s.ref}</span></td>
-                <td className="mono" style={{ fontSize: 12 }}>{s.invoiceNumber || <span style={{ color: 'var(--t4)' }}>—</span>}</td>
+                <td>{s.invoiceNumber ? <span className="ref-id">{s.invoiceNumber}</span> : muted('—')}</td>
+                <td className="mono" style={{ fontSize: 12 }}>{s.releaseNumber || muted('—')}</td>
                 <td style={{ fontSize: 12.5 }}>{s.date}</td>
+                <td style={{ fontSize: 12.5 }} title="From Masterpay">
+                  {s.paymentDate ? (
+                    <>
+                      {s.paymentDateLabel}
+                      {s.paymentStatus === 'Partially Paid' && <div style={{ fontSize: 10.5, color: 'var(--amber)' }}>Partial</div>}
+                    </>
+                  ) : muted('Unpaid')}
+                </td>
                 <td>
                   <div style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--t1)' }}>{s.company}</div>
-                  <div style={{ fontSize: 11, color: 'var(--t4)' }}>{s.contact}</div>
+                  <div style={{ fontSize: 11, color: 'var(--t4)' }}>
+                    {[s.clientCode, s.contact].filter(Boolean).join(' · ')}
+                  </div>
                 </td>
                 <td style={{ fontSize: 12.5 }}>{s.type}</td>
                 <td className="mono">{s.size}</td>
                 <td style={{ fontSize: 11.5, color: 'var(--t3)' }}>{s.condition}</td>
                 <td className="r mono bold">{s.qty}</td>
-                <td className="r cost-cell">${s.buyPU.toLocaleString()}</td>
-                <td className="r mono" style={{ fontWeight: 600 }}>${s.sellPU.toLocaleString()}</td>
-                <td className="r cost-cell">${s.totalBuy.toLocaleString()}</td>
-                <td className="r revenue-cell">${s.totalSell.toLocaleString()}</td>
-                <td className="r profit-cell">${s.profit.toLocaleString()}</td>
+                <td className="r cost-cell">{money(s.buyPU)}</td>
+                <td className="r mono" style={{ fontWeight: 600 }}>{money(s.sellPU)}</td>
+                <td className="r cost-cell">{money(s.totalBuy)}</td>
+                <td className="r revenue-cell">{money(s.totalSell)}</td>
+                <td className="r profit-cell">{money(s.profit)}</td>
                 <td className="r mono" style={{ fontWeight: 700, color: s.margin >= 30 ? 'var(--green)' : 'var(--amber)' }}>{s.margin.toFixed(1)}%</td>
                 <td><ChipPIC label={s.pic} /></td>
                 <td>
@@ -282,15 +333,15 @@ const SalesTracker = () => {
           )}
           <tfoot>
             <tr style={{ background: 'var(--s2)' }}>
-              <td colSpan={8} style={{ padding: '10px 14px', fontWeight: 700, color: 'var(--t1)' }}>
+              <td colSpan={9} style={{ padding: '10px 14px', fontWeight: 700, color: 'var(--t1)' }}>
                 Totals ({countedSales.length} sales{cancelledCount ? `, ${cancelledCount} cancelled not counted` : ''})
               </td>
               <td className="r mono bold" style={{ color: 'var(--t1)' }}>{totalUnits}</td>
               <td colSpan={2} />
-              <td className="r cost-cell" style={{ fontWeight: 700 }}>${totalBuy.toLocaleString()}</td>
-              <td className="r revenue-cell" style={{ fontWeight: 700 }}>${totalSell.toLocaleString()}</td>
-              <td className="r profit-cell" style={{ fontWeight: 800, fontSize: 14 }}>${totalProfit.toLocaleString()}</td>
-              <td className="r mono" style={{ fontWeight: 700, color: 'var(--green)' }}>{(totalSell ? totalProfit / totalSell * 100 : 0).toFixed(1)}%</td>
+              <td className="r cost-cell" style={{ fontWeight: 700 }}>{money(totalBuy)}</td>
+              <td className="r revenue-cell" style={{ fontWeight: 700 }}>{money(totalSell)}</td>
+              <td className="r profit-cell" style={{ fontWeight: 800, fontSize: 14 }}>{money(totalProfit)}</td>
+              <td className="r mono" style={{ fontWeight: 700, color: 'var(--green)' }}>{totalMargin.toFixed(1)}%</td>
               <td colSpan={3} />
             </tr>
           </tfoot>
@@ -300,29 +351,34 @@ const SalesTracker = () => {
         <RecordDetailModal
           title={`Sale ${viewRow.ref}`}
           onClose={() => setViewRow(null)}
+          width={560}
           fields={[
-            { label: 'Sale number', value: viewRow.saleNumber || viewRow.ref },
-            { label: 'Invoice number', value: viewRow.invoiceNumber },
+            { label: 'Invoice number', value: viewRow.invoiceNumber || undefined },
+            { label: 'Release number', value: viewRow.releaseNumber || undefined },
+            { label: 'Client ID', value: viewRow.clientCode || undefined },
+            { label: 'First transaction', value: formatDateOnly(viewRow.firstTransactionDate) || undefined },
             { label: 'Company', value: viewRow.company },
             { label: 'Contact', value: viewRow.contact },
             { label: 'Status', value: <Badge status={viewRow.status as BadgeStatus} /> },
+            { label: 'Date', value: viewRow.date },
+            { label: 'Payment status', value: viewRow.paymentStatus },
+            { label: 'Payment date', value: viewRow.paymentDateLabel || 'Unpaid' },
             { label: 'Type', value: viewRow.type },
             { label: 'Size', value: viewRow.size },
             { label: 'Condition', value: viewRow.condition },
             { label: 'Quantity', value: viewRow.qty },
-            { label: 'Total buy', value: `$${viewRow.totalBuy.toLocaleString()}` },
-            { label: 'Total sell', value: `$${viewRow.totalSell.toLocaleString()}` },
-            { label: 'Profit', value: `$${viewRow.profit.toLocaleString()}` },
-            { label: 'Margin', value: `${viewRow.margin.toFixed(1)}%` },
+            { label: 'Buying rate / unit', value: money(viewRow.buyPU) },
+            { label: 'Selling price / unit', value: money(viewRow.sellPU) },
+            { label: 'Total buy', value: money(viewRow.totalBuy) },
+            { label: 'Total sell', value: money(viewRow.totalSell) },
+            { label: 'Profit', value: money(viewRow.profit) },
+            { label: 'Profit margin', value: `${viewRow.margin.toFixed(1)}%` },
             { label: 'PIC', value: viewRow.pic },
-            { label: 'Date', value: viewRow.date },
           ]}
         />
       )}
     </div>
   )
 }
-
-// ─── Active Clients Dashboard (Sales Core) ──────────────────────────────────
 
 export default SalesTracker

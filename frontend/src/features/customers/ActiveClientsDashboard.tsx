@@ -7,23 +7,25 @@ import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
 import RefreshButton from '../../components/ui/RefreshButton'
 import { confirmDelete } from '../../lib/deleteRecord'
-import type { Screen, BadgeStatus } from '../../app/types'
+import type { Screen, BadgeStatus, NavIntent } from '../../app/types'
 import { NewInquiryDialog, NewManualSaleDialog, type WarmLeadOption } from '../pipeline/PipelineDialogs'
 import { useCustomers } from '../../hooks/useCustomers'
 import { useWarmLeads } from '../../hooks/useWarmLeads'
 import { isAdminRole } from '../../lib/scope'
+import AccountInquiries from './AccountInquiries'
 
-const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Screen) => void }) => {
+const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Screen, intent?: NavIntent) => void }) => {
   const [tab, setTab] = useState('All')
   const [search, setSearch] = useState('')
   const [revision, setRevision] = useState(0)
   const [viewRow, setViewRow] = useState<any>(null)
-  const [inquiryIdentity, setInquiryIdentity] = useState<string | null>(null)
+  const [inquiryFor, setInquiryFor] = useState<{ identity: string; accountId: string } | null>(null)
   const [saleInitialData, setSaleInitialData] = useState<any | null>(null)
   const [showManualSale, setShowManualSale] = useState(false)
   const [showNewInquiry, setShowNewInquiry] = useState(false)
 
-  // Scoped to personal active clients for sales managers
+  // Scoped to personal active clients for sales managers. One row per customer account,
+  // so a company with two accounts shows twice, each under its own Client ID.
   const customers = useCustomers(tab, search, revision, undefined, 'personal')
   // NewInquiryDialog requires the warm-lead options, same as every other caller.
   const warmLeads = useWarmLeads(revision)
@@ -39,26 +41,29 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
   const filtered = tab === 'All' ? customers : customers.filter(c => c.status === tab)
 
   const handleFastInquiry = (c: any) => {
-    const ident = c.phone !== '-' ? c.phone : (c.email !== '-' ? c.email : c.co)
-    setInquiryIdentity(ident)
+    const identity = c.phone !== '-' ? c.phone : (c.email !== '-' ? c.email : c.co)
+    setInquiryFor({ identity, accountId: c.id })
   }
 
   const canDelete = role === 'admin' || role === 'sales_manager'
   const isAdmin = isAdminRole(role)
 
   // Scoped to this manager's own PIC by the backend, so deleting here never
-  // touches a colleague's sales for the same company.
+  // touches a colleague's sales for the same account.
   const handleDelete = (c: any) => confirmDelete({
     what: 'Client',
-    name: c.co,
+    name: c.clientCode ? `${c.co} (${c.clientCode})` : c.co,
     endpoint: `/customers/${c.id}`,
     cacheKey: 'customers',
-    detail: `Its ${c.sales} Won sale${c.sales === 1 ? '' : 's'} ($${c.revenue.toLocaleString()} revenue) will be deleted with it.`,
+    detail: `Its ${c.sales} Won sale${c.sales === 1 ? '' : 's'} ($${c.revenue.toLocaleString()} revenue) will be deleted with it. Other accounts under the same company are not touched.`,
     onDeleted: () => setRevision(r => r + 1),
   })
 
+  // A sale from here belongs to this account: no First Transaction question to get wrong.
   const handleFastSale = (c: any) => {
     setSaleInitialData({
+      customerAccountId: c.id,
+      clientCode: c.clientCode,
       companyName: c.co,
       contactPerson: c.contact !== '-' ? c.contact : '',
       phone: c.phone !== '-' ? c.phone : '',
@@ -68,6 +73,10 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
     })
   }
 
+  const openInquiry = onNav
+    ? (inquiryId: string) => { setViewRow(null); onNav('inquiries', { inquiryId }) }
+    : undefined
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="page-header">
@@ -75,8 +84,8 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
           <div className="page-title">{isAdmin ? 'Active clients' : 'Your active clients'}</div>
           <div className="page-desc">
             {isAdmin
-              ? 'Every client with a purchase in the last three months, across the company.'
-              : 'Your repeat buyers: clients you have sold to in the last three months.'}
+              ? 'Every customer account with a purchase in the last three months, across the company.'
+              : 'Your repeat buyers: customer accounts you have sold to in the last three months.'}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -96,12 +105,13 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
             onSaved={() => { setShowManualSale(false); setRevision(r => r + 1) }}
           />
         )}
-        {inquiryIdentity && (
+        {inquiryFor && (
           <NewInquiryDialog
             warmLeads={warmLeads as WarmLeadOption[]}
-            initialIdentity={inquiryIdentity}
-            onClose={() => setInquiryIdentity(null)}
-            onSaved={() => { setInquiryIdentity(null); setRevision(r => r + 1) }}
+            initialIdentity={inquiryFor.identity}
+            customerAccountId={inquiryFor.accountId}
+            onClose={() => setInquiryFor(null)}
+            onSaved={() => { setInquiryFor(null); setRevision(r => r + 1) }}
           />
         )}
         {saleInitialData && (
@@ -138,11 +148,11 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
       <div className="toolbar">
         <div className="search-field">
           <Ic n={I.search} size={13} />
-          <input placeholder="Search active clients by name, contact, phone…" value={search} onChange={e => setSearch(e.target.value)} />
+          <input placeholder="Search active clients by company or Client ID…" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <div className="toolbar-right">
           <RefreshButton cacheKey="customers" label="Active clients" onRefresh={() => setRevision(r => r + 1)} />
-          <span className="count-label">{filtered.length} clients</span>
+          <span className="count-label">{filtered.length} accounts</span>
           <ExportMenu data={filtered} filename="active-clients" />
         </div>
       </div>
@@ -151,9 +161,11 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
         <table className="crm">
           <thead>
             <tr>
+              <th>Client ID</th>
               <th>Company</th>
               <th>Contact</th>
               <th>State</th>
+              <th>First Transaction</th>
               <th className="r">Sales</th>
               <th className="r">Units</th>
               <th className="r">Revenue</th>
@@ -166,7 +178,7 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
           <tbody>
             {filtered.length === 0 ? (
               <EmptyTableState
-                colSpan={10}
+                colSpan={12}
                 icon={I.customer}
                 title="No active clients found"
                 subtitle={search || tab !== 'All'
@@ -178,6 +190,7 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
             ) : (
               filtered.map(c => (
                 <tr key={c.id}>
+                  <td><span className="ref-id">{c.clientCode || '—'}</span></td>
                   <td>
                     <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{c.co}</div>
                     <div style={{ fontSize: 11, color: 'var(--t4)', fontFamily: 'var(--mono)' }}>
@@ -188,6 +201,7 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
                   <td>
                     <span className="badge b-gray" style={{ fontFamily: 'var(--mono)' }}>{c.state}</span>
                   </td>
+                  <td style={{ fontSize: 12, color: 'var(--t3)' }}>{c.firstTransaction}</td>
                   <td className="r mono bold">{c.sales}</td>
                   <td className="r mono bold">{c.units}</td>
                   <td className="r revenue-cell">${c.revenue.toLocaleString()}</td>
@@ -196,11 +210,11 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
                   <td><Badge status={c.status as BadgeStatus} /></td>
                   <td className="col-actions">
                     <div className="row-actions" style={{ display: 'flex', gap: 4 }}>
-                      <Btn variant="secondary" sm onClick={() => handleFastInquiry(c)} title="Fast 1-Click Inquiry"><Ic n={I.inquiry} size={12} /> Inquiry</Btn>
-                      <Btn variant="ghost" sm onClick={() => handleFastSale(c)} title="Fast Direct Sale"><Ic n={I.plus} size={12} /> Sale</Btn>
+                      <Btn variant="secondary" sm onClick={() => handleFastInquiry(c)} title="Fast 1-Click Inquiry for this account"><Ic n={I.inquiry} size={12} /> Inquiry</Btn>
+                      <Btn variant="ghost" sm onClick={() => handleFastSale(c)} title="Fast direct sale for this account"><Ic n={I.plus} size={12} /> Sale</Btn>
                       <Btn variant="ghost" sm onClick={() => setViewRow(c)}>View</Btn>
                       {canDelete && (
-                        <Btn variant="danger" sm onClick={() => handleDelete(c)} title="Delete this client and its Won sales">
+                        <Btn variant="danger" sm onClick={() => handleDelete(c)} title="Delete this account and its Won sales">
                           <Ic n={I.removed} size={12} /> Delete
                         </Btn>
                       )}
@@ -215,9 +229,12 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
 
       {viewRow && (
         <RecordDetailModal
-          title={viewRow.co}
+          title={viewRow.clientCode ? `${viewRow.co} · ${viewRow.clientCode}` : viewRow.co}
           onClose={() => setViewRow(null)}
+          width={620}
           fields={[
+            { label: 'Client ID', value: viewRow.clientCode || undefined },
+            { label: 'First transaction', value: viewRow.firstTransaction },
             { label: 'Contact', value: viewRow.contact },
             { label: 'Phone', value: viewRow.phone },
             { label: 'Email', value: viewRow.email },
@@ -231,12 +248,11 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
             { label: 'Gross Profit', value: `$${viewRow.profit.toLocaleString()}` },
             { label: 'Last Purchase', value: viewRow.last },
           ]}
+          extra={<AccountInquiries accountId={viewRow.id} companyId={viewRow.companyId} onOpen={openInquiry} />}
         />
       )}
     </div>
   )
 }
-
-// ─── Customer Accounts (Operations Master) ───────────────────────────────────
 
 export default ActiveClientsDashboard

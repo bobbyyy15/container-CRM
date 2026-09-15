@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { toast, askConfirm, askReason } from '../../lib/notify'
+import React, { useState } from 'react'
 import { confirmDelete } from '../../lib/deleteRecord'
 import { Ic, I } from '../../components/ui/icons'
 import Btn from '../../components/ui/Button'
@@ -9,11 +8,12 @@ import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
 import { TableSkeleton } from '../../components/ui/SkeletonLoader'
 import RefreshButton from '../../components/ui/RefreshButton'
-import type { Screen, BadgeStatus } from '../../app/types'
+import type { Screen, BadgeStatus, NavIntent } from '../../app/types'
 import { NewManualSaleDialog, usePics } from '../pipeline/PipelineDialogs'
 import { useCustomers } from '../../hooks/useCustomers'
+import AccountInquiries from './AccountInquiries'
 
-const CustomerAccounts = ({ role }: { role?: string }) => {
+const CustomerAccounts = ({ role, onNav }: { role?: string; onNav?: (s: Screen, intent?: NavIntent) => void }) => {
   const [tab, setTab] = useState('All');
   const [search, setSearch] = useState('');
   const [picFilter, setPicFilter] = useState('');
@@ -25,12 +25,12 @@ const CustomerAccounts = ({ role }: { role?: string }) => {
   const isOpsOrAdmin = role === 'admin' || role === 'operations';
   const canDelete = role === 'admin' || role === 'sales_manager';
 
-  // A row here is a rollup of the company's Won sales, so deleting it deletes
-  // those sales. Scoped to the selected PIC when one is filtered, otherwise the
-  // backend removes every PIC's Won sales for that company.
+  // A row here is one customer account's Won sales, so deleting it deletes those sales.
+  // Scoped to the selected PIC when one is filtered, otherwise the backend removes every
+  // PIC's Won sales for that account -- never another account under the same company.
   const handleDelete = (c: any) => confirmDelete({
     what: 'Customer Account',
-    name: c.co,
+    name: c.clientCode ? `${c.co} (${c.clientCode})` : c.co,
     endpoint: `/customers/${c.id}${picFilter ? `?pic_id=${picFilter}` : ''}`,
     cacheKey: 'customers',
     detail: `Its ${c.sales} Won sale${c.sales === 1 ? '' : 's'} ($${c.revenue.toLocaleString()} revenue) will be deleted with it.`,
@@ -39,16 +39,20 @@ const CustomerAccounts = ({ role }: { role?: string }) => {
   const customers = useCustomers(tab, search, revision, undefined, 'master', picFilter || undefined);
   const filtered = tab === 'All' ? customers : customers.filter(c => c.status === tab);
 
+  const openInquiry = onNav
+    ? (inquiryId: string) => { setViewRow(null); onNav('inquiries', { inquiryId }) }
+    : undefined;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="page-header">
         <div>
           <div className="page-title">Customer Accounts (Master)</div>
-          <div className="page-desc">Centralized company-wide accounts compiled across all sales managers and PICs.</div>
+          <div className="page-desc">Every customer account, company-wide. One company can hold several accounts, each with its own Client ID.</div>
         </div>
         {/* Customers are derived from purchase history (see page-desc above), so
             there's no standalone "customer" record to create -- this records a sale,
-            which is what actually makes a company show up on this list. */}
+            which is what actually makes an account show up on this list. */}
         <Btn variant="primary" sm onClick={() => setShowNewCustomer(true)} title="Customers are created by recording a sale">
           <Ic n={I.plus} size={13} /> Record Sale → New Customer
         </Btn>
@@ -67,7 +71,7 @@ const CustomerAccounts = ({ role }: { role?: string }) => {
       <div className="toolbar">
         <div className="search-field">
           <Ic n={I.search} size={13} />
-          <input placeholder="Search master customer accounts…" value={search} onChange={e => setSearch(e.target.value)} />
+          <input placeholder="Search by company or Client ID…" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         {isOpsOrAdmin && (
           <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}>
@@ -77,25 +81,25 @@ const CustomerAccounts = ({ role }: { role?: string }) => {
         )}
         <div className="toolbar-right">
           <RefreshButton cacheKey="customers" label="Customer accounts" onRefresh={() => setRevision(r => r + 1)} />
-          <span className="count-label">{filtered.length} customers</span>
+          <span className="count-label">{filtered.length} accounts</span>
           <ExportMenu data={filtered} filename="customer-accounts-master" />
         </div>
       </div>
       <div className="table-wrap">
         <table className="crm">
           <thead><tr>
-            <th>Company</th><th>Contact</th><th>State</th><th>PIC</th>
+            <th>Client ID</th><th>Company</th><th>Contact</th><th>State</th><th>PIC</th><th>First Transaction</th>
             <th className="r">Sales</th><th className="r">Units</th><th className="r">Revenue</th>
             <th className="r">Gross Profit</th><th>Last Purchase</th><th>Status</th>
             <th className="col-actions">Actions</th>
           </tr></thead>
           {customers.loading && filtered.length === 0 ? (
-            <TableSkeleton rows={8} cols={11} asTable={true} />
+            <TableSkeleton rows={8} cols={13} asTable={true} />
           ) : (
             <tbody>
               {filtered.length === 0 ? (
                 <EmptyTableState
-                  colSpan={11}
+                  colSpan={13}
                   icon={I.customer}
                   title="No customer accounts found"
                   subtitle={search || tab !== 'All'
@@ -106,6 +110,7 @@ const CustomerAccounts = ({ role }: { role?: string }) => {
                 />
               ) : filtered.map(c => (
                 <tr key={c.id}>
+                  <td><span className="ref-id">{c.clientCode || '—'}</span></td>
                   <td>
                     <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{c.co}</div>
                     <div style={{ fontSize: 11, color: 'var(--t4)', fontFamily: 'var(--mono)' }}>{c.phone}</div>
@@ -113,6 +118,7 @@ const CustomerAccounts = ({ role }: { role?: string }) => {
                   <td style={{ fontSize: 12.5 }}>{c.contact}</td>
                   <td><span className="badge b-gray" style={{ fontFamily: 'var(--mono)' }}>{c.state}</span></td>
                   <td><ChipPIC label={c.pic} /></td>
+                  <td style={{ fontSize: 12, color: 'var(--t3)' }}>{c.firstTransaction}</td>
                   <td className="r mono bold">{c.sales}</td>
                   <td className="r mono bold">{c.units}</td>
                   <td className="r revenue-cell">${c.revenue.toLocaleString()}</td>
@@ -137,9 +143,12 @@ const CustomerAccounts = ({ role }: { role?: string }) => {
       </div>
       {viewRow && (
         <RecordDetailModal
-          title={viewRow.co}
+          title={viewRow.clientCode ? `${viewRow.co} · ${viewRow.clientCode}` : viewRow.co}
           onClose={() => setViewRow(null)}
+          width={620}
           fields={[
+            { label: 'Client ID', value: viewRow.clientCode || undefined },
+            { label: 'First transaction', value: viewRow.firstTransaction },
             { label: 'Contact', value: viewRow.contact },
             { label: 'Phone', value: viewRow.phone },
             { label: 'Email', value: viewRow.email },
@@ -153,12 +162,11 @@ const CustomerAccounts = ({ role }: { role?: string }) => {
             { label: 'Gross profit', value: `$${viewRow.profit.toLocaleString()}` },
             { label: 'Last purchase', value: viewRow.last },
           ]}
+          extra={<AccountInquiries accountId={viewRow.id} companyId={viewRow.companyId} onOpen={openInquiry} />}
         />
       )}
     </div>
   )
 }
-
-// ─── Contact Outreach Sheet ───────────────────────────────────────────────────
 
 export default CustomerAccounts

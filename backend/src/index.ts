@@ -19,6 +19,7 @@ import inventoryRoutes from './routes/inventory.routes';
 import settingsRoutes from './routes/settings.routes';
 import exportRoutes from './routes/export.routes';
 import reportRoutes from './routes/report.routes';
+import masterpayRoutes from './routes/masterpay.routes';
 
 import { requireAuth } from './middleware/auth.middleware';
 import { requestContext } from './middleware/request-context.middleware';
@@ -61,6 +62,7 @@ app.use('/api/v1/inventory',     inventoryRoutes);
 app.use('/api/v1/settings',      settingsRoutes);
 app.use('/api/v1/export',        exportRoutes);
 app.use('/api/v1/reports',       reportRoutes);
+app.use('/api/v1/masterpay',     masterpayRoutes);
 
 
 // Only started when run directly. Live updates are handled by Supabase Realtime

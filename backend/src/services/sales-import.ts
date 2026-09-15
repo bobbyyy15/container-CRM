@@ -3,21 +3,23 @@
  *
  * Kept free of any database client so the rules are unit-testable: the columns they use,
  * the values that are and are not acceptable, and which rows collide with each other. The
- * service layer adds what only the database knows -- whether a sale number or invoice
- * number is already taken -- and performs the writes.
+ * service layer adds what only the database knows -- whether a release number, invoice
+ * number or Client ID is already on file -- and performs the writes.
  *
  * Money is never trusted from the sheet when it can be derived. Their file carries Total
  * Revenue and Profit columns, but those are products of quantity, buying rate and selling
  * price; a stale or hand-edited total would otherwise walk straight into the dashboard.
  * The computed figures win and any disagreement is reported on the row.
  */
+import { computeSaleFinancials } from './sale-financials';
 
 /** One row as the spreadsheet gives it: header text to cell text. */
 export type RawSalesRow = Record<string, unknown>;
 
 export type MappedSaleRow = {
   rowNumber: number;
-  saleNumber?: string;
+  /** The release reference, stored in sales.sale_number and shown as Release Number. */
+  releaseNumber?: string;
   invoiceNumber?: string;
   saleDate?: string;
   companyName: string;
@@ -35,9 +37,15 @@ export type MappedSaleRow = {
   revenue: number;
   buyingCost: number;
   grossProfit: number;
+  margin: number;
   status: 'Pending' | 'Won' | 'Cancelled';
   remarks?: string;
+  /** The customer account's Client ID, when the sheet gives one. */
   clientId?: string;
+  /** What the sheet's First Transaction column says, when it has one. */
+  firstTransaction?: boolean;
+  /** How the sale attaches to a customer account, once resolved against the CRM. */
+  account?: 'new' | 'existing';
   /** Anything wrong with this row. A row with errors is never imported. */
   errors: string[];
   /** Worth saying, but not a reason to refuse the row. */
@@ -51,8 +59,12 @@ const headerKey = (value: unknown) => clean(value).toLowerCase().replace(/[^a-z0
 
 const COLUMN_ALIASES: Record<string, keyof MappedSaleRow | 'ignore'> = {
   date: 'saleDate', saledate: 'saleDate', dateofsale: 'saleDate', transactiondate: 'saleDate',
+  datepurchase: 'saleDate', purchasedate: 'saleDate', datepurchased: 'saleDate',
   invoicenumber: 'invoiceNumber', invoiceno: 'invoiceNumber', invoice: 'invoiceNumber', invoicenum: 'invoiceNumber',
-  salenumber: 'saleNumber', saleno: 'saleNumber', wavenumber: 'saleNumber', wave: 'saleNumber', waveno: 'saleNumber',
+  releasenumber: 'releaseNumber', releaseno: 'releaseNumber', releaseref: 'releaseNumber', releasereference: 'releaseNumber',
+  release: 'releaseNumber', releasenum: 'releaseNumber',
+  // What the CRM used to label Sale Number is the release reference; older sheets still say so.
+  salenumber: 'releaseNumber', saleno: 'releaseNumber', wavenumber: 'releaseNumber', wave: 'releaseNumber', waveno: 'releaseNumber',
   companyname: 'companyName', company: 'companyName', client: 'companyName', clientname: 'companyName', customer: 'companyName',
   contactperson: 'contactPerson', contact: 'contactPerson', contactname: 'contactPerson', fullname: 'contactPerson',
   contactnumber: 'phone', phone: 'phone', phonenumber: 'phone', mobile: 'phone', telephone: 'phone', contactno: 'phone',
@@ -64,11 +76,15 @@ const COLUMN_ALIASES: Record<string, keyof MappedSaleRow | 'ignore'> = {
   condition: 'condition', containercondition: 'condition',
   size: 'size', containersize: 'size',
   sellingprice: 'sellingPrice', sellprice: 'sellingPrice', sellingrate: 'sellingPrice', priceperunit: 'sellingPrice', unitprice: 'sellingPrice',
+  sellperunit: 'sellingPrice',
   buyingrate: 'buyingRate', buyingprice: 'buyingRate', buyprice: 'buyingRate', buyingcostperunit: 'buyingRate', cost: 'buyingRate',
-  totalrevenue: 'revenue', revenue: 'revenue', totalsell: 'revenue', totalsales: 'revenue',
-  profit: 'grossProfit', grossprofit: 'grossProfit', totalprofit: 'grossProfit', margin: 'ignore',
+  buyperunit: 'buyingRate',
+  totalrevenue: 'revenue', revenue: 'revenue', totalsell: 'revenue', totalsales: 'revenue', totalsr: 'revenue',
+  profit: 'grossProfit', grossprofit: 'grossProfit', totalprofit: 'grossProfit', margin: 'ignore', profitmargin: 'ignore',
   remarks: 'remarks', status: 'status', remarksstatus: 'status', statusremarks: 'status', notes: 'remarks',
-  clientid: 'clientId', clientno: 'clientId', customerid: 'clientId',
+  clientid: 'clientId', clientno: 'clientId', customerid: 'clientId', clientcode: 'clientId', accountid: 'clientId',
+  firsttransaction: 'firstTransaction', firsttxn: 'firstTransaction', firstpurchase: 'firstTransaction',
+  newaccount: 'firstTransaction', newcustomer: 'firstTransaction',
 };
 
 /**
@@ -96,6 +112,14 @@ export const readNumber = (value: unknown): number | undefined => {
   const parsed = Number(negative ? text.replace(/[()]/g, '') : text);
   if (!Number.isFinite(parsed)) return undefined;
   return negative ? -parsed : parsed;
+};
+
+/** Yes / No, in the words a sheet uses for it; undefined when it is neither. */
+export const readYesNo = (value: unknown): boolean | undefined => {
+  const key = clean(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (['yes', 'y', 'true', '1', 'new', 'first', 'firsttransaction', 'newaccount', 'newcustomer'].includes(key)) return true;
+  if (['no', 'n', 'false', '0', 'repeat', 'existing', 'returning', 'repeatcustomer'].includes(key)) return false;
+  return undefined;
 };
 
 /** Accepts what spreadsheets produce: ISO, US, and Excel's day-number serials. */
@@ -176,9 +200,9 @@ export const mapSaleRow = (raw: RawSalesRow, rowNumber: number): MappedSaleRow =
   if (buyingRate === undefined) errors.push('Buying Rate is required');
   else if (buyingRate < 0) errors.push('Buying Rate cannot be negative');
 
-  const saleNumber = get('saleNumber');
-  if (saleNumber && !WAVE_PATTERN.test(saleNumber.toUpperCase())) {
-    errors.push(`Sale Number "${saleNumber}" is not in WAVE format, e.g. WAVE-10317`);
+  const releaseNumber = get('releaseNumber');
+  if (releaseNumber && !WAVE_PATTERN.test(releaseNumber.toUpperCase())) {
+    errors.push(`Release Number "${releaseNumber}" is not in WAVE format, e.g. WAVE-10317`);
   }
 
   const saleDateRaw = get('saleDate');
@@ -190,26 +214,30 @@ export const mapSaleRow = (raw: RawSalesRow, rowNumber: number): MappedSaleRow =
   const type = readType(typeRaw);
   if (typeRaw && !type) notices.push(`Type "${typeRaw}" is not a known container type and was left unset`);
 
+  const firstTransactionRaw = get('firstTransaction');
+  const firstTransaction = readYesNo(firstTransactionRaw);
+  if (firstTransactionRaw && firstTransaction === undefined) {
+    errors.push(`First Transaction "${firstTransactionRaw}" must be Yes or No`);
+  }
+
   const { status, remark } = readStatus(get('status') ?? '');
   const remarks = get('remarks') ?? remark;
 
   // Derived, never taken from the sheet.
-  const revenue = (sellingPrice ?? 0) * quantity;
-  const buyingCost = (buyingRate ?? 0) * quantity;
-  const grossProfit = revenue - buyingCost;
+  const money = computeSaleFinancials(quantity, buyingRate ?? 0, sellingPrice ?? 0);
 
   const statedRevenue = readNumber(get('revenue'));
-  if (statedRevenue !== undefined && Math.abs(statedRevenue - revenue) > MONEY_TOLERANCE) {
-    notices.push(`Total Revenue in the sheet is ${statedRevenue}, recalculated as ${revenue} from quantity × selling price`);
+  if (statedRevenue !== undefined && Math.abs(statedRevenue - money.totalSell) > MONEY_TOLERANCE) {
+    notices.push(`Total Revenue in the sheet is ${statedRevenue}, recalculated as ${money.totalSell} from quantity × selling price`);
   }
   const statedProfit = readNumber(get('grossProfit'));
-  if (statedProfit !== undefined && Math.abs(statedProfit - grossProfit) > MONEY_TOLERANCE) {
-    notices.push(`Profit in the sheet is ${statedProfit}, recalculated as ${grossProfit}`);
+  if (statedProfit !== undefined && Math.abs(statedProfit - money.profit) > MONEY_TOLERANCE) {
+    notices.push(`Profit in the sheet is ${statedProfit}, recalculated as ${money.profit}`);
   }
 
   return {
     rowNumber,
-    saleNumber: saleNumber?.toUpperCase(),
+    releaseNumber: releaseNumber?.toUpperCase(),
     invoiceNumber: get('invoiceNumber'),
     saleDate,
     companyName,
@@ -224,31 +252,33 @@ export const mapSaleRow = (raw: RawSalesRow, rowNumber: number): MappedSaleRow =
     size: get('size'),
     sellingPrice: sellingPrice ?? 0,
     buyingRate: buyingRate ?? 0,
-    revenue,
-    buyingCost,
-    grossProfit,
+    revenue: money.totalSell,
+    buyingCost: money.totalBuy,
+    grossProfit: money.profit,
+    margin: money.margin,
     status,
     remarks,
     clientId: get('clientId'),
+    firstTransaction,
     errors,
     notices,
   };
 };
 
 /**
- * Flags rows that repeat a sale number or an invoice number within the same file. The
+ * Flags rows that repeat a release number or an invoice number within the same file. The
  * first row keeps the number; the later ones are refused, so an import can never quietly
  * overwrite or double-count.
  */
 export const markDuplicatesWithinFile = (rows: MappedSaleRow[]): MappedSaleRow[] => {
-  const seenSale = new Map<string, number>();
+  const seenRelease = new Map<string, number>();
   const seenInvoice = new Map<string, number>();
   for (const row of rows) {
-    const sale = row.saleNumber?.toUpperCase();
-    if (sale) {
-      const first = seenSale.get(sale);
-      if (first !== undefined) row.errors.push(`Sale Number ${sale} already appears on row ${first}`);
-      else seenSale.set(sale, row.rowNumber);
+    const release = row.releaseNumber?.toUpperCase();
+    if (release) {
+      const first = seenRelease.get(release);
+      if (first !== undefined) row.errors.push(`Release Number ${release} already appears on row ${first}`);
+      else seenRelease.set(release, row.rowNumber);
     }
     const invoice = row.invoiceNumber?.toUpperCase();
     if (invoice) {
@@ -262,3 +292,60 @@ export const markDuplicatesWithinFile = (rows: MappedSaleRow[]): MappedSaleRow[]
 
 export const mapSalesSheet = (rows: RawSalesRow[]): MappedSaleRow[] =>
   markDuplicatesWithinFile(rows.map((raw, index) => mapSaleRow(raw, index + 2)));
+
+/**
+ * Decides which customer account every importable row belongs to. The account is found
+ * by its Client ID, never by the company name: the same company can hold several accounts.
+ *
+ * - A Client ID already in the CRM adds the sale to that account.
+ * - A Client ID not yet in the CRM opens a new account; later rows with the same Client ID
+ *   in the file then add to it.
+ * - Without a Client ID, the row must say First Transaction = Yes (a new account with the
+ *   next Client ID). A repeat sale cannot be placed without one, so it is refused.
+ *
+ * A First Transaction column that contradicts the Client ID is refused rather than guessed.
+ * Rows that already carry an error are left alone -- they will not be imported, so they
+ * must not open an account that a later row would then depend on.
+ */
+export const resolveCustomerAccounts = (rows: MappedSaleRow[], existingClientIds: Iterable<string>): MappedSaleRow[] => {
+  const existing = new Set([...existingClientIds].map(code => code.trim().toUpperCase()));
+  const openedOnRow = new Map<string, number>();
+
+  for (const row of rows) {
+    if (row.errors.length) continue;
+    const code = row.clientId?.trim();
+
+    if (!code) {
+      if (row.firstTransaction === true) {
+        row.account = 'new';
+        row.notices.push('Opens a new customer account with the next Client ID');
+      } else if (row.firstTransaction === false) {
+        row.errors.push('A repeat sale needs the Client ID of the customer account it belongs to');
+      } else {
+        row.errors.push('First Transaction is required: give the Client ID of an existing account, or mark First Transaction = Yes');
+      }
+      continue;
+    }
+
+    const key = code.toUpperCase();
+    const onFile = existing.has(key);
+    const openedEarlier = openedOnRow.get(key);
+    const known = onFile || openedEarlier !== undefined;
+
+    if (row.firstTransaction === true && known) {
+      row.errors.push(onFile
+        ? `Client ID ${code} already has its first transaction in the CRM`
+        : `Client ID ${code} already opens its account on row ${openedEarlier}`);
+    } else if (row.firstTransaction === false && !known) {
+      row.errors.push(`Client ID ${code} is not an existing customer account; mark First Transaction = Yes to open it`);
+    } else if (known) {
+      row.account = 'existing';
+      row.firstTransaction = false;
+    } else {
+      row.account = 'new';
+      row.firstTransaction = true;
+      openedOnRow.set(key, row.rowNumber);
+    }
+  }
+  return rows;
+};

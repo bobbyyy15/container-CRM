@@ -3,13 +3,15 @@ import { api } from '../../lib/api'
 import { useCatalogList } from '../../hooks/useCatalogList'
 import { invalidateCache } from '../../lib/dataCache'
 
+const profitMargin = (profit: number, totalSell: number) => (totalSell > 0 ? (profit / totalSell) * 100 : 0)
+
 /**
  * Edits a sale that already exists.
  *
- * Only rates are edited, never totals: revenue, buying cost and profit are recalculated on
+ * Only rates are edited, never totals: Total Buy, Total Sell and Profit are recalculated on
  * the server from quantity, buying rate and selling price, so nothing typed here can put a
  * figure into the dashboards that the numbers do not support. The values shown below the
- * form are what will be stored.
+ * form are what will be stored. The payment date is not here: Masterpay records it.
  */
 const EditSaleDialog = ({ sale, pics, onClose, onSaved }: {
   sale: any
@@ -21,8 +23,8 @@ const EditSaleDialog = ({ sale, pics, onClose, onSaved }: {
   const conditions = useCatalogList('/catalog/conditions')
   const types = useCatalogList('/catalog/categories')
 
-  const [saleNumber, setSaleNumber] = useState(sale.saleNumber || '')
   const [invoiceNumber, setInvoiceNumber] = useState(sale.invoiceNumber || '')
+  const [releaseNumber, setReleaseNumber] = useState(sale.releaseNumber || '')
   const [saleDate, setSaleDate] = useState((sale.saleDate || sale.createdAt || '').slice(0, 10))
   const [totalUnits, setTotalUnits] = useState(sale.qty || 1)
   const [buyingRate, setBuyingRate] = useState(sale.buyPU || 0)
@@ -36,9 +38,9 @@ const EditSaleDialog = ({ sale, pics, onClose, onSaved }: {
   const [error, setError] = useState('')
 
   const units = Number(totalUnits) || 0
-  const revenue = (Number(sellingPrice) || 0) * units
-  const buyingCost = (Number(buyingRate) || 0) * units
-  const grossProfit = revenue - buyingCost
+  const totalSell = (Number(sellingPrice) || 0) * units
+  const totalBuy = (Number(buyingRate) || 0) * units
+  const profit = totalSell - totalBuy
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -46,8 +48,8 @@ const EditSaleDialog = ({ sale, pics, onClose, onSaved }: {
     setError('')
     try {
       await api.patch(`/deals/sales/${sale.id}`, {
-        saleNumber: saleNumber.trim().toUpperCase(),
         invoiceNumber: invoiceNumber.trim() || null,
+        releaseNumber: releaseNumber.trim().toUpperCase(),
         saleDate: saleDate || null,
         totalUnits: units,
         buyingRate: Number(buyingRate) || 0,
@@ -61,6 +63,7 @@ const EditSaleDialog = ({ sale, pics, onClose, onSaved }: {
       // The list reads through a 60-second cache, so drop it or the row it just saved
       // keeps showing the old figures.
       invalidateCache('deals:sales')
+      invalidateCache('deals:masterpay')
       onSaved()
       onClose()
     } catch (caught: any) {
@@ -82,19 +85,21 @@ const EditSaleDialog = ({ sale, pics, onClose, onSaved }: {
         <div className="modal-header">
           <div>
             <div className="modal-title">Edit sale {sale.ref}</div>
-            <div className="modal-desc">Totals are recalculated from quantity, buying rate and selling price.</div>
+            <div className="modal-desc">
+              {sale.clientCode ? `Account ${sale.clientCode} · ` : ''}Totals are recalculated from quantity, buying rate and selling price.
+            </div>
           </div>
           <button type="button" className="btn btn-ghost" onClick={onClose} aria-label="Close">×</button>
         </div>
         <form onSubmit={submit}>
           <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
-              {label('Sale number', true)}
-              <input className="inp" value={saleNumber} onChange={e => setSaleNumber(e.target.value)} placeholder="WAVE-10317" required />
-            </div>
-            <div>
               {label('Invoice number')}
               <input className="inp" value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} placeholder="Typed from the invoice" />
+            </div>
+            <div>
+              {label('Release number', true)}
+              <input className="inp" value={releaseNumber} onChange={e => setReleaseNumber(e.target.value)} placeholder="WAVE-10317" required />
             </div>
             <div>
               {label('Date of sale')}
@@ -148,18 +153,28 @@ const EditSaleDialog = ({ sale, pics, onClose, onSaved }: {
               {label('Selling price / unit ($)', true)}
               <input className="inp" type="number" min="0" step="0.01" value={sellingPrice} onChange={e => setSellingPrice(e.target.value === '' ? 0 : Number(e.target.value))} required />
             </div>
-            <div style={{ gridColumn: '1 / -1', padding: 12, borderRadius: 8, background: 'var(--s2)', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+            <div>
+              {label('Payment date')}
+              <div style={{ fontSize: 12.5, padding: '8px 0', color: sale.paymentDate ? 'var(--t1)' : 'var(--t4)' }}>
+                {sale.paymentDate ? sale.paymentDateLabel : 'Unpaid'} <span style={{ color: 'var(--t4)' }}>· recorded in Masterpay</span>
+              </div>
+            </div>
+            <div style={{ gridColumn: '1 / -1', padding: 12, borderRadius: 8, background: 'var(--s2)', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--t3)' }}>Total buying cost</div>
-                <div style={{ fontWeight: 700, fontFamily: 'var(--mono)' }}>${buyingCost.toLocaleString()}</div>
+                <div style={{ fontSize: 11, color: 'var(--t3)' }}>Total buy</div>
+                <div style={{ fontWeight: 700, fontFamily: 'var(--mono)' }}>${totalBuy.toLocaleString()}</div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--t3)' }}>Revenue</div>
-                <div style={{ fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--brand)' }}>${revenue.toLocaleString()}</div>
+                <div style={{ fontSize: 11, color: 'var(--t3)' }}>Total sell</div>
+                <div style={{ fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--brand)' }}>${totalSell.toLocaleString()}</div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--t3)' }}>Gross profit</div>
-                <div style={{ fontWeight: 800, fontFamily: 'var(--mono)', color: grossProfit >= 0 ? 'var(--green)' : 'var(--red)' }}>${grossProfit.toLocaleString()}</div>
+                <div style={{ fontSize: 11, color: 'var(--t3)' }}>Profit</div>
+                <div style={{ fontWeight: 800, fontFamily: 'var(--mono)', color: profit >= 0 ? 'var(--green)' : 'var(--red)' }}>${profit.toLocaleString()}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--t3)' }}>Profit margin</div>
+                <div style={{ fontWeight: 700, fontFamily: 'var(--mono)' }}>{profitMargin(profit, totalSell).toFixed(1)}%</div>
               </div>
             </div>
             {status === 'Cancelled' && (

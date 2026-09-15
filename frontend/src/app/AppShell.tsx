@@ -19,6 +19,7 @@ import RemovedSheet from '../features/outreach/RemovedSheet'
 import Deliverability from '../features/outreach/Deliverability'
 import Contracts from '../features/contracts/Contracts'
 import Pickups from '../features/pickups/Pickups'
+import Masterpay from '../features/masterpay/Masterpay'
 import ContainerCatalog from '../features/catalog/ContainerCatalog'
 import PICPerformance from '../features/analytics/PICPerformance'
 import ProfitAnalytics from '../features/analytics/ProfitAnalytics'
@@ -79,13 +80,14 @@ export default function AppShell({ session, currentProfile }: AppShellProps) {
       case 'inquiry-dashboard':   return <InquiryDashboard role={currentProfile?.role} />
       case 'prospects':           return <ProspectSheet mode="prospect" onNav={handleNav} />
       case 'warm-leads':          return <ProspectSheet mode="warm" onNav={handleNav} />
-      case 'inquiries':           return <InquiryList />
+      case 'inquiries':           return <InquiryList intent={navIntent} onIntentApplied={() => setNavIntent(null)} />
       case 'quotations':          return <QuotationList />
       case 'sales-tracker':       return <SalesTracker />
       case 'active-clients':      return <ActiveClientsDashboard role={currentProfile?.role} onNav={handleNav} />
-      case 'customers':           return <CustomerAccounts role={currentProfile?.role} />
+      case 'customers':           return <CustomerAccounts role={currentProfile?.role} onNav={handleNav} />
       case 'contact-outreach':    return <ContactOutreach intent={navIntent} onIntentApplied={() => setNavIntent(null)} />
-      case 'contracts':           return <Contracts role={currentProfile?.role} />
+      // Operations works from Masterpay in place of Customer Contracts.
+      case 'contracts':           return currentProfile?.role === 'operations' ? <Masterpay role={currentProfile?.role} /> : <Contracts role={currentProfile?.role} />
       case 'daily-tasks':         return <DailyTasks />
       case 'removed':             return <RemovedSheet />
       case 'deliverability':      return <Deliverability />
@@ -100,6 +102,7 @@ export default function AppShell({ session, currentProfile }: AppShellProps) {
       case 'inquiry-validation':  return ['admin', 'procurement'].includes(currentProfile?.role ?? '') ? <InquiryValidation /> : <Dashboard onNav={handleNav} session={session} role={currentProfile?.role} />
       case 'inventory-management': return <InventoryManagement role={currentProfile?.role} />
       case 'pickups':             return <Pickups role={currentProfile?.role} />
+      case 'masterpay':           return ['admin', 'operations'].includes(currentProfile?.role ?? '') ? <Masterpay role={currentProfile?.role} /> : <Dashboard onNav={handleNav} session={session} role={currentProfile?.role} />
       case 'best-clients':        return <BestClients />
       case 'inquiry-funnel':      return <InquiryFunnel />
       case 'monthly-report':     return <MonthlyReport />

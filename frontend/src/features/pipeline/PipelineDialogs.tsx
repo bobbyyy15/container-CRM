@@ -3,6 +3,7 @@ import { api } from '../../lib/api'
 import { fetchCached, getFromCache } from '../../lib/dataCache'
 import { formatPhoneNumber, formatPhoneAsYouType, hasAtSymbol } from '../../lib/formatters'
 import SuggestInput from '../../components/ui/SuggestInput'
+import AccountChoice, { accountChoiceError, type AccountChoiceValue } from '../sales/AccountChoice'
 import {
   COUNTRY_OPTIONS,
   STATE_PROVINCE_OPTIONS,
@@ -51,7 +52,12 @@ export const usePics = () => {
 
 export type WarmLeadOption = { id: string; company: string; contact: string }
 export type InquiryOption = { id: string; ref: string; company: string; contact: string }
-export type QuotationOption = { id: string; ref: string; co: string; status: string; qty: number; sellTotal: number }
+export type QuotationOption = {
+  id: string; ref: string; co: string; status: string; qty: number; sellTotal: number
+  /** The customer account the quotation's inquiry is tied to, when it is. */
+  inquiryAccountId?: string | null
+  inquiryClientCode?: string
+}
 
 const Modal = ({ title, description, onClose, children }: {
   title: string
@@ -87,10 +93,12 @@ const FieldLabel = ({ label, required, optional, style }: { label: string; requi
   </label>
 )
 
-export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClose, onSaved }: {
+export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, customerAccountId, onClose, onSaved }: {
   warmLeads: WarmLeadOption[]
   initialId?: string
   initialIdentity?: string
+  /** The customer account the inquiry is raised for, e.g. from an Active Client. */
+  customerAccountId?: string
   onClose: () => void
   onSaved: () => void
 }) => {
@@ -199,6 +207,7 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
         specialRequirements: specialRequirements.trim() || undefined,
         remarks: remarks.trim() || undefined,
         followUpDate: followUpDate || undefined,
+        customerAccountId: customerAccountId || undefined,
       }
       if (source === 'warmLead') {
         await api.post(`/leads/warm-leads/${warmLeadId}/create-inquiry`, {
@@ -953,6 +962,9 @@ export const NewProspectDialog = ({ onClose, onSaved }: {
 
 export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
   initialData?: {
+    /** Opened for an existing customer account: the sale is a repeat on that account. */
+    customerAccountId?: string
+    clientCode?: string
     companyName?: string
     contactPerson?: string
     phone?: string
@@ -985,12 +997,17 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
   const [containerConditionId, setContainerConditionId] = useState('')
   // Their own reference. Left blank, the database allocates the next WAVE number, so the
   // field is optional but always editable.
-  const [saleNumber, setSaleNumber] = useState('')
+  const [releaseNumber, setReleaseNumber] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [containerCategoryId, setContainerCategoryId] = useState('')
   const sizes = useCatalog('/catalog/sizes')
   const conditions = useCatalog('/catalog/conditions')
   const types = useCatalog('/catalog/categories')
+  // Required: whether this sale opens a new customer account or adds to an existing one.
+  // Opened from an Active Client, the account is already known.
+  const [account, setAccount] = useState<AccountChoiceValue>(() => (initialData?.clientCode || initialData?.customerAccountId
+    ? { firstTransaction: false, clientCode: initialData?.clientCode ?? '', customerAccountId: initialData?.customerAccountId }
+    : { firstTransaction: null, clientCode: '' }))
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
 
@@ -998,10 +1015,16 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
   const buyingCost = (Number(buyPerUnit) || 0) * units
   const revenue = (Number(sellPerUnit) || 0) * units
   const grossProfit = revenue - buyingCost
+  const firstTransaction = account.firstTransaction === true
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (!companyName.trim()) return
+    const accountError = accountChoiceError(account)
+    if (accountError) {
+      setError(accountError)
+      return
+    }
+    if (firstTransaction && !companyName.trim()) return
     if (email.trim() && !hasAtSymbol(email)) {
       setError('Email must contain an "@"')
       return
@@ -1010,22 +1033,29 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
     setError('')
     try {
       await api.post('/deals/sales', {
-        companyName: companyName.trim(),
-        contactPerson: contactPerson.trim() || undefined,
-        phone: formatPhoneNumber(phone).trim() || undefined,
-        email: email.trim() || undefined,
-        picId: picId || undefined,
+        firstTransaction: account.firstTransaction,
+        customerAccountId: account.firstTransaction === false && !account.clientCode.trim() ? account.customerAccountId : undefined,
+        clientCode: account.clientCode.trim() || undefined,
+        // An existing account already knows its company and contact.
+        ...(firstTransaction ? {
+          companyName: companyName.trim(),
+          contactPerson: contactPerson.trim() || undefined,
+          phone: formatPhoneNumber(phone).trim() || undefined,
+          email: email.trim() || undefined,
+          picId: picId || undefined,
+          stateProvince: formatStateAbbr(stateProvince.trim()) || undefined,
+          country: formatCountryAbbr(country.trim()) || undefined,
+          city: formatCityTitleCase(city.trim()) || undefined,
+        } : {}),
         totalUnits,
-        buyingCost,
-        revenue,
-        stateProvince: formatStateAbbr(stateProvince.trim()) || undefined,
-        country: formatCountryAbbr(country.trim()) || undefined,
-        city: formatCityTitleCase(city.trim()) || undefined,
+        // Rates only; the server derives Total Buy, Total Sell and Profit.
+        buyingRate: Number(buyPerUnit) || 0,
+        sellingPrice: Number(sellPerUnit) || 0,
         containerSizeId: containerSizeId || undefined,
         containerConditionId: containerConditionId || undefined,
         containerCategoryId: containerCategoryId || undefined,
-        saleNumber: saleNumber.trim().toUpperCase() || undefined,
         invoiceNumber: invoiceNumber.trim() || undefined,
+        releaseNumber: releaseNumber.trim().toUpperCase() || undefined,
         saleDate: saleDate || undefined,
       })
       onSaved()
@@ -1041,6 +1071,12 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
     <Modal title="Record sale manually" description="For a sale that didn't go through a Quotation." onClose={onClose}>
       <form onSubmit={submit}>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <AccountChoice
+            value={account}
+            onChange={setAccount}
+            knownAccountLabel={initialData?.customerAccountId ? `${initialData.companyName ?? 'This account'}${initialData.clientCode ? ` · ${initialData.clientCode}` : ''}` : undefined}
+          />
+          {firstTransaction && (<>
           <div style={{ gridColumn: '1 / -1' }}>
             <FieldLabel label="Company" required />
             <input className="inp" value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder="Company Name" required />
@@ -1110,13 +1146,14 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
               placeholder="Type state (e.g. TX, CA, ON)..."
             />
           </div>
-          <div>
-            <FieldLabel label="Sale number" optional />
-            <input className="inp" value={saleNumber} onChange={event => setSaleNumber(event.target.value)} placeholder="WAVE-10317 (blank allocates the next)" />
-          </div>
+          </>)}
           <div>
             <FieldLabel label="Invoice number" optional />
             <input className="inp" value={invoiceNumber} onChange={event => setInvoiceNumber(event.target.value)} placeholder="From the invoice" />
+          </div>
+          <div>
+            <FieldLabel label="Release number" optional />
+            <input className="inp" value={releaseNumber} onChange={event => setReleaseNumber(event.target.value)} placeholder="WAVE-10317 (blank allocates the next)" />
           </div>
           <div>
             <FieldLabel label="Type" optional />
@@ -1173,7 +1210,7 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={working || !companyName.trim()}>{working ? 'Recording…' : 'Record Sale'}</button>
+          <button className="btn btn-primary" disabled={working || account.firstTransaction === null || (firstTransaction && !companyName.trim())}>{working ? 'Recording…' : 'Record Sale'}</button>
         </div>
       </form>
     </Modal>
@@ -1264,30 +1301,50 @@ export const SaleDialog = ({ quotations, initialId, onClose, onSaved }: {
   const initial = accepted.find(quote => quote.id === initialId) ?? accepted[0]
   const [quotationId, setQuotationId] = useState(initial?.id ?? '')
   const [units, setUnits] = useState(initial?.qty || 1)
-  const [buyingCost, setBuyingCost] = useState(0)
-  const [revenue, setRevenue] = useState(initial?.sellTotal || 0)
+  // Rates, not totals: the server derives Total Buy, Total Sell and Profit from them.
+  const [buyRate, setBuyRate] = useState(0)
+  const [sellRate, setSellRate] = useState(initial?.qty ? (initial.sellTotal || 0) / initial.qty : initial?.sellTotal || 0)
+  // An inquiry already tied to an account answers First Transaction; otherwise it is asked.
+  const accountFor = (quote?: QuotationOption): AccountChoiceValue => quote?.inquiryAccountId
+    ? { firstTransaction: false, clientCode: '', customerAccountId: quote.inquiryAccountId }
+    : { firstTransaction: null, clientCode: '' }
+  const [account, setAccount] = useState<AccountChoiceValue>(() => accountFor(initial))
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
 
+  const quote = accepted.find(item => item.id === quotationId)
+  const totalBuy = buyRate * units
+  const totalSell = sellRate * units
+  const profit = totalSell - totalBuy
+
   const selectQuote = (id: string) => {
     setQuotationId(id)
-    const quote = accepted.find(item => item.id === id)
-    if (quote) {
-      setUnits(quote.qty || 1)
-      setRevenue(quote.sellTotal)
+    const next = accepted.find(item => item.id === id)
+    if (next) {
+      setUnits(next.qty || 1)
+      setSellRate(next.qty ? next.sellTotal / next.qty : next.sellTotal)
+      setAccount(accountFor(next))
     }
   }
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!quotationId) return
+    const accountError = accountChoiceError(account)
+    if (accountError) {
+      setError(accountError)
+      return
+    }
     setWorking(true)
     setError('')
     try {
       await api.post(`/deals/quotations/${quotationId}/convert-to-sale`, {
         total_units: units,
-        buying_cost: buyingCost,
-        revenue,
+        buying_rate: buyRate,
+        selling_price: sellRate,
+        first_transaction: account.firstTransaction ?? undefined,
+        customer_account_id: account.firstTransaction === false && !account.clientCode.trim() ? account.customerAccountId : undefined,
+        client_code: account.clientCode.trim() || undefined,
       })
       onSaved()
       onClose()
@@ -1314,20 +1371,30 @@ export const SaleDialog = ({ quotations, initialId, onClose, onSaved }: {
               <input className="inp" type="number" min="1" value={units} onChange={event => setUnits(Number(event.target.value))} required />
             </div>
             <div>
-              <FieldLabel label="Buying cost total ($)" required />
-              <input className="inp" type="number" min="0" step="1" value={buyingCost || ''} onChange={event => setBuyingCost(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required />
+              <FieldLabel label="Buying rate / unit ($)" required />
+              <input className="inp" type="number" min="0" step="0.01" value={buyRate || ''} onChange={event => setBuyRate(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required />
             </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <FieldLabel label="Revenue total ($)" required />
-              <input className="inp" type="number" min="0" step="1" value={revenue || ''} onChange={event => setRevenue(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required />
+            <div>
+              <FieldLabel label="Selling price / unit ($)" required />
+              <input className="inp" type="number" min="0" step="0.01" value={sellRate || ''} onChange={event => setSellRate(event.target.value === '' ? 0 : Number(event.target.value))} placeholder="0" required />
             </div>
-            <div style={{ gridColumn: '1 / -1', padding: 10, borderRadius: 8, background: 'var(--s2)', color: revenue - buyingCost >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>Gross profit: ${(revenue - buyingCost).toLocaleString()}</div>
+            <div style={{ gridColumn: '1 / -1', padding: 10, borderRadius: 8, background: 'var(--s2)', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, fontSize: 12 }}>
+              <div>Total buy<div style={{ fontWeight: 700, fontFamily: 'var(--mono)' }}>${totalBuy.toLocaleString()}</div></div>
+              <div>Total sell<div style={{ fontWeight: 700, fontFamily: 'var(--mono)' }}>${totalSell.toLocaleString()}</div></div>
+              <div>Profit<div style={{ fontWeight: 700, fontFamily: 'var(--mono)', color: profit >= 0 ? 'var(--green)' : 'var(--red)' }}>${profit.toLocaleString()}</div></div>
+              <div>Margin<div style={{ fontWeight: 700, fontFamily: 'var(--mono)' }}>{(totalSell > 0 ? profit / totalSell * 100 : 0).toFixed(1)}%</div></div>
+            </div>
+            <AccountChoice
+              value={account}
+              onChange={setAccount}
+              knownAccountLabel={quote?.inquiryAccountId ? `The inquiry's customer account${quote.inquiryClientCode ? ` · ${quote.inquiryClientCode}` : ''}` : undefined}
+            />
           </> : <div style={{ gridColumn: '1 / -1', padding: 12, background: 'var(--brand-bg)', borderRadius: 8, fontSize: 12 }}>No accepted quotations are available. Open Quotations and accept one first.</div>}
           <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={working || !quotationId}>{working ? 'Recording…' : 'Record Sale'}</button>
+          <button className="btn btn-primary" disabled={working || !quotationId || account.firstTransaction === null}>{working ? 'Recording…' : 'Record Sale'}</button>
         </div>
       </form>
     </Modal>

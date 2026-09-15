@@ -53,6 +53,9 @@ api.interceptors.response.use(
           broadcastCrmChange('deals', method.toUpperCase())
           broadcastCrmChange('contracts', method.toUpperCase())
         }
+        if (url.includes('/masterpay')) {
+          broadcastCrmChange('deals', method.toUpperCase())
+        }
         if (url.includes('/pics')) {
           broadcastCrmChange('leads', method.toUpperCase())
         }

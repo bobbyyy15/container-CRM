@@ -7,28 +7,37 @@ import { invalidateCache } from '../../lib/dataCache'
  * Imports the sales spreadsheet the client already keeps.
  *
  * The file is read here and the rows are sent as they appear in the sheet; the server owns
- * the mapping, the validation and the duplicate checks, so one set of rules covers the
- * import however it is driven. Nothing is written on the first pass: the server reports
- * what it would do to every row and the import only commits when the person says so.
+ * the mapping, the validation, the duplicate checks and which customer account every row
+ * lands on, so one set of rules covers the import however it is driven. Nothing is written
+ * on the first pass: the server reports what it would do to every row and the import only
+ * commits when the person says so.
  */
 const CHUNK = 500
 
 type Row = {
   rowNumber: number
   companyName: string
-  saleNumber?: string
   invoiceNumber?: string
+  releaseNumber?: string
+  clientId?: string
+  account?: 'new' | 'existing'
   saleDate?: string
   quantity: number
   type?: string
   size?: string
   condition?: string
+  buyingRate: number
+  sellingPrice: number
+  buyingCost: number
   revenue: number
   grossProfit: number
+  margin: number
   status: string
   errors: string[]
   notices: string[]
 }
+
+const money = (value: number) => `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
 
 const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImported: () => void }) => {
   const [filename, setFilename] = useState<string>()
@@ -92,6 +101,7 @@ const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImp
       }
       toast(`${imported} sale${imported === 1 ? '' : 's'} imported${rejected ? ` · ${rejected} rejected` : ''}.`, rejected ? 'error' : 'success')
       invalidateCache('deals:sales')
+      invalidateCache('customers')
       onImported()
       onClose()
     } catch (error: any) {
@@ -104,10 +114,12 @@ const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImp
   const rows = preview?.rows ?? []
   const problems = rows.filter(r => r.errors.length)
   const notices = rows.filter(r => !r.errors.length && r.notices.length)
+  const cell = { fontSize: 12 }
+  const mono = { fontSize: 11.5 }
 
   return (
     <div className="overlay" onMouseDown={onClose}>
-      <div className="modal" style={{ width: 'min(920px, 96vw)' }} onMouseDown={e => e.stopPropagation()}>
+      <div className="modal" style={{ width: 'min(1100px, 96vw)' }} onMouseDown={e => e.stopPropagation()}>
         <div className="modal-header">
           <div>
             <div className="modal-title">Import sales</div>
@@ -126,15 +138,21 @@ const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImp
             <div style={{ color: 'var(--t3)', fontSize: 12, marginTop: 4 }}>
               {reading
                 ? 'Reading the file…'
-                : 'Date · Invoice Number · Company Name · Contact · State · City · Quantity · Type · Condition · Size · Selling Price · Buying Rate · Remarks / Status'}
+                : 'Date · Invoice Number · Release Number · Client ID · First Transaction · Company Name · Contact · State · City · Quantity · Type · Condition · Size · Buying Rate · Selling Price · Remarks / Status'}
             </div>
+            {!reading && (
+              <div style={{ color: 'var(--t4)', fontSize: 11.5, marginTop: 4 }}>
+                Each row needs a Client ID, or First Transaction = Yes to open a new customer account.
+              </div>
+            )}
           </div>
 
           {preview && (
             <>
-              <div style={{ display: 'flex', gap: 18, fontSize: 12.5, margin: '14px 0 8px' }}>
+              <div style={{ display: 'flex', gap: 18, fontSize: 12.5, margin: '14px 0 8px', flexWrap: 'wrap' }}>
                 <span><b>{preview.summary.total}</b> rows read</span>
                 <span style={{ color: 'var(--green)' }}><b>{preview.summary.importable}</b> ready to import</span>
+                {preview.summary.newAccounts > 0 && <span><b>{preview.summary.newAccounts}</b> open a new customer account</span>}
                 {preview.summary.rejected > 0 && <span style={{ color: 'var(--red)' }}><b>{preview.summary.rejected}</b> rejected</span>}
               </div>
 
@@ -160,28 +178,35 @@ const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImp
                 </div>
               )}
 
-              <div style={{ border: '1px solid var(--border-s)', borderRadius: 8, overflow: 'auto', maxHeight: 260 }}>
+              <div style={{ border: '1px solid var(--border-s)', borderRadius: 8, overflow: 'auto', maxHeight: 280 }}>
                 <table className="crm" style={{ width: '100%' }}>
                   <thead><tr>
-                    <th>Row</th><th>Sale #</th><th>Invoice #</th><th>Date</th><th>Company</th>
+                    <th>Row</th><th>Invoice #</th><th>Release #</th><th>Client ID</th><th>Account</th><th>Date</th><th>Company</th>
                     <th>Type</th><th>Size</th><th>Condition</th><th className="r">Qty</th>
-                    <th className="r">Revenue</th><th className="r">Profit</th><th>Status</th>
+                    <th className="r">Buy/Unit</th><th className="r">Sell/Unit</th><th className="r">Total Buy</th>
+                    <th className="r">Total Sell</th><th className="r">Profit</th><th className="r">Margin</th><th>Status</th>
                   </tr></thead>
                   <tbody>
                     {rows.slice(0, 100).map(row => (
                       <tr key={row.rowNumber} style={{ background: row.errors.length ? 'var(--red-bg)' : undefined }}>
-                        <td className="mono" style={{ fontSize: 11.5 }}>{row.rowNumber}</td>
-                        <td className="mono" style={{ fontSize: 11.5 }}>{row.saleNumber || <span style={{ color: 'var(--t4)' }}>auto</span>}</td>
-                        <td className="mono" style={{ fontSize: 11.5 }}>{row.invoiceNumber || '—'}</td>
-                        <td className="mono" style={{ fontSize: 11.5 }}>{row.saleDate || '—'}</td>
+                        <td className="mono" style={mono}>{row.rowNumber}</td>
+                        <td className="mono" style={mono}>{row.invoiceNumber || '—'}</td>
+                        <td className="mono" style={mono}>{row.releaseNumber || <span style={{ color: 'var(--t4)' }}>auto</span>}</td>
+                        <td className="mono" style={mono}>{row.clientId || <span style={{ color: 'var(--t4)' }}>{row.account === 'new' ? 'auto' : '—'}</span>}</td>
+                        <td style={cell}>{row.account === 'new' ? 'New' : row.account === 'existing' ? 'Existing' : '—'}</td>
+                        <td className="mono" style={mono}>{row.saleDate || '—'}</td>
                         <td style={{ fontSize: 12, fontWeight: 600 }}>{row.companyName || '—'}</td>
-                        <td style={{ fontSize: 12 }}>{row.type || '—'}</td>
-                        <td style={{ fontSize: 12 }}>{row.size || '—'}</td>
-                        <td style={{ fontSize: 12 }}>{row.condition || '—'}</td>
-                        <td className="r mono" style={{ fontSize: 12 }}>{row.quantity}</td>
-                        <td className="r mono" style={{ fontSize: 12 }}>${row.revenue.toLocaleString()}</td>
-                        <td className="r mono" style={{ fontSize: 12 }}>${row.grossProfit.toLocaleString()}</td>
-                        <td style={{ fontSize: 12 }}>{row.status}</td>
+                        <td style={cell}>{row.type || '—'}</td>
+                        <td style={cell}>{row.size || '—'}</td>
+                        <td style={cell}>{row.condition || '—'}</td>
+                        <td className="r mono" style={cell}>{row.quantity}</td>
+                        <td className="r mono" style={cell}>{money(row.buyingRate)}</td>
+                        <td className="r mono" style={cell}>{money(row.sellingPrice)}</td>
+                        <td className="r mono" style={cell}>{money(row.buyingCost)}</td>
+                        <td className="r mono" style={cell}>{money(row.revenue)}</td>
+                        <td className="r mono" style={cell}>{money(row.grossProfit)}</td>
+                        <td className="r mono" style={cell}>{row.margin.toFixed(1)}%</td>
+                        <td style={cell}>{row.status}</td>
                       </tr>
                     ))}
                   </tbody>

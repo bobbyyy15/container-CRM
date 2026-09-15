@@ -11,6 +11,7 @@ export const mapInquiryRow = (row: any) => {
     id: row.id,
     companyId: row.company_id,
     contactId: row.contact_id,
+    customerAccountId: row.customer_account_id || null,
     ref: `INQ-${row.id.slice(0, 8).toUpperCase()}`,
     date: created.toLocaleDateString(),
     time: created.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -72,8 +73,24 @@ export const mapQuotationRow = (row: any) => {
     status: row.status,
     source: row.inquiry_id ? `INQ-${row.inquiry_id.slice(0, 8).toUpperCase()}` : 'Direct',
     pic: row.pics?.name || 'Unassigned',
+    // When the inquiry is tied to a customer account, the sale it becomes belongs there.
+    inquiryAccountId: row.inquiries?.customer_account_id || null,
+    inquiryClientCode: row.inquiries?.customer_accounts?.client_code || '',
   }
 }
+
+/** Masterpay rows arrive shaped by the server; only the dates are formatted here. */
+export const mapMasterpayRow = (row: any) => ({
+  ...row,
+  id: row.saleId,
+  datePurchaseLabel: formatDateOnly(row.datePurchase),
+  paymentDateLabel: formatDateOnly(row.paymentDate),
+  releaseDateLabel: formatDateOnly(row.releaseDate),
+})
+
+/** A date-only value ("2026-09-15") shown in local time, so it never slips back a day. */
+export const formatDateOnly = (value?: string | null) =>
+  value ? new Date(`${String(value).slice(0, 10)}T00:00:00`).toLocaleDateString() : ''
 
 export const mapSaleRow = (row: any) => {
   const units = Number(row.total_units || 0)
@@ -87,12 +104,19 @@ export const mapSaleRow = (row: any) => {
   const companyContact = (companyLinks.find((l: any) => l.is_primary) ?? companyLinks[0])?.contacts
   return {
     id: row.id,
-    // The sale's own number, which the client sets and edits. It used to be derived from
-    // the row id -- "SAL-CF0C7B82" -- which is why it looked random and could not be
-    // changed; sales have carried a real sale_number since migration 036.
-    ref: row.sale_number || `SAL-${row.id.slice(0, 8).toUpperCase()}`,
-    saleNumber: row.sale_number || '',
+    // Invoice Number is the primary reference. The Release Number is the WAVE number the
+    // CRM used to call the sale number -- the column is still sale_number.
+    ref: row.invoice_number || row.sale_number || `SAL-${row.id.slice(0, 8).toUpperCase()}`,
     invoiceNumber: row.invoice_number || '',
+    releaseNumber: row.sale_number || '',
+    // The customer account the sale belongs to; one company can hold several.
+    customerAccountId: row.customer_account_id || row.customer_accounts?.id || '',
+    clientCode: row.customer_accounts?.client_code || '',
+    firstTransactionDate: row.customer_accounts?.first_transaction_date || null,
+    // Read through from Masterpay, which is the only place a payment date is kept.
+    paymentStatus: row.payment_status || 'Unpaid',
+    paymentDate: row.payment_date || null,
+    paymentDateLabel: formatDateOnly(row.payment_date),
     type: row.container_categories?.code || row.container_categories?.name || '—',
     containerCategoryId: row.container_category_id || '',
     containerSizeId: row.container_size_id || '',
@@ -115,14 +139,21 @@ export const mapSaleRow = (row: any) => {
     totalBuy: buyingCost,
     totalSell: revenue,
     profit,
-    margin: revenue ? (profit / revenue) * 100 : 0,
+    // Profit / Total Sell; a sale with no revenue has no margin rather than a division error.
+    margin: revenue > 0 ? (profit / revenue) * 100 : 0,
     pic: row.pics?.name || 'Unassigned',
     status: row.status,
   }
 }
 
 export const mapCustomerRow = (c: any) => ({
-  id: c.company_id,
+  // The customer account, not the company: the same company can hold several accounts, and
+  // each is its own Active Client row.
+  id: c.customer_account_id ?? c.company_id,
+  companyId: c.company_id,
+  clientCode: c.client_code || '',
+  firstTransactionDate: c.first_transaction_date || null,
+  firstTransaction: formatDateOnly(c.first_transaction_date) || '-',
   co: c.company_name,
   contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
   phone: formatPhoneNumber(c.primary_contact ? (c.primary_contact.phone_1 || c.primary_contact.phone_2) : '-'),

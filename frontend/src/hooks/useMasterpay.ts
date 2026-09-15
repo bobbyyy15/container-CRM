@@ -1,0 +1,46 @@
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { api } from '../lib/api'
+import { useRealtimeRevision } from '../lib/realtime'
+import { fetchCached, getFromCache } from '../lib/dataCache'
+import { mapMasterpayRow } from './mappers'
+import type { ListResult } from './useProspects'
+
+export const useMasterpay = (revision = 0): ListResult<any> => {
+  const cacheKey = 'deals:masterpay'
+  const liveRevision = useRealtimeRevision(['deals'])
+  const [data, setData] = useState<any[]>(() => {
+    const cached = getFromCache<any[]>(cacheKey)
+    return cached ? cached.map(mapMasterpayRow) : []
+  })
+  const [loading, setLoading] = useState<boolean>(() => !getFromCache(cacheKey))
+  const isFirstMount = useRef(true)
+  const prevRevision = useRef(revision)
+  const prevLiveRevision = useRef(liveRevision)
+
+  useEffect(() => {
+    let cancelled = false
+    // A bumped revision means a payment or sale changed, so read past the cache.
+    const shouldBypass = !isFirstMount.current && (prevRevision.current !== revision || prevLiveRevision.current !== liveRevision)
+    isFirstMount.current = false
+    prevRevision.current = revision
+    prevLiveRevision.current = liveRevision
+
+    if (!getFromCache(cacheKey) && !shouldBypass) setLoading(true)
+
+    fetchCached(cacheKey, () => api.get('/masterpay').then(res => res.data.data || []), 60_000, shouldBypass)
+      .then(raw => {
+        if (!cancelled) {
+          setData((raw || []).map(mapMasterpayRow))
+          setLoading(false)
+        }
+      })
+      .catch(err => {
+        console.error('Failed to fetch Masterpay', err)
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [revision, liveRevision])
+
+  // Memoised so a screen gets a new array when the rows change, not on every render.
+  return useMemo(() => Object.assign([...data], { data, loading }), [data, loading])
+}

@@ -1,6 +1,12 @@
 import { supabaseAdmin } from '../config/supabase';
-import { mapSalesSheet } from './sales-import';
+import { mapSalesSheet, resolveCustomerAccounts } from './sales-import';
+import { findConditionId, findSizeId, type CatalogEntry } from './container-catalog';
+import { saleTotalsColumns } from './sale-financials';
 import { ConvertToSalePayload, CreateQuotationPayload, UpdateQuotationStatusPayload, CreateManualSalePayload, UpdateSalePayload, ImportSalesPayload } from '../schemas/deal.schema';
+
+/** A database refusal worded for a person (P0001) keeps its own message. */
+const saleError = (error: { code?: string; message: string }, fallback: string) =>
+  new Error(error.code === 'P0001' ? error.message : `${fallback}: ${error.message}`);
 
 export class DealService {
 
@@ -37,9 +43,7 @@ export class DealService {
    * dashboard as fact.
    */
   static recalculate(totalUnits: number, buyingRate: number, sellingPrice: number) {
-    const revenue = sellingPrice * totalUnits;
-    const buyingCost = buyingRate * totalUnits;
-    return { revenue, buying_cost: buyingCost, gross_profit: revenue - buyingCost };
+    return saleTotalsColumns(totalUnits, buyingRate, sellingPrice);
   }
 
   /**
@@ -72,8 +76,9 @@ export class DealService {
       total_units: units,
       updated_at: new Date().toISOString(),
     };
-    if (payload.saleNumber !== undefined) update.sale_number = payload.saleNumber;
     if (payload.invoiceNumber !== undefined) update.invoice_number = payload.invoiceNumber || null;
+    // The Release Number lives in sale_number.
+    if (payload.releaseNumber !== undefined) update.sale_number = payload.releaseNumber;
     if (payload.saleDate !== undefined) update.sale_date = payload.saleDate || null;
     if (payload.containerSizeId !== undefined) update.container_size_id = payload.containerSizeId;
     if (payload.containerConditionId !== undefined) update.container_condition_id = payload.containerConditionId;
@@ -83,9 +88,9 @@ export class DealService {
 
     const { data, error } = await supabaseAdmin.from('sales').update(update).eq('id', id).select('*').single();
     if (error) {
-      // 23505 is a unique violation: the sale number is already on another sale.
+      // 23505 is a unique violation: the release number is already on another sale.
       if ((error as { code?: string }).code === '23505') {
-        throw Object.assign(new Error(`Sale number ${payload.saleNumber} is already used by another sale.`), { status: 409 });
+        throw Object.assign(new Error(`Release number ${payload.releaseNumber} is already used by another sale.`), { status: 409 });
       }
       throw error;
     }
@@ -96,49 +101,55 @@ export class DealService {
    * Imports the client's sales spreadsheet.
    *
    * Runs as a preview first (`dryRun`), reporting every row's outcome -- what it mapped to,
-   * what is wrong with it, and whether it duplicates a sale already on record or another
-   * row in the file -- so nothing is written until someone has seen it. Committing skips
-   * every row that has an error, so an import can never partially overwrite an existing
-   * sale: a duplicate is refused, never merged.
+   * which customer account it lands on, what is wrong with it, and whether it duplicates a
+   * sale already on record or another row in the file -- so nothing is written until
+   * someone has seen it. Committing skips every row that has an error, so an import can
+   * never partially overwrite an existing sale: a duplicate is refused, never merged.
    */
   static async importSales(payload: ImportSalesPayload, actorId: string, picId: string | null) {
     const rows = mapSalesSheet(payload.rows);
 
-    const saleNumbers = rows.map(r => r.saleNumber).filter((v): v is string => Boolean(v));
+    const releaseNumbers = rows.map(r => r.releaseNumber).filter((v): v is string => Boolean(v));
     const invoiceNumbers = rows.map(r => r.invoiceNumber).filter((v): v is string => Boolean(v));
 
-    const [existingSales, existingInvoices, categories, sizes, conditions] = await Promise.all([
-      saleNumbers.length
-        ? supabaseAdmin.from('sales').select('sale_number').in('sale_number', saleNumbers)
-        : Promise.resolve({ data: [] as { sale_number: string }[] }),
+    const [existingReleases, existingInvoices, accounts, categories, sizes, conditions] = await Promise.all([
+      releaseNumbers.length
+        ? supabaseAdmin.from('sales').select('sale_number').in('sale_number', releaseNumbers)
+        : Promise.resolve({ data: [] as { sale_number: string }[], error: null }),
       invoiceNumbers.length
         ? supabaseAdmin.from('sales').select('invoice_number').in('invoice_number', invoiceNumbers)
-        : Promise.resolve({ data: [] as { invoice_number: string }[] }),
+        : Promise.resolve({ data: [] as { invoice_number: string }[], error: null }),
+      supabaseAdmin.from('customer_accounts').select('client_code'),
       supabaseAdmin.from('container_categories').select('id, code, name'),
       supabaseAdmin.from('container_sizes').select('id, name'),
       supabaseAdmin.from('container_conditions').select('id, name'),
     ]);
+    const failed = [existingReleases, existingInvoices, accounts, categories, sizes, conditions].find(result => result.error);
+    if (failed?.error) throw failed.error;
 
-    const takenSale = new Set((existingSales.data ?? []).map(r => String(r.sale_number).toUpperCase()));
+    const takenRelease = new Set((existingReleases.data ?? []).map(r => String(r.sale_number).toUpperCase()));
     const takenInvoice = new Set((existingInvoices.data ?? []).map(r => String(r.invoice_number).toUpperCase()));
     const byCode = new Map((categories.data ?? []).map(c => [String(c.code ?? '').toUpperCase(), c.id]));
-    const sizeByName = new Map((sizes.data ?? []).map(s => [String(s.name).toLowerCase(), s.id]));
-    const conditionByName = new Map((conditions.data ?? []).map(c => [String(c.name).toLowerCase(), c.id]));
+    const sizeCatalog = (sizes.data ?? []) as CatalogEntry[];
+    const conditionCatalog = (conditions.data ?? []) as CatalogEntry[];
 
     for (const row of rows) {
-      if (row.saleNumber && takenSale.has(row.saleNumber.toUpperCase())) {
-        row.errors.push(`Sale Number ${row.saleNumber} already exists in the CRM`);
+      if (row.releaseNumber && takenRelease.has(row.releaseNumber.toUpperCase())) {
+        row.errors.push(`Release Number ${row.releaseNumber} already exists in the CRM`);
       }
       if (row.invoiceNumber && takenInvoice.has(row.invoiceNumber.toUpperCase())) {
         row.errors.push(`Invoice Number ${row.invoiceNumber} is already on another sale`);
       }
-      if (row.size && !sizeByName.has(row.size.toLowerCase())) {
+      if (row.size && !findSizeId(row.size, sizeCatalog)) {
         row.notices.push(`Size "${row.size}" is not in the catalog and was left unset`);
       }
-      if (row.condition && !conditionByName.has(row.condition.toLowerCase())) {
+      if (row.condition && !findConditionId(row.condition, conditionCatalog)) {
         row.notices.push(`Condition "${row.condition}" is not in the catalog and was left unset`);
       }
     }
+
+    // Last, so a row refused for any other reason never opens an account.
+    resolveCustomerAccounts(rows, (accounts.data ?? []).map(account => String(account.client_code)));
 
     const importable = rows.filter(row => row.errors.length === 0);
     const summary = {
@@ -146,10 +157,12 @@ export class DealService {
       importable: importable.length,
       rejected: rows.length - importable.length,
       imported: 0,
+      newAccounts: importable.filter(row => row.account === 'new').length,
     };
 
     if (payload.dryRun) return { summary, rows, committed: false };
 
+    // In sheet order, so a row adding to an account opened earlier in the file finds it.
     for (const row of importable) {
       const { error } = await supabaseAdmin.rpc('create_manual_sale', {
         p_actor_id: actorId,
@@ -164,13 +177,16 @@ export class DealService {
         p_state_province: row.state ?? null,
         p_country: null,
         p_city: row.city ?? null,
-        p_container_size_id: row.size ? sizeByName.get(row.size.toLowerCase()) ?? null : null,
-        p_container_condition_id: row.condition ? conditionByName.get(row.condition.toLowerCase()) ?? null : null,
+        p_container_size_id: row.size ? findSizeId(row.size, sizeCatalog) ?? null : null,
+        p_container_condition_id: row.condition ? findConditionId(row.condition, conditionCatalog) ?? null : null,
         p_sale_date: row.saleDate ?? null,
-        p_sale_number: row.saleNumber ?? null,
+        p_sale_number: row.releaseNumber ?? null,
         p_invoice_number: row.invoiceNumber ?? null,
         p_container_category_id: row.type ? byCode.get(row.type) ?? null : null,
         p_status: row.status,
+        p_first_transaction: row.account === 'new',
+        p_customer_account_id: null,
+        p_client_code: row.clientId ?? null,
       });
       if (error) row.errors.push(error.message);
       else summary.imported += 1;
@@ -181,30 +197,34 @@ export class DealService {
   }
 
   static async createManualSale(payload: CreateManualSalePayload, userId: string) {
+    const totals = saleTotalsColumns(payload.totalUnits, payload.buyingRate, payload.sellingPrice);
     const { data: sale, error } = await supabaseAdmin
       .rpc('create_manual_sale', {
         p_actor_id: userId,
-        p_company_name: payload.companyName,
+        p_company_name: payload.companyName ?? null,
         p_contact_person: payload.contactPerson ?? null,
         p_phone: payload.phone ?? null,
         p_email: payload.email ?? null,
         p_pic_id: payload.picId ?? null,
         p_total_units: payload.totalUnits,
-        p_buying_cost: payload.buyingCost,
-        p_revenue: payload.revenue,
+        p_buying_cost: totals.buying_cost,
+        p_revenue: totals.revenue,
         p_state_province: payload.stateProvince ?? null,
         p_country: payload.country ?? null,
         p_city: payload.city ?? null,
         p_container_size_id: payload.containerSizeId ?? null,
         p_container_condition_id: payload.containerConditionId ?? null,
         p_sale_date: payload.saleDate ?? null,
-        p_sale_number: payload.saleNumber ?? null,
+        p_sale_number: payload.releaseNumber ?? null,
         p_invoice_number: payload.invoiceNumber ?? null,
         p_container_category_id: payload.containerCategoryId ?? null,
         p_status: payload.status ?? 'Won',
+        p_first_transaction: payload.firstTransaction,
+        p_customer_account_id: payload.customerAccountId ?? null,
+        p_client_code: payload.clientCode ?? null,
       })
       .single();
-    if (error) throw new Error(error.code === 'P0001' ? error.message : `Failed to create sale: ${error.message}`);
+    if (error) throw saleError(error, 'Failed to create sale');
     const convertedCompanyId = (sale as { company_id?: string } | null)?.company_id;
     if (convertedCompanyId) {
       await supabaseAdmin
@@ -217,16 +237,21 @@ export class DealService {
   }
 
   static async convertToSale(quotationId: string, payload: ConvertToSalePayload, userId: string) {
+    const totals = saleTotalsColumns(payload.total_units, payload.buying_rate, payload.selling_price);
     const { data: sale, error } = await supabaseAdmin
       .rpc('convert_quotation_to_sale', {
         p_quotation_id: quotationId,
         p_actor_id: userId,
         p_total_units: payload.total_units,
-        p_buying_cost: payload.buying_cost,
-        p_revenue: payload.revenue,
+        p_buying_cost: totals.buying_cost,
+        p_revenue: totals.revenue,
+        p_first_transaction: payload.first_transaction ?? null,
+        p_customer_account_id: payload.customer_account_id ?? null,
+        p_client_code: payload.client_code ?? null,
+        p_sale_date: payload.sale_date ?? null,
       })
       .single();
-    if (error) throw new Error(`Failed to record sale: ${error.message}`);
+    if (error) throw saleError(error, 'Failed to record sale');
     const convertedCompanyId = (sale as { company_id?: string } | null)?.company_id;
     if (convertedCompanyId) {
       await supabaseAdmin

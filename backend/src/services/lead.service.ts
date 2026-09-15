@@ -3,6 +3,8 @@ import { CreateInquiryPayload, CreateManualWarmLeadPayload, CreateManualInquiryP
 import { formatPhoneNumber } from '../utils/formatters';
 import { formatCountryAbbr, formatStateAbbr, formatCityTitleCase } from '../utils/places';
 
+type InquiryRow = { id?: string; company_id?: string } | null;
+
 export class LeadService {
   static async convertProspectToWarmLead(prospectId: string, actorId: string, reason?: string, channel?: string) {
     const { data, error } = await supabaseAdmin
@@ -59,7 +61,29 @@ export class LeadService {
         .eq('company_id', convertedCompanyId)
         .eq('lifecycle_status', 'active');
     }
+    await LeadService.linkInquiryToAccount(data as InquiryRow, payload.customerAccountId);
     return data;
+  }
+
+  /**
+   * Ties a new inquiry to the customer account it was raised for -- but only when that
+   * account belongs to the inquiry's company, so a stale or mismatched id can never attach
+   * one customer's inquiry to another customer's account.
+   */
+  static async linkInquiryToAccount(inquiry: InquiryRow, customerAccountId?: string) {
+    if (!customerAccountId || !inquiry?.id || !inquiry.company_id) return;
+    const { data: account, error } = await supabaseAdmin
+      .from('customer_accounts')
+      .select('company_id')
+      .eq('id', customerAccountId)
+      .maybeSingle();
+    if (error) throw new Error(`Failed to look up the customer account: ${error.message}`);
+    if (account?.company_id !== inquiry.company_id) return;
+    const { error: linkError } = await supabaseAdmin
+      .from('inquiries')
+      .update({ customer_account_id: customerAccountId })
+      .eq('id', inquiry.id);
+    if (linkError) throw new Error(`Failed to link the inquiry to its customer account: ${linkError.message}`);
   }
 
   static async createManualProspect(payload: CreateManualProspectPayload, actorId: string) {
@@ -154,6 +178,7 @@ export class LeadService {
         .eq('company_id', convertedCompanyId)
         .eq('lifecycle_status', 'active');
     }
+    await LeadService.linkInquiryToAccount(data as InquiryRow, payload.customerAccountId);
     return data;
   }
 

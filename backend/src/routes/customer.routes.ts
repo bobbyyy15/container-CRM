@@ -12,6 +12,6 @@ router.use(requireRoles('admin', 'sales_manager', 'operations'));
 router.get('/', CustomerController.listCustomers);
 // A customer account is a rollup of Won sales, so deleting one deletes those
 // sales -- operations reads this screen but does not own that data.
-router.delete('/:companyId', requireRoles('admin', 'sales_manager'), DeleteController.deleteCustomerAccount);
+router.delete('/:accountId', requireRoles('admin', 'sales_manager'), DeleteController.deleteCustomerAccount);
 
 export default router;

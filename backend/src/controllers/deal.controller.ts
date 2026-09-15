@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { DealService } from '../services/deal.service';
+import { withPayment } from '../services/masterpay-rows';
 import { CreateQuotationSchema, UpdateQuotationStatusSchema, ConvertToSaleSchema, CreateManualSaleSchema, UpdateSaleStatusSchema, UpdateSaleSchema, ImportSalesSchema } from '../schemas/deal.schema';
 
 // A record created with no PIC stamped on it is invisible under the pic_id-based data
@@ -46,7 +47,8 @@ export class DealController {
         // size and condition instead of a dash. An inquiry has two of each -- the
         // requirement and the Procurement alternative -- so the embed names the column.
         .select('*, companies(*), contacts(*), pics(name), quotation_items(*), '
-          + 'inquiries(container_sizes!container_size_id(name), container_conditions!container_condition_id(name)))')
+          + 'inquiries(customer_account_id, customer_accounts(client_code), '
+          + 'container_sizes!container_size_id(name), container_conditions!container_condition_id(name)))')
         .eq('pic_id', picId)
         .order('created_at', { ascending: false });
 
@@ -72,6 +74,10 @@ export class DealController {
         // the quotation otherwise, so both are embedded and the mapper prefers the sale's own.
         .select('*, companies(*, company_contacts(is_primary, contacts(*))), pics(name), '
           + 'container_sizes(name), container_conditions(name), container_categories(code, name), '
+          // The account the sale belongs to, and its payment -- read from Masterpay, the only
+          // place a payment date is kept.
+          + 'customer_accounts(id, client_code, first_transaction_date), '
+          + 'masterpay_records(payment_status, payment_date, payment_amount), '
           // An inquiry has two size and two condition FKs -- the requirement and the
           // Procurement-suggested alternative -- so the embed has to name the column.
           + 'quotations(*, contacts(*), quotation_items(*), '
@@ -82,7 +88,8 @@ export class DealController {
 
       if (error) throw error;
 
-      res.json({ success: true, data });
+      // The select string is concatenated, so the client cannot type the rows it returns.
+      res.json({ success: true, data: ((data ?? []) as { masterpay_records?: unknown }[]).map(withPayment) });
     } catch (error: any) {
       res.status(500).json({ success: false, error: { message: error.message } });
     }
@@ -166,7 +173,7 @@ export class DealController {
       const sale = await DealService.convertToSale(id, payload, userId);
       res.status(201).json({ success: true, data: sale });
     } catch (error: any) {
-      res.status(400).json({ success: false, error: { message: error.message } });
+      res.status(400).json({ success: false, error: { message: readableError(error) } });
     }
   }
 
@@ -226,6 +233,19 @@ export class DealController {
         return res.status(409).json({
           success: false,
           error: { message: 'This Sale has a Contract and cannot be deleted.' },
+        });
+      }
+
+      // Payment history is kept with the sale it was paid against.
+      const { count: paymentCount, error: paymentError } = await supabaseAdmin
+        .from('masterpay_records')
+        .select('id', { count: 'exact', head: true })
+        .eq('sale_id', id);
+      if (paymentError) throw paymentError;
+      if ((paymentCount ?? 0) > 0) {
+        return res.status(409).json({
+          success: false,
+          error: { message: 'This Sale has a Masterpay payment record and cannot be deleted.' },
         });
       }
 

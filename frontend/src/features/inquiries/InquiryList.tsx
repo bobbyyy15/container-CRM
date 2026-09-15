@@ -12,12 +12,12 @@ import RefreshButton from '../../components/ui/RefreshButton'
 import { confirmDelete, confirmBulkDelete } from '../../lib/deleteRecord'
 import BulkBar from '../../components/ui/BulkBar'
 import { useRowSelection } from '../../hooks/useRowSelection'
-import type { Screen, BadgeStatus } from '../../app/types'
+import type { Screen, BadgeStatus, NavIntent } from '../../app/types'
 import { NewInquiryDialog, QuotationDialog, type InquiryOption, type WarmLeadOption } from '../pipeline/PipelineDialogs'
 import { useInquiries } from '../../hooks/useInquiries'
 import { useWarmLeads } from '../../hooks/useWarmLeads'
 
-const InquiryList = () => {
+const InquiryList = ({ intent, onIntentApplied }: { intent?: NavIntent | null; onIntentApplied?: () => void } = {}) => {
   const [revision, setRevision] = useState(0)
   const [showNewInquiry, setShowNewInquiry] = useState(false)
   const [quotationInquiryId, setQuotationInquiryId] = useState<string | null>(null)
@@ -28,6 +28,21 @@ const InquiryList = () => {
   // inquiries, so read the full set separately for it.
   const ALL_INQUIRIES = useInquiries(revision, 'all')
   const warmLeads = useWarmLeads(revision)
+
+  // Opened for one inquiry (from an Active Client): show its detail once the full set --
+  // closed inquiries included -- has loaded, then release the request so coming back to
+  // this screen later does not reopen it.
+  useEffect(() => {
+    if (!intent?.inquiryId) return
+    const row = ALL_INQUIRIES.find(r => r.id === intent.inquiryId)
+    if (row) {
+      setViewRow(row)
+      onIntentApplied?.()
+    } else if (!ALL_INQUIRIES.loading) {
+      toast('That inquiry is not in the list you can see.', 'error')
+      onIntentApplied?.()
+    }
+  }, [intent, ALL_INQUIRIES, onIntentApplied])
   const [tab, setTab] = useState('All')
   const [lookup, setLookup] = useState('')
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colField: string; colLabel: string } | null>(null);

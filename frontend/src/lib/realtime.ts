@@ -27,6 +27,8 @@ const TABLE_RESOURCES: Record<string, string> = {
   sales: 'deals',
   contracts: 'contracts',
   inventory: 'inventory',
+  customer_accounts: 'deals',
+  masterpay_records: 'deals',
   notifications: 'notifications',
 };
 

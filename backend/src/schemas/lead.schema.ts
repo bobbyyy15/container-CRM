@@ -20,6 +20,8 @@ export const CreateInquirySchema = z.object({
   stateProvince: z.string().trim().max(100).optional(),
   country: z.string().trim().max(100).optional(),
   city: z.string().trim().max(100).optional(),
+  /** The customer account this inquiry was raised for, when known. */
+  customerAccountId: z.string().uuid().optional(),
 });
 
 export const CreateManualWarmLeadSchema = z.object({
@@ -61,6 +63,8 @@ export const CreateManualInquirySchema = z.object({
   specialRequirements: z.string().trim().max(2000).optional(),
   remarks: z.string().trim().max(2000).optional(),
   followUpDate: z.string().date().optional(),
+  /** The customer account this inquiry was raised for, e.g. from an Active Client. */
+  customerAccountId: z.string().uuid().optional(),
 }).refine(
   data => Boolean(data.warmLeadId) || Boolean(data.companyName),
   { message: 'Either warmLeadId or companyName is required', path: ['companyName'] },
