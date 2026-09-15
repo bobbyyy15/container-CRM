@@ -48,7 +48,7 @@ const SalesTracker = () => {
 
   const filteredSales = SALES.filter(s => {
     const term = search.trim().toLowerCase()
-    const searchMatch = !term || [s.invoiceNumber, s.releaseNumber, s.clientCode, s.company, s.contact, s.category]
+    const searchMatch = !term || [s.invoiceNumber, s.releaseNumber, s.company, s.contact, s.category]
       .some(value => String(value ?? '').toLowerCase().includes(term))
     const picMatch = !picFilter || s.pic === picFilter
     const categoryMatch = !categoryFilter || s.category === categoryFilter
@@ -87,7 +87,6 @@ const SalesTracker = () => {
     'Date': s.date,
     'Payment Date': s.paymentDateLabel,
     'Payment Status': s.paymentStatus,
-    'Client ID': s.clientCode,
     'Company': s.company,
     'Contact': s.contact,
     'Type': s.type,
@@ -204,7 +203,7 @@ const SalesTracker = () => {
       </div>
 
       <div className="toolbar">
-        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search invoice, release, Client ID, company…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+        <div className="search-field"><Ic n={I.search} size={13} /><input placeholder="Search invoice, release, company…" value={search} onChange={e => setSearch(e.target.value)} /></div>
         <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}><option value="">All PICs</option>{salesPics.map(p => <option key={p} value={p}>{p}</option>)}</select>
         <select className="sel" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">All Categories</option>{salesCategories.map(c => <option key={c} value={c}>{c}</option>)}</select>
         <select className="sel" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} aria-label="Sale status">
@@ -244,7 +243,7 @@ const SalesTracker = () => {
                 onChange={e => selection.toggleAll(e.target.checked)}
               />
             </th>
-            <th>Invoice #</th><th>Release #</th><th>Date</th><th>Payment Date</th><th>Company / Account</th>
+            <th>Invoice #</th><th>Release #</th><th>Date</th><th>Payment Date</th><th>Company</th>
             <th>Type</th><th>Size</th><th>Condition</th><th className="r">Qty</th><th className="r">Buy/Unit</th>
             <th className="r">Sell/Unit</th><th className="r">Total Buy</th><th className="r">Total Sell</th>
             <th className="r">Profit</th><th className="r">Margin</th><th>PIC</th><th>Status</th>
@@ -292,7 +291,7 @@ const SalesTracker = () => {
                 <td>
                   <div style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--t1)' }}>{s.company}</div>
                   <div style={{ fontSize: 11, color: 'var(--t4)' }}>
-                    {[s.clientCode, s.contact].filter(Boolean).join(' · ')}
+                    {s.contact}
                   </div>
                 </td>
                 <td style={{ fontSize: 12.5 }}>{s.type}</td>
@@ -355,7 +354,6 @@ const SalesTracker = () => {
           fields={[
             { label: 'Invoice number', value: viewRow.invoiceNumber || undefined },
             { label: 'Release number', value: viewRow.releaseNumber || undefined },
-            { label: 'Client ID', value: viewRow.clientCode || undefined },
             { label: 'First transaction', value: formatDateOnly(viewRow.firstTransactionDate) || undefined },
             { label: 'Company', value: viewRow.company },
             { label: 'Contact', value: viewRow.contact },

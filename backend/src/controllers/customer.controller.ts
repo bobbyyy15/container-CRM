@@ -2,7 +2,32 @@ import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 
 export class CustomerController {
-  
+
+  /**
+   * The fast lookup for a repurchase: existing clients by phone, email, contact or company
+   * name, or Customer ID. A sales manager finds only their own clients, as on Active Clients.
+   */
+  static async lookupAccounts(req: Request, res: Response) {
+    try {
+      const query = String(req.query.q ?? '').trim();
+      if (query.length < 2) return res.json({ success: true, data: [] });
+
+      const isSalesManager = req.auth?.profile.role === 'sales_manager';
+      const picId = req.auth?.profile.pic_id;
+      if (isSalesManager && !picId) return res.json({ success: true, data: [] });
+
+      const { data, error } = await supabaseAdmin.rpc('lookup_customer_accounts', {
+        p_query: query,
+        p_pic_id: isSalesManager ? picId : null,
+        p_limit: 8,
+      });
+      if (error) throw error;
+      res.json({ success: true, data: data ?? [] });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: { message: error.message } });
+    }
+  }
+
   static async listCustomers(req: Request, res: Response) {
     try {
       const status = req.query.status as string; // 'Active' or 'Floating' or 'All'

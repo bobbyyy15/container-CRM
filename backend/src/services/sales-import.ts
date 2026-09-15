@@ -46,6 +46,12 @@ export type MappedSaleRow = {
   firstTransaction?: boolean;
   /** How the sale attaches to a customer account, once resolved against the CRM. */
   account?: 'new' | 'existing';
+  /** The existing account a repurchase lands on, when it is already in the CRM. */
+  accountId?: string;
+  /** Who the account is, for the preview. */
+  accountLabel?: string;
+  /** A repurchase on an account that an earlier row of the same file opens. */
+  openedOnRow?: number;
   /** Anything wrong with this row. A row with errors is never imported. */
   errors: string[];
   /** Worth saying, but not a reason to refuse the row. */
@@ -293,59 +299,117 @@ export const markDuplicatesWithinFile = (rows: MappedSaleRow[]): MappedSaleRow[]
 export const mapSalesSheet = (rows: RawSalesRow[]): MappedSaleRow[] =>
   markDuplicatesWithinFile(rows.map((raw, index) => mapSaleRow(raw, index + 2)));
 
+/** An email as the database compares it: trimmed and lower-cased. */
+export const normalizeEmail = (value: unknown): string | undefined => {
+  const text = clean(value).toLowerCase();
+  return text.includes('@') ? text : undefined;
+};
+
 /**
- * Decides which customer account every importable row belongs to. The account is found
- * by its Client ID, never by the company name: the same company can hold several accounts.
- *
- * - A Client ID already in the CRM adds the sale to that account.
- * - A Client ID not yet in the CRM opens a new account; later rows with the same Client ID
- *   in the file then add to it.
- * - Without a Client ID, the row must say First Transaction = Yes (a new account with the
- *   next Client ID). A repeat sale cannot be placed without one, so it is refused.
- *
- * A First Transaction column that contradicts the Client ID is refused rather than guessed.
- * Rows that already carry an error are left alone -- they will not be imported, so they
- * must not open an account that a later row would then depend on.
+ * A phone as it is matched: its last ten digits, so "+1 (719) 892-0252" and "719.892.0252"
+ * are the same number. Fewer than seven digits is not enough to identify anyone.
  */
-export const resolveCustomerAccounts = (rows: MappedSaleRow[], existingClientIds: Iterable<string>): MappedSaleRow[] => {
-  const existing = new Set([...existingClientIds].map(code => code.trim().toUpperCase()));
-  const openedOnRow = new Map<string, number>();
+export const normalizePhone = (value: unknown): string | undefined => {
+  const digits = clean(value).replace(/\D/g, '');
+  return digits.length >= 7 ? digits.slice(-10) : undefined;
+};
+
+/** An existing customer account, as the import can recognise it. */
+export type AccountIdentity = {
+  accountId: string;
+  clientCode?: string;
+  companyName: string;
+  emails: string[];
+  phones: string[];
+};
+
+/**
+ * Decides which customer account every importable row belongs to, the way the client
+ * works: a customer is known by their phone and email.
+ *
+ * - A row whose phone or email belongs to an existing client is that client's repurchase.
+ *   A Customer ID already in the CRM (Masterpay sheets carry one) places it the same way.
+ * - Otherwise the row is a first transaction and opens a new account, which needs both a
+ *   phone and an email. A later row in the same file with that phone or email is then a
+ *   repurchase on it.
+ * - A phone or email that matches two different clients cannot be placed safely, so the row
+ *   is refused rather than guessed.
+ *
+ * A First Transaction column, when the sheet has one, must agree. Rows that already carry
+ * an error are left alone -- they will not be imported, so they must not open an account
+ * that a later row would then depend on. Nothing is ever matched by company name: one
+ * company can hold several accounts.
+ */
+export const resolveCustomerAccounts = (rows: MappedSaleRow[], existingAccounts: AccountIdentity[]): MappedSaleRow[] => {
+  const index = <K extends 'emails' | 'phones'>(key: K) => {
+    const map = new Map<string, AccountIdentity[]>();
+    for (const account of existingAccounts) {
+      for (const value of account[key]) map.set(value, [...(map.get(value) ?? []), account]);
+    }
+    return map;
+  };
+  const byEmail = index('emails');
+  const byPhone = index('phones');
+  const byCode = new Map(existingAccounts.filter(a => a.clientCode).map(a => [a.clientCode!.trim().toUpperCase(), a]));
+
+  // Accounts opened earlier in this file, by the identities that will find them again.
+  const openedByEmail = new Map<string, MappedSaleRow>();
+  const openedByPhone = new Map<string, MappedSaleRow>();
 
   for (const row of rows) {
     if (row.errors.length) continue;
-    const code = row.clientId?.trim();
+    const email = normalizeEmail(row.email);
+    const phone = normalizePhone(row.phone);
+    const code = row.clientId?.trim().toUpperCase();
 
-    if (!code) {
+    const matches = [
+      ...(code && byCode.has(code) ? [byCode.get(code)!] : []),
+      ...(email ? byEmail.get(email) ?? [] : []),
+      ...(phone ? byPhone.get(phone) ?? [] : []),
+    ].filter((account, position, all) => all.findIndex(other => other.accountId === account.accountId) === position);
+    const openedEarlier = (email && openedByEmail.get(email)) || (phone && openedByPhone.get(phone)) || undefined;
+
+    if (matches.length > 1) {
+      row.errors.push(`The phone or email matches more than one client (${matches.map(m => m.companyName).join(', ')}); give the Customer ID to choose`);
+      continue;
+    }
+
+    const existing = matches[0];
+    if (existing || openedEarlier) {
       if (row.firstTransaction === true) {
-        row.account = 'new';
-        row.notices.push('Opens a new customer account with the next Client ID');
-      } else if (row.firstTransaction === false) {
-        row.errors.push('A repeat sale needs the Client ID of the customer account it belongs to');
+        row.errors.push(existing
+          ? `This phone or email already belongs to existing client ${existing.companyName}; it is a repurchase, not a first transaction`
+          : `This phone or email opens its client on row ${openedEarlier!.rowNumber}; this row is a repurchase, not a first transaction`);
+        continue;
+      }
+      row.account = 'existing';
+      row.firstTransaction = false;
+      if (existing) {
+        row.accountId = existing.accountId;
+        row.accountLabel = existing.companyName;
       } else {
-        row.errors.push('First Transaction is required: give the Client ID of an existing account, or mark First Transaction = Yes');
+        row.openedOnRow = openedEarlier!.rowNumber;
+        row.accountLabel = openedEarlier!.companyName;
       }
       continue;
     }
 
-    const key = code.toUpperCase();
-    const onFile = existing.has(key);
-    const openedEarlier = openedOnRow.get(key);
-    const known = onFile || openedEarlier !== undefined;
-
-    if (row.firstTransaction === true && known) {
-      row.errors.push(onFile
-        ? `Client ID ${code} already has its first transaction in the CRM`
-        : `Client ID ${code} already opens its account on row ${openedEarlier}`);
-    } else if (row.firstTransaction === false && !known) {
-      row.errors.push(`Client ID ${code} is not an existing customer account; mark First Transaction = Yes to open it`);
-    } else if (known) {
-      row.account = 'existing';
-      row.firstTransaction = false;
-    } else {
-      row.account = 'new';
-      row.firstTransaction = true;
-      openedOnRow.set(key, row.rowNumber);
+    if (row.firstTransaction === false) {
+      row.errors.push('Marked as a repurchase, but no existing client has this phone or email');
+      continue;
     }
+
+    const missing = [!phone && 'phone', !email && 'email'].filter(Boolean);
+    if (missing.length) {
+      row.errors.push(`A new client's first transaction needs the customer's ${missing.join(' and ')}`);
+      continue;
+    }
+
+    row.account = 'new';
+    row.firstTransaction = true;
+    row.accountLabel = row.companyName;
+    openedByEmail.set(email!, row);
+    openedByPhone.set(phone!, row);
   }
   return rows;
 };

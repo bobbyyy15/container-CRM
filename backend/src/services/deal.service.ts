@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../config/supabase';
-import { mapSalesSheet, resolveCustomerAccounts } from './sales-import';
+import { mapSalesSheet, normalizeEmail, normalizePhone, resolveCustomerAccounts, type AccountIdentity } from './sales-import';
 import { findConditionId, findSizeId, type CatalogEntry } from './container-catalog';
 import { saleTotalsColumns } from './sale-financials';
 import { ConvertToSalePayload, CreateQuotationPayload, UpdateQuotationStatusPayload, CreateManualSalePayload, UpdateSalePayload, ImportSalesPayload } from '../schemas/deal.schema';
@@ -119,7 +119,8 @@ export class DealService {
       invoiceNumbers.length
         ? supabaseAdmin.from('sales').select('invoice_number').in('invoice_number', invoiceNumbers)
         : Promise.resolve({ data: [] as { invoice_number: string }[], error: null }),
-      supabaseAdmin.from('customer_accounts').select('client_code'),
+      // Every account with the contact it is known by, so a row's phone or email finds its client.
+      supabaseAdmin.from('customer_accounts').select('id, client_code, companies(name), contacts(email_active, email_2, phone_direct, phone_2)'),
       supabaseAdmin.from('container_categories').select('id, code, name'),
       supabaseAdmin.from('container_sizes').select('id, name'),
       supabaseAdmin.from('container_conditions').select('id, name'),
@@ -149,7 +150,18 @@ export class DealService {
     }
 
     // Last, so a row refused for any other reason never opens an account.
-    resolveCustomerAccounts(rows, (accounts.data ?? []).map(account => String(account.client_code)));
+    const identities: AccountIdentity[] = ((accounts.data ?? []) as any[]).map(account => {
+      const contact = Array.isArray(account.contacts) ? account.contacts[0] : account.contacts;
+      const company = Array.isArray(account.companies) ? account.companies[0] : account.companies;
+      return {
+        accountId: account.id,
+        clientCode: account.client_code ?? undefined,
+        companyName: company?.name ?? 'an existing client',
+        emails: [contact?.email_active, contact?.email_2].map(normalizeEmail).filter((v): v is string => Boolean(v)),
+        phones: [contact?.phone_direct, contact?.phone_2].map(normalizePhone).filter((v): v is string => Boolean(v)),
+      };
+    });
+    resolveCustomerAccounts(rows, identities);
 
     const importable = rows.filter(row => row.errors.length === 0);
     const summary = {
@@ -162,9 +174,17 @@ export class DealService {
 
     if (payload.dryRun) return { summary, rows, committed: false };
 
-    // In sheet order, so a row adding to an account opened earlier in the file finds it.
+    // In sheet order, so a repurchase on an account opened earlier in the file finds it.
+    const openedAccounts = new Map<number, string>();
     for (const row of importable) {
-      const { error } = await supabaseAdmin.rpc('create_manual_sale', {
+      const accountId = row.account === 'existing'
+        ? row.accountId ?? (row.openedOnRow ? openedAccounts.get(row.openedOnRow) : undefined)
+        : undefined;
+      if (row.account === 'existing' && !accountId) {
+        row.errors.push(`Its client was to be opened on row ${row.openedOnRow}, which was not imported`);
+        continue;
+      }
+      const { data, error } = await supabaseAdmin.rpc('create_manual_sale', {
         p_actor_id: actorId,
         p_company_name: row.companyName,
         p_contact_person: row.contactPerson ?? null,
@@ -185,11 +205,17 @@ export class DealService {
         p_container_category_id: row.type ? byCode.get(row.type) ?? null : null,
         p_status: row.status,
         p_first_transaction: row.account === 'new',
-        p_customer_account_id: null,
-        p_client_code: row.clientId ?? null,
+        p_customer_account_id: accountId ?? null,
+        // A Customer ID in the sheet names the new account; a repurchase is placed by id.
+        p_client_code: row.account === 'new' ? row.clientId ?? null : null,
       });
-      if (error) row.errors.push(error.message);
-      else summary.imported += 1;
+      if (error) {
+        row.errors.push(error.message);
+        continue;
+      }
+      summary.imported += 1;
+      const sale = (Array.isArray(data) ? data[0] : data) as { customer_account_id?: string } | null;
+      if (row.account === 'new' && sale?.customer_account_id) openedAccounts.set(row.rowNumber, sale.customer_account_id);
     }
     summary.rejected = rows.length - summary.imported;
 

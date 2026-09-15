@@ -19,8 +19,8 @@ type Row = {
   companyName: string
   invoiceNumber?: string
   releaseNumber?: string
-  clientId?: string
   account?: 'new' | 'existing'
+  accountLabel?: string
   saleDate?: string
   quantity: number
   type?: string
@@ -138,11 +138,11 @@ const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImp
             <div style={{ color: 'var(--t3)', fontSize: 12, marginTop: 4 }}>
               {reading
                 ? 'Reading the file…'
-                : 'Date · Invoice Number · Release Number · Client ID · First Transaction · Company Name · Contact · State · City · Quantity · Type · Condition · Size · Buying Rate · Selling Price · Remarks / Status'}
+                : 'Date · Invoice Number · Release Number · Company Name · Contact · Contact Number · Email Address · State · City · Quantity · Type · Condition · Size · Buying Rate · Selling Price · Remarks / Status'}
             </div>
             {!reading && (
               <div style={{ color: 'var(--t4)', fontSize: 11.5, marginTop: 4 }}>
-                Each row needs a Client ID, or First Transaction = Yes to open a new customer account.
+                A row whose phone or email belongs to an existing client is a repurchase. A new client's first transaction needs both phone and email.
               </div>
             )}
           </div>
@@ -152,7 +152,7 @@ const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImp
               <div style={{ display: 'flex', gap: 18, fontSize: 12.5, margin: '14px 0 8px', flexWrap: 'wrap' }}>
                 <span><b>{preview.summary.total}</b> rows read</span>
                 <span style={{ color: 'var(--green)' }}><b>{preview.summary.importable}</b> ready to import</span>
-                {preview.summary.newAccounts > 0 && <span><b>{preview.summary.newAccounts}</b> open a new customer account</span>}
+                {preview.summary.newAccounts > 0 && <span><b>{preview.summary.newAccounts}</b> new clients (first transaction)</span>}
                 {preview.summary.rejected > 0 && <span style={{ color: 'var(--red)' }}><b>{preview.summary.rejected}</b> rejected</span>}
               </div>
 
@@ -181,7 +181,7 @@ const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImp
               <div style={{ border: '1px solid var(--border-s)', borderRadius: 8, overflow: 'auto', maxHeight: 280 }}>
                 <table className="crm" style={{ width: '100%' }}>
                   <thead><tr>
-                    <th>Row</th><th>Invoice #</th><th>Release #</th><th>Client ID</th><th>Account</th><th>Date</th><th>Company</th>
+                    <th>Row</th><th>Invoice #</th><th>Release #</th><th>Client</th><th>Date</th><th>Company</th>
                     <th>Type</th><th>Size</th><th>Condition</th><th className="r">Qty</th>
                     <th className="r">Buy/Unit</th><th className="r">Sell/Unit</th><th className="r">Total Buy</th>
                     <th className="r">Total Sell</th><th className="r">Profit</th><th className="r">Margin</th><th>Status</th>
@@ -192,8 +192,7 @@ const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImp
                         <td className="mono" style={mono}>{row.rowNumber}</td>
                         <td className="mono" style={mono}>{row.invoiceNumber || '—'}</td>
                         <td className="mono" style={mono}>{row.releaseNumber || <span style={{ color: 'var(--t4)' }}>auto</span>}</td>
-                        <td className="mono" style={mono}>{row.clientId || <span style={{ color: 'var(--t4)' }}>{row.account === 'new' ? 'auto' : '—'}</span>}</td>
-                        <td style={cell}>{row.account === 'new' ? 'New' : row.account === 'existing' ? 'Existing' : '—'}</td>
+                        <td style={cell}>{row.account === 'new' ? 'First transaction' : row.account === 'existing' ? `Repurchase${row.accountLabel ? ` · ${row.accountLabel}` : ''}` : '—'}</td>
                         <td className="mono" style={mono}>{row.saleDate || '—'}</td>
                         <td style={{ fontSize: 12, fontWeight: 600 }}>{row.companyName || '—'}</td>
                         <td style={cell}>{row.type || '—'}</td>

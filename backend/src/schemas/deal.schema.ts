@@ -13,8 +13,9 @@ const isoDate = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
 
 /**
  * Which customer account a sale belongs to. First Transaction is required, not inferred:
- * the same company can hold more than one account, so the company name alone cannot say
- * whether a sale opens a new account or adds to an existing one.
+ * a new client's first sale opens an account (and needs the customer's phone and email),
+ * and a repurchase names the existing account found by the fast lookup. The same company
+ * can hold more than one account, so the company name alone cannot decide it.
  */
 const accountFields = {
   firstTransaction: z.boolean({ error: 'First Transaction is required: say whether this sale opens a new customer account' }),
@@ -106,8 +107,18 @@ export const CreateManualSaleSchema = z.object({
   ...accountFields,
 }).superRefine((data, context) => {
   checkAccountChoice(data, context);
-  if (data.firstTransaction && !data.companyName) {
+  if (!data.firstTransaction) return;
+  // A new client is recorded with both ways to reach them, so a repurchase can find them.
+  if (!data.companyName) {
     context.addIssue({ code: 'custom', path: ['companyName'], message: 'Company is required for a first transaction' });
+  }
+  if (!data.phone) {
+    context.addIssue({ code: 'custom', path: ['phone'], message: 'Phone is required for a first transaction' });
+  }
+  if (!data.email) {
+    context.addIssue({ code: 'custom', path: ['email'], message: 'Email is required for a first transaction' });
+  } else if (!/^[^@\s]+@[^@\s]+$/.test(data.email)) {
+    context.addIssue({ code: 'custom', path: ['email'], message: 'Email must contain an "@"' });
   }
 });
 

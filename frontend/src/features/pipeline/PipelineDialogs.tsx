@@ -1005,9 +1005,13 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
   const types = useCatalog('/catalog/categories')
   // Required: whether this sale opens a new customer account or adds to an existing one.
   // Opened from an Active Client, the account is already known.
-  const [account, setAccount] = useState<AccountChoiceValue>(() => (initialData?.clientCode || initialData?.customerAccountId
-    ? { firstTransaction: false, clientCode: initialData?.clientCode ?? '', customerAccountId: initialData?.customerAccountId }
-    : { firstTransaction: null, clientCode: '' }))
+  const [account, setAccount] = useState<AccountChoiceValue>(() => (initialData?.customerAccountId
+    ? {
+        firstTransaction: false,
+        customerAccountId: initialData.customerAccountId,
+        accountLabel: [initialData.companyName, initialData.contactPerson].filter(Boolean).join(' · '),
+      }
+    : { firstTransaction: null }))
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
 
@@ -1025,6 +1029,11 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
       return
     }
     if (firstTransaction && !companyName.trim()) return
+    // A new client is recorded with both ways to reach them, so a repurchase can find them.
+    if (firstTransaction && (!phone.trim() || !email.trim())) {
+      setError("A first transaction needs the customer's phone and email.")
+      return
+    }
     if (email.trim() && !hasAtSymbol(email)) {
       setError('Email must contain an "@"')
       return
@@ -1034,8 +1043,7 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
     try {
       await api.post('/deals/sales', {
         firstTransaction: account.firstTransaction,
-        customerAccountId: account.firstTransaction === false && !account.clientCode.trim() ? account.customerAccountId : undefined,
-        clientCode: account.clientCode.trim() || undefined,
+        customerAccountId: account.firstTransaction === false ? account.customerAccountId : undefined,
         // An existing account already knows its company and contact.
         ...(firstTransaction ? {
           companyName: companyName.trim(),
@@ -1071,11 +1079,7 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
     <Modal title="Record sale manually" description="For a sale that didn't go through a Quotation." onClose={onClose}>
       <form onSubmit={submit}>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <AccountChoice
-            value={account}
-            onChange={setAccount}
-            knownAccountLabel={initialData?.customerAccountId ? `${initialData.companyName ?? 'This account'}${initialData.clientCode ? ` · ${initialData.clientCode}` : ''}` : undefined}
-          />
+          <AccountChoice value={account} onChange={setAccount} />
           {firstTransaction && (<>
           <div style={{ gridColumn: '1 / -1' }}>
             <FieldLabel label="Company" required />
@@ -1093,7 +1097,7 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
             </select>
           </div>
           <div>
-            <FieldLabel label="Phone" optional />
+            <FieldLabel label="Phone" required />
             <input
               className="inp"
               value={phone}
@@ -1103,7 +1107,7 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
             />
           </div>
           <div>
-            <FieldLabel label="Email" optional />
+            <FieldLabel label="Email" required />
             <input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="name@company.com" />
           </div>
           <div>
@@ -1210,7 +1214,7 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={working || account.firstTransaction === null || (firstTransaction && !companyName.trim())}>{working ? 'Recording…' : 'Record Sale'}</button>
+          <button className="btn btn-primary" disabled={working || account.firstTransaction === null || (firstTransaction && (!companyName.trim() || !phone.trim() || !email.trim()))}>{working ? 'Recording…' : 'Record Sale'}</button>
         </div>
       </form>
     </Modal>
@@ -1306,13 +1310,12 @@ export const SaleDialog = ({ quotations, initialId, onClose, onSaved }: {
   const [sellRate, setSellRate] = useState(initial?.qty ? (initial.sellTotal || 0) / initial.qty : initial?.sellTotal || 0)
   // An inquiry already tied to an account answers First Transaction; otherwise it is asked.
   const accountFor = (quote?: QuotationOption): AccountChoiceValue => quote?.inquiryAccountId
-    ? { firstTransaction: false, clientCode: '', customerAccountId: quote.inquiryAccountId }
-    : { firstTransaction: null, clientCode: '' }
+    ? { firstTransaction: false, customerAccountId: quote.inquiryAccountId, accountLabel: `${quote.co} (the inquiry's client)` }
+    : { firstTransaction: null }
   const [account, setAccount] = useState<AccountChoiceValue>(() => accountFor(initial))
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
 
-  const quote = accepted.find(item => item.id === quotationId)
   const totalBuy = buyRate * units
   const totalSell = sellRate * units
   const profit = totalSell - totalBuy
@@ -1343,8 +1346,7 @@ export const SaleDialog = ({ quotations, initialId, onClose, onSaved }: {
         buying_rate: buyRate,
         selling_price: sellRate,
         first_transaction: account.firstTransaction ?? undefined,
-        customer_account_id: account.firstTransaction === false && !account.clientCode.trim() ? account.customerAccountId : undefined,
-        client_code: account.clientCode.trim() || undefined,
+        customer_account_id: account.firstTransaction === false ? account.customerAccountId : undefined,
       })
       onSaved()
       onClose()
@@ -1387,7 +1389,7 @@ export const SaleDialog = ({ quotations, initialId, onClose, onSaved }: {
             <AccountChoice
               value={account}
               onChange={setAccount}
-              knownAccountLabel={quote?.inquiryAccountId ? `The inquiry's customer account${quote.inquiryClientCode ? ` · ${quote.inquiryClientCode}` : ''}` : undefined}
+              firstTransactionHint="The quotation's contact must already have a phone and email on file."
             />
           </> : <div style={{ gridColumn: '1 / -1', padding: 12, background: 'var(--brand-bg)', borderRadius: 8, fontSize: 12 }}>No accepted quotations are available. Open Quotations and accept one first.</div>}
           <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>

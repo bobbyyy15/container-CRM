@@ -30,7 +30,7 @@ const CustomerAccounts = ({ role, onNav }: { role?: string; onNav?: (s: Screen, 
   // PIC's Won sales for that account -- never another account under the same company.
   const handleDelete = (c: any) => confirmDelete({
     what: 'Customer Account',
-    name: c.clientCode ? `${c.co} (${c.clientCode})` : c.co,
+    name: c.co,
     endpoint: `/customers/${c.id}${picFilter ? `?pic_id=${picFilter}` : ''}`,
     cacheKey: 'customers',
     detail: `Its ${c.sales} Won sale${c.sales === 1 ? '' : 's'} ($${c.revenue.toLocaleString()} revenue) will be deleted with it.`,
@@ -48,7 +48,7 @@ const CustomerAccounts = ({ role, onNav }: { role?: string; onNav?: (s: Screen, 
       <div className="page-header">
         <div>
           <div className="page-title">Customer Accounts (Master)</div>
-          <div className="page-desc">Every customer account, company-wide. One company can hold several accounts, each with its own Client ID.</div>
+          <div className="page-desc">Every customer account, company-wide. One company can hold several accounts, each known by its own contact.</div>
         </div>
         {/* Customers are derived from purchase history (see page-desc above), so
             there's no standalone "customer" record to create -- this records a sale,
@@ -71,7 +71,7 @@ const CustomerAccounts = ({ role, onNav }: { role?: string; onNav?: (s: Screen, 
       <div className="toolbar">
         <div className="search-field">
           <Ic n={I.search} size={13} />
-          <input placeholder="Search by company or Client ID…" value={search} onChange={e => setSearch(e.target.value)} />
+          <input placeholder="Search master customer accounts…" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         {isOpsOrAdmin && (
           <select className="sel" value={picFilter} onChange={e => setPicFilter(e.target.value)}>
@@ -88,18 +88,18 @@ const CustomerAccounts = ({ role, onNav }: { role?: string; onNav?: (s: Screen, 
       <div className="table-wrap">
         <table className="crm">
           <thead><tr>
-            <th>Client ID</th><th>Company</th><th>Contact</th><th>State</th><th>PIC</th><th>First Transaction</th>
+            <th>Company</th><th>Contact</th><th>State</th><th>PIC</th><th>First Transaction</th>
             <th className="r">Sales</th><th className="r">Units</th><th className="r">Revenue</th>
             <th className="r">Gross Profit</th><th>Last Purchase</th><th>Status</th>
             <th className="col-actions">Actions</th>
           </tr></thead>
           {customers.loading && filtered.length === 0 ? (
-            <TableSkeleton rows={8} cols={13} asTable={true} />
+            <TableSkeleton rows={8} cols={12} asTable={true} />
           ) : (
             <tbody>
               {filtered.length === 0 ? (
                 <EmptyTableState
-                  colSpan={13}
+                  colSpan={12}
                   icon={I.customer}
                   title="No customer accounts found"
                   subtitle={search || tab !== 'All'
@@ -110,7 +110,6 @@ const CustomerAccounts = ({ role, onNav }: { role?: string; onNav?: (s: Screen, 
                 />
               ) : filtered.map(c => (
                 <tr key={c.id}>
-                  <td><span className="ref-id">{c.clientCode || '—'}</span></td>
                   <td>
                     <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{c.co}</div>
                     <div style={{ fontSize: 11, color: 'var(--t4)', fontFamily: 'var(--mono)' }}>{c.phone}</div>
@@ -143,11 +142,10 @@ const CustomerAccounts = ({ role, onNav }: { role?: string; onNav?: (s: Screen, 
       </div>
       {viewRow && (
         <RecordDetailModal
-          title={viewRow.clientCode ? `${viewRow.co} · ${viewRow.clientCode}` : viewRow.co}
+          title={viewRow.co}
           onClose={() => setViewRow(null)}
           width={620}
           fields={[
-            { label: 'Client ID', value: viewRow.clientCode || undefined },
             { label: 'First transaction', value: viewRow.firstTransaction },
             { label: 'Contact', value: viewRow.contact },
             { label: 'Phone', value: viewRow.phone },

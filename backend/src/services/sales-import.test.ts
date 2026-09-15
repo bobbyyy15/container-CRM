@@ -9,8 +9,11 @@ import {
   readType,
   readYesNo,
   mapHeaders,
+  normalizeEmail,
+  normalizePhone,
   resolveCustomerAccounts,
   WAVE_PATTERN,
+  type AccountIdentity,
 } from './sales-import';
 
 /** A row in the client's own column names, so the test breaks if the mapping drifts. */
@@ -234,56 +237,95 @@ test('First Transaction is read as yes or no, and anything else is refused', () 
 const accountRows = (...overrides: Record<string, unknown>[]) =>
   mapSalesSheet(overrides.map((override, index) => sheetRow({ 'Invoice Number': `INV-${index}`, ...override })));
 
-test('one company under two Client IDs stays two customer accounts', () => {
-  const rows = resolveCustomerAccounts(accountRows(
-    { 'Company Name': 'Acme Logistics', 'Client ID': 'CL-1' },
-    { 'Company Name': 'Acme Logistics', 'Client ID': 'CL-2' },
-  ), []);
-  assert.deepEqual(rows.map(r => [r.clientId, r.account]), [['CL-1', 'new'], ['CL-2', 'new']]);
-  assert.ok(rows.every(r => r.errors.length === 0));
+/** An existing client, as the import is told about it. */
+const client = (overrides: Partial<AccountIdentity> = {}): AccountIdentity => ({
+  accountId: 'account-bowman',
+  clientCode: 'CID-00012',
+  companyName: 'K & T Bowman Trucking Inc',
+  emails: ['kevin@bowman.test'],
+  phones: ['7198920252'],
+  ...overrides,
 });
 
-test('a Client ID already in the CRM adds the sale to that account', () => {
-  const [row] = resolveCustomerAccounts(accountRows({ 'Client ID': 'cl-119' }), ['CL-119']);
+test('phones and emails are compared the way the database stores them', () => {
+  assert.equal(normalizePhone('+1 (719) 892-0252'), '7198920252');
+  assert.equal(normalizePhone('719.892.0252'), '7198920252');
+  assert.equal(normalizePhone('555-12'), undefined, 'too short to identify anyone');
+  assert.equal(normalizeEmail(' Kevin@Bowman.TEST '), 'kevin@bowman.test');
+  assert.equal(normalizeEmail('not-an-email'), undefined);
+});
+
+test('a row with an existing client phone is that client repurchase', () => {
+  const [row] = resolveCustomerAccounts(accountRows({ 'Contact Number': '+1 719 892 0252', 'Email Address': '', 'Client ID': '' }), [client()]);
+  assert.equal(row.errors.length, 0, row.errors.join('; '));
   assert.equal(row.account, 'existing');
   assert.equal(row.firstTransaction, false);
+  assert.equal(row.accountId, 'account-bowman');
 });
 
-test('a new Client ID opens its account once, and later rows in the file add to it', () => {
-  const rows = resolveCustomerAccounts(accountRows({ 'Client ID': 'CL-9' }, { 'Client ID': 'CL-9' }), []);
-  assert.deepEqual(rows.map(r => r.account), ['new', 'existing']);
+test('a row with an existing client email is that client repurchase, whatever the case', () => {
+  const [row] = resolveCustomerAccounts(accountRows({ 'Contact Number': '', 'Email Address': 'KEVIN@bowman.test', 'Client ID': '' }), [client()]);
+  assert.equal(row.account, 'existing');
+  assert.equal(row.accountLabel, 'K & T Bowman Trucking Inc');
 });
 
-test('First Transaction contradicting the Client ID is refused, never guessed', () => {
-  const [alreadyOpen] = resolveCustomerAccounts(accountRows({ 'Client ID': 'CL-119', 'First Transaction': 'Yes' }), ['CL-119']);
-  assert.match(alreadyOpen.errors[0], /Client ID CL-119 already has its first transaction/);
-
-  const [unknownRepeat] = resolveCustomerAccounts(accountRows({ 'Client ID': 'CL-404', 'First Transaction': 'No' }), []);
-  assert.match(unknownRepeat.errors[0], /not an existing customer account/);
-
-  const twice = resolveCustomerAccounts(accountRows(
-    { 'Client ID': 'CL-5', 'First Transaction': 'Yes' },
-    { 'Client ID': 'CL-5', 'First Transaction': 'Yes' },
-  ), []);
-  assert.match(twice[1].errors[0], /already opens its account on row 2/);
+test('a Customer ID from a Masterpay sheet places the row too', () => {
+  const [row] = resolveCustomerAccounts(accountRows({ 'Client ID': 'cid-00012', 'Contact Number': '', 'Email Address': '' }), [client()]);
+  assert.equal(row.account, 'existing');
+  assert.equal(row.accountId, 'account-bowman');
 });
 
-test('without a Client ID, First Transaction is required and only Yes can be placed', () => {
-  const [opens] = resolveCustomerAccounts(accountRows({ 'Client ID': '', 'First Transaction': 'Yes' }), []);
-  assert.equal(opens.account, 'new');
-  assert.equal(opens.errors.length, 0);
+test('a new client first transaction needs both phone and email', () => {
+  const [both] = resolveCustomerAccounts(accountRows({ 'Client ID': '' }), []);
+  assert.equal(both.account, 'new');
+  assert.equal(both.firstTransaction, true);
 
-  const [repeat] = resolveCustomerAccounts(accountRows({ 'Client ID': '', 'First Transaction': 'No' }), []);
-  assert.match(repeat.errors[0], /repeat sale needs the Client ID/);
+  const [noEmail] = resolveCustomerAccounts(accountRows({ 'Client ID': '', 'Email Address': '' }), []);
+  assert.match(noEmail.errors[0], /first transaction needs the customer's email/);
 
-  const [silent] = resolveCustomerAccounts(accountRows({ 'Client ID': '' }), []);
-  assert.match(silent.errors[0], /First Transaction is required/);
+  const [neither] = resolveCustomerAccounts(accountRows({ 'Client ID': '', 'Email Address': '', 'Contact Number': '' }), []);
+  assert.match(neither.errors[0], /needs the customer's phone and email/);
 });
 
-test('a row that is already refused does not open an account for later rows', () => {
+test('one company with two different contacts becomes two clients, not one merged by name', () => {
   const rows = resolveCustomerAccounts(accountRows(
-    { 'Client ID': 'CL-3', 'Quantity': '0' },
-    { 'Client ID': 'CL-3' },
+    { 'Company Name': 'Acme Logistics', 'Contact Number': '(212) 555-0101', 'Email Address': 'ann@acme.test', 'Client ID': '' },
+    { 'Company Name': 'Acme Logistics', 'Contact Number': '(212) 555-0202', 'Email Address': 'ben@acme.test', 'Client ID': '' },
+  ), []);
+  assert.deepEqual(rows.map(r => r.account), ['new', 'new']);
+});
+
+test('a later row with the same phone or email is a repurchase on the client the file opens', () => {
+  const rows = resolveCustomerAccounts(accountRows(
+    { 'Client ID': '' },
+    { 'Client ID': '', 'Contact Number': '' },
+  ), []);
+  assert.deepEqual(rows.map(r => r.account), ['new', 'existing']);
+  assert.equal(rows[1].openedOnRow, 2);
+});
+
+test('First Transaction contradicting the phone or email is refused, never guessed', () => {
+  const [known] = resolveCustomerAccounts(accountRows({ 'Client ID': '', 'First Transaction': 'Yes' }), [client()]);
+  assert.match(known.errors[0], /already belongs to existing client K & T Bowman Trucking Inc/);
+
+  const [unknown] = resolveCustomerAccounts(accountRows({ 'Client ID': '', 'First Transaction': 'No' }), []);
+  assert.match(unknown.errors[0], /no existing client has this phone or email/);
+});
+
+test('a phone and email that point at two different clients is refused', () => {
+  const [row] = resolveCustomerAccounts(accountRows({ 'Client ID': '' }), [
+    client({ accountId: 'a', companyName: 'By Phone Co', emails: [] }),
+    client({ accountId: 'b', companyName: 'By Email Co', phones: [] }),
+  ]);
+  assert.match(row.errors[0], /matches more than one client/);
+  assert.ok(row.errors[0].includes('By Phone Co') && row.errors[0].includes('By Email Co'), row.errors[0]);
+  assert.equal(row.account, undefined, 'the row is not placed on either client');
+});
+
+test('a row that is already refused does not open a client for later rows', () => {
+  const rows = resolveCustomerAccounts(accountRows(
+    { 'Client ID': '', 'Quantity': '0' },
+    { 'Client ID': '' },
   ), []);
   assert.equal(rows[0].account, undefined);
   assert.equal(rows[1].account, 'new', 'the first importable row opens it');

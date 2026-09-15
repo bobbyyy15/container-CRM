@@ -52,7 +52,7 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
   // touches a colleague's sales for the same account.
   const handleDelete = (c: any) => confirmDelete({
     what: 'Client',
-    name: c.clientCode ? `${c.co} (${c.clientCode})` : c.co,
+    name: c.co,
     endpoint: `/customers/${c.id}`,
     cacheKey: 'customers',
     detail: `Its ${c.sales} Won sale${c.sales === 1 ? '' : 's'} ($${c.revenue.toLocaleString()} revenue) will be deleted with it. Other accounts under the same company are not touched.`,
@@ -63,7 +63,6 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
   const handleFastSale = (c: any) => {
     setSaleInitialData({
       customerAccountId: c.id,
-      clientCode: c.clientCode,
       companyName: c.co,
       contactPerson: c.contact !== '-' ? c.contact : '',
       phone: c.phone !== '-' ? c.phone : '',
@@ -148,7 +147,7 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
       <div className="toolbar">
         <div className="search-field">
           <Ic n={I.search} size={13} />
-          <input placeholder="Search active clients by company or Client ID…" value={search} onChange={e => setSearch(e.target.value)} />
+          <input placeholder="Search active clients by company…" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <div className="toolbar-right">
           <RefreshButton cacheKey="customers" label="Active clients" onRefresh={() => setRevision(r => r + 1)} />
@@ -161,7 +160,6 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
         <table className="crm">
           <thead>
             <tr>
-              <th>Client ID</th>
               <th>Company</th>
               <th>Contact</th>
               <th>State</th>
@@ -178,7 +176,7 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
           <tbody>
             {filtered.length === 0 ? (
               <EmptyTableState
-                colSpan={12}
+                colSpan={11}
                 icon={I.customer}
                 title="No active clients found"
                 subtitle={search || tab !== 'All'
@@ -190,7 +188,6 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
             ) : (
               filtered.map(c => (
                 <tr key={c.id}>
-                  <td><span className="ref-id">{c.clientCode || '—'}</span></td>
                   <td>
                     <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{c.co}</div>
                     <div style={{ fontSize: 11, color: 'var(--t4)', fontFamily: 'var(--mono)' }}>
@@ -229,11 +226,10 @@ const ActiveClientsDashboard = ({ role, onNav }: { role?: string; onNav?: (s: Sc
 
       {viewRow && (
         <RecordDetailModal
-          title={viewRow.clientCode ? `${viewRow.co} · ${viewRow.clientCode}` : viewRow.co}
+          title={viewRow.co}
           onClose={() => setViewRow(null)}
           width={620}
           fields={[
-            { label: 'Client ID', value: viewRow.clientCode || undefined },
             { label: 'First transaction', value: viewRow.firstTransaction },
             { label: 'Contact', value: viewRow.contact },
             { label: 'Phone', value: viewRow.phone },

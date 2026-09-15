@@ -14,7 +14,8 @@ import { DealService } from '../services/deal.service';
 
 /** A first-transaction manual sale: the smallest valid payload. */
 const newAccountSale = (overrides: Record<string, unknown> = {}) => ({
-  companyName: 'Acme', totalUnits: 1, buyingRate: 1, sellingPrice: 2, firstTransaction: true, ...overrides,
+  companyName: 'Acme', phone: '(719) 892-0252', email: 'buyer@acme.test',
+  totalUnits: 1, buyingRate: 1, sellingPrice: 2, firstTransaction: true, ...overrides,
 });
 const ACCOUNT_ID = '5f0d7c8e-1a2b-4c3d-8e9f-001122334455';
 
@@ -60,6 +61,27 @@ test('a first transaction needs a company, and may carry its own Client ID', () 
   assert.equal(noCompany.success, false);
   assert.match(noCompany.error!.issues[0].message, /Company is required for a first transaction/);
   assert.equal(CreateManualSaleSchema.parse(newAccountSale({ clientCode: 'CL-119' })).clientCode, 'CL-119');
+});
+
+test('a first transaction needs the customer phone and email', () => {
+  const noPhone = CreateManualSaleSchema.safeParse(newAccountSale({ phone: undefined }));
+  assert.equal(noPhone.success, false);
+  assert.match(noPhone.error!.issues[0].message, /Phone is required for a first transaction/);
+
+  const noEmail = CreateManualSaleSchema.safeParse(newAccountSale({ email: undefined }));
+  assert.equal(noEmail.success, false);
+  assert.match(noEmail.error!.issues[0].message, /Email is required for a first transaction/);
+
+  const badEmail = CreateManualSaleSchema.safeParse(newAccountSale({ email: 'buyer.acme.test' }));
+  assert.equal(badEmail.success, false);
+  assert.match(badEmail.error!.issues[0].message, /must contain an "@"/);
+});
+
+test('a repurchase does not need phone or email again', () => {
+  const parsed = CreateManualSaleSchema.safeParse({
+    totalUnits: 1, buyingRate: 1, sellingPrice: 2, firstTransaction: false, customerAccountId: ACCOUNT_ID,
+  });
+  assert.ok(parsed.success, parsed.success ? '' : parsed.error.issues[0].message);
 });
 
 test('a first transaction cannot also name an existing account', () => {

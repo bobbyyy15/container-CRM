@@ -1,4 +1,4 @@
--- Migration 072: customer accounts, Masterpay, and sales placed on an account.
+-- Migrations 072 and 073: customer accounts, First Transaction, the repurchase lookup, Masterpay.
 -- Run against a local database only. Every test record is rolled back.
 BEGIN;
 
@@ -11,6 +11,7 @@ DECLARE
     v_account_rows INTEGER;
     v_units BIGINT;
     v_raised BOOLEAN;
+    v_found UUID;
     v_size UUID;
     v_condition UUID;
     v_company UUID;
@@ -19,13 +20,15 @@ DECLARE
     v_quote UUID;
     v_quote_sale public.sales%ROWTYPE;
 BEGIN
-    -- Same company, two first transactions with their own Client IDs: two accounts.
+    -- Same company, two first transactions by two different contacts: two accounts.
     SELECT * INTO v_sale_a FROM public.create_manual_sale(
-        NULL, 'Smoke Twin Accounts Co', p_total_units => 2, p_buying_cost => 2000, p_revenue => 3000,
-        p_state_province => 'TX', p_country => 'US', p_first_transaction => true, p_client_code => 'SMOKE-A');
+        NULL, 'Smoke Twin Accounts Co', 'Ann Buyer', '(719) 555-0101', 'ann@smoke-twin.test',
+        p_total_units => 2, p_buying_cost => 2000, p_revenue => 3000,
+        p_state_province => 'TX', p_country => 'US', p_first_transaction => true);
     SELECT * INTO v_sale_b FROM public.create_manual_sale(
-        NULL, 'Smoke Twin Accounts Co', p_total_units => 1, p_buying_cost => 500, p_revenue => 900,
-        p_state_province => 'TX', p_country => 'US', p_first_transaction => true, p_client_code => 'SMOKE-B');
+        NULL, 'Smoke Twin Accounts Co', 'Ben Buyer', '(719) 555-0202', 'ben@smoke-twin.test',
+        p_total_units => 1, p_buying_cost => 500, p_revenue => 900,
+        p_state_province => 'TX', p_country => 'US', p_first_transaction => true);
 
     ASSERT v_sale_a.company_id = v_sale_b.company_id, 'both sales belong to the one company';
     ASSERT v_sale_a.customer_account_id <> v_sale_b.customer_account_id, 'but to two customer accounts';
@@ -33,13 +36,25 @@ BEGIN
     SELECT COUNT(*) INTO v_account_rows FROM public.customer_accounts_view WHERE company_id = v_sale_a.company_id;
     ASSERT v_account_rows = 2, 'Active Clients shows the two accounts separately, not merged by company';
 
-    -- A repeat sale named by Client ID lands on that account only.
-    SELECT * INTO v_repeat FROM public.create_manual_sale(
-        NULL, NULL, p_total_units => 3, p_buying_cost => 3000, p_revenue => 4500,
-        p_first_transaction => false, p_client_code => 'smoke-a');
-    ASSERT v_repeat.customer_account_id = v_sale_a.customer_account_id, 'repeat sale joins SMOKE-A';
-    SELECT total_units INTO v_units FROM public.customer_accounts_view WHERE customer_account_id = v_sale_a.customer_account_id;
-    ASSERT v_units = 5, 'SMOKE-A totals its own two sales';
+    -- A first transaction needs both phone and email.
+    v_raised := false;
+    BEGIN
+        PERFORM public.create_manual_sale(NULL, 'No Email Co', 'Cy', '(719) 555-0303', NULL,
+            p_total_units => 1, p_buying_cost => 1, p_revenue => 2, p_first_transaction => true);
+    EXCEPTION WHEN SQLSTATE 'P0001' THEN
+        v_raised := SQLERRM LIKE '%phone and email%';
+    END;
+    ASSERT v_raised, 'a first transaction without an email is refused';
+
+    -- A known phone or email is a repurchase, not a first transaction.
+    v_raised := false;
+    BEGIN
+        PERFORM public.create_manual_sale(NULL, 'Anything Co', NULL, '+1 719 555 0101', 'someone-else@smoke.test',
+            p_total_units => 1, p_buying_cost => 1, p_revenue => 2, p_first_transaction => true);
+    EXCEPTION WHEN SQLSTATE 'P0001' THEN
+        v_raised := SQLERRM LIKE '%already belongs to existing client%';
+    END;
+    ASSERT v_raised, 'a first transaction with an existing client''s phone is refused';
 
     -- First Transaction is required.
     v_raised := false;
@@ -50,15 +65,19 @@ BEGIN
     END;
     ASSERT v_raised, 'a sale without a First Transaction answer is refused';
 
-    -- A first transaction reusing a Client ID is refused.
-    v_raised := false;
-    BEGIN
-        PERFORM public.create_manual_sale(NULL, 'Other Co', p_total_units => 1, p_buying_cost => 1, p_revenue => 2,
-            p_first_transaction => true, p_client_code => 'SMOKE-B');
-    EXCEPTION WHEN SQLSTATE 'P0001' THEN
-        v_raised := true;
-    END;
-    ASSERT v_raised, 'a Client ID cannot open a second account';
+    -- The fast lookup finds each account by its own contact.
+    SELECT customer_account_id INTO v_found FROM public.lookup_customer_accounts('719-555-0202');
+    ASSERT v_found = v_sale_b.customer_account_id, 'lookup by phone finds Ben''s account';
+    SELECT customer_account_id INTO v_found FROM public.lookup_customer_accounts('ANN@smoke-twin.test');
+    ASSERT v_found = v_sale_a.customer_account_id, 'lookup by email finds Ann''s account';
+
+    -- A repurchase on the account the lookup found.
+    SELECT * INTO v_repeat FROM public.create_manual_sale(
+        NULL, NULL, p_total_units => 3, p_buying_cost => 3000, p_revenue => 4500,
+        p_first_transaction => false, p_customer_account_id => v_sale_a.customer_account_id);
+    ASSERT v_repeat.customer_account_id = v_sale_a.customer_account_id, 'repurchase joins Ann''s account';
+    SELECT total_units INTO v_units FROM public.customer_accounts_view WHERE customer_account_id = v_sale_a.customer_account_id;
+    ASSERT v_units = 5, 'the account totals its own two sales';
 
     -- The database keeps profit equal to revenue less cost.
     UPDATE public.sales SET gross_profit = 999999 WHERE id = v_sale_a.id RETURNING * INTO v_sale_a;
@@ -119,7 +138,7 @@ BEGIN
     ASSERT v_quote_sale.container_condition_id = v_condition, 'condition copied from the inquiry';
     ASSERT v_quote_sale.customer_account_id = v_sale_b.customer_account_id, 'the inquiry''s account answers First Transaction';
 
-    RAISE NOTICE 'customer accounts + masterpay smoke test passed';
+    RAISE NOTICE 'customer accounts + first transaction + masterpay smoke test passed';
 END $$;
 
 ROLLBACK;

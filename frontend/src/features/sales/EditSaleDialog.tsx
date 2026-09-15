@@ -86,7 +86,7 @@ const EditSaleDialog = ({ sale, pics, onClose, onSaved }: {
           <div>
             <div className="modal-title">Edit sale {sale.ref}</div>
             <div className="modal-desc">
-              {sale.clientCode ? `Account ${sale.clientCode} · ` : ''}Totals are recalculated from quantity, buying rate and selling price.
+              Totals are recalculated from quantity, buying rate and selling price.
             </div>
           </div>
           <button type="button" className="btn btn-ghost" onClick={onClose} aria-label="Close">×</button>
