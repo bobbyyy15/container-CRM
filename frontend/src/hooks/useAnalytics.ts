@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
 import { useRealtimeRevision } from '../lib/realtime'
 import { fetchCached, getFromCache } from '../lib/dataCache'
@@ -10,16 +10,23 @@ import { fetchCached, getFromCache } from '../lib/dataCache'
  */
 export const useAnalytics = (range = 'month') => {
   const cacheKey = `analytics:dashboard:${range}`
-  const liveRevision = useRealtimeRevision([])
+  const liveRevision = useRealtimeRevision(['deals', 'leads', 'contracts', 'inventory'])
   const [data, setData] = useState<any>(() => getFromCache(cacheKey) ?? null)
+  const isFirstMount = useRef(true)
+  const prevLiveRevision = useRef(liveRevision)
 
   useEffect(() => {
     let cancelled = false
-    fetchCached(cacheKey, () => api.get('/analytics/dashboard', { params: { range } }).then(res => res.data.data), 45_000)
+    // A live change means the figures moved, so read past the cache instead of re-serving it.
+    const shouldBypass = !isFirstMount.current && prevLiveRevision.current !== liveRevision
+    isFirstMount.current = false
+    prevLiveRevision.current = liveRevision
+
+    fetchCached(cacheKey, () => api.get('/analytics/dashboard', { params: { range } }).then(res => res.data.data), 45_000, shouldBypass)
       .then(fresh => {
         if (!cancelled) setData(fresh)
       })
-      .catch(console.error)
+      .catch(err => console.error('Failed to fetch analytics', err))
     return () => { cancelled = true }
   }, [liveRevision, range])
 

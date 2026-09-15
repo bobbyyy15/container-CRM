@@ -8,6 +8,7 @@ import ExportMenu from '../../components/ui/ExportMenu'
 import type { Screen, BadgeStatus } from '../../app/types'
 import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
+import { TableSkeleton } from '../../components/ui/SkeletonLoader'
 import RefreshButton from '../../components/ui/RefreshButton'
 import { confirmDelete } from '../../lib/deleteRecord'
 import { NewContractDialog } from '../pipeline/PipelineDialogs'
@@ -84,19 +85,22 @@ const Contracts = ({ role }: { role?: string }) => {
             <th className="r">Value</th><th>Pickup Date</th><th>Pickup Status</th>
             <th>Status</th><th>PIC</th><th>Source Sale</th><th className="col-actions">Actions</th>
           </tr></thead>
-          <tbody>
-            {contracts.length === 0 && (
-              <EmptyTableState
-                colSpan={11}
-                icon={I.contract}
-                title="No contracts found"
-                subtitle={search || status !== 'All Statuses' || pickStatus !== 'All Pickup Statuses'
-                  ? 'No contracts match your filters. Try clearing the search or dropdowns.'
-                  : 'Contracts are raised against Won sales. Create one to get started.'}
-                actionLabel="New Contract"
-                onAction={() => setShowNew(true)}
-              />
-            )}
+          {contracts.loading && contracts.length === 0 ? (
+            <TableSkeleton rows={8} cols={11} asTable={true} />
+          ) : (
+            <tbody>
+              {contracts.length === 0 && (
+                <EmptyTableState
+                  colSpan={11}
+                  icon={I.contract}
+                  title="No contracts found"
+                  subtitle={search || status !== 'All Statuses' || pickStatus !== 'All Pickup Statuses'
+                    ? 'No contracts match your filters. Try clearing the search or dropdowns.'
+                    : 'Contracts are raised against Won sales. Create one to get started.'}
+                  actionLabel="New Contract"
+                  onAction={() => setShowNew(true)}
+                />
+              )}
             {contracts.map(c => (
               <tr key={c.id} style={{ background: c.pickStatus === 'Overdue' ? 'var(--red-bg)' : undefined }}>
                 <td><span className="ref-id" style={{ color: 'var(--teal)' }}>{c.ref}</span></td>
@@ -126,6 +130,7 @@ const Contracts = ({ role }: { role?: string }) => {
               </tr>
             ))}
           </tbody>
+          )}
         </table>
       </div>
       {viewRow && (

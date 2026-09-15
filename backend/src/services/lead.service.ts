@@ -1,5 +1,7 @@
 import { supabaseAdmin } from '../config/supabase';
 import { CreateInquiryPayload, CreateManualWarmLeadPayload, CreateManualInquiryPayload, CreateManualProspectPayload } from '../schemas/lead.schema';
+import { formatPhoneNumber } from '../utils/formatters';
+import { formatCountryAbbr, formatStateAbbr, formatCityTitleCase } from '../utils/places';
 
 export class LeadService {
   static async convertProspectToWarmLead(prospectId: string, actorId: string, reason?: string, channel?: string) {
@@ -66,16 +68,16 @@ export class LeadService {
         p_actor_id: actorId,
         p_company_name: payload.companyName,
         p_contact_person: payload.contactPerson ?? null,
-        p_phone: payload.phone ?? null,
+        p_phone: payload.phone ? formatPhoneNumber(payload.phone) : null,
         p_email: payload.email ?? null,
         p_pic_id: payload.picId ?? null,
         p_category: payload.category,
         p_sms_deliverability: payload.smsDeliverability ?? null,
         p_industry: payload.industry ?? null,
         p_service_location: payload.serviceLocation ?? null,
-        p_country: payload.country ?? null,
-        p_state_province: payload.stateProvince ?? null,
-        p_city: payload.city ?? null,
+        p_country: payload.country ? formatCountryAbbr(payload.country) : null,
+        p_state_province: payload.stateProvince ? formatStateAbbr(payload.stateProvince) : null,
+        p_city: payload.city ? formatCityTitleCase(payload.city) : null,
         p_date_added: payload.dateAdded ?? null,
       })
       .single();
@@ -93,10 +95,10 @@ export class LeadService {
         p_actor_id: actorId,
         p_company_name: payload.companyName,
         p_contact_person: payload.contactPerson ?? null,
-        p_phone: payload.phone ?? null,
+        p_phone: payload.phone ? formatPhoneNumber(payload.phone) : null,
         p_email: payload.email ?? null,
-        p_state_province: payload.stateProvince ?? null,
-        p_country: payload.country ?? null,
+        p_state_province: payload.stateProvince ? formatStateAbbr(payload.stateProvince) : null,
+        p_country: payload.country ? formatCountryAbbr(payload.country) : null,
         p_pic_id: payload.picId ?? null,
         p_notes: payload.notes ?? null,
         p_previous_inquiry_indicator: payload.previousInquiryIndicator ?? false,
@@ -125,10 +127,10 @@ export class LeadService {
         p_warm_lead_id: payload.warmLeadId ?? null,
         p_company_name: payload.companyName ?? null,
         p_contact_person: payload.contactPerson ?? null,
-        p_phone: payload.phone ?? null,
+        p_phone: payload.phone ? formatPhoneNumber(payload.phone) : null,
         p_email: payload.email ?? null,
-        p_state_province: payload.stateProvince ?? null,
-        p_country: payload.country ?? null,
+        p_state_province: payload.stateProvince ? formatStateAbbr(payload.stateProvince) : null,
+        p_country: payload.country ? formatCountryAbbr(payload.country) : null,
         p_pic_id: payload.picId ?? null,
         p_container_size_id: payload.containerSizeId,
         p_container_condition_id: payload.containerConditionId,
@@ -657,17 +659,17 @@ export class LeadService {
       }
     } else if (field === 'country') {
       if (row.company_id) {
-        const { error } = await supabaseAdmin.from('companies').update({ address_country: value }).eq('id', row.company_id);
+        const { error } = await supabaseAdmin.from('companies').update({ address_country: formatCountryAbbr(value) }).eq('id', row.company_id);
         if (error) throw error;
       }
     } else if (field === 'state') {
       if (row.company_id) {
-        const { error } = await supabaseAdmin.from('companies').update({ address_state: value }).eq('id', row.company_id);
+        const { error } = await supabaseAdmin.from('companies').update({ address_state: formatStateAbbr(value) }).eq('id', row.company_id);
         if (error) throw error;
       }
     } else if (field === 'city') {
       if (row.company_id) {
-        const { error } = await supabaseAdmin.from('companies').update({ address_city: value }).eq('id', row.company_id);
+        const { error } = await supabaseAdmin.from('companies').update({ address_city: formatCityTitleCase(value) }).eq('id', row.company_id);
         if (error) throw error;
       }
     } else if (field === 'address') {
@@ -729,9 +731,9 @@ export class LeadService {
             contactUpdates.last_name = null;
           }
         } else if (field === 'phone') {
-          contactUpdates.phone_direct = value;
+          contactUpdates.phone_direct = formatPhoneNumber(value);
         } else if (field === 'phone2') {
-          contactUpdates.phone_2 = value;
+          contactUpdates.phone_2 = formatPhoneNumber(value);
         } else if (field === 'emailAddr') {
           contactUpdates.email_active = value;
         } else if (field === 'email2') {
@@ -752,9 +754,9 @@ export class LeadService {
           firstName = parts[0];
           lastName = parts.slice(1).join(' ') || null;
         } else if (field === 'phone') {
-          phoneDirect = value;
+          phoneDirect = formatPhoneNumber(value);
         } else if (field === 'phone2') {
-          phone2 = value;
+          phone2 = formatPhoneNumber(value);
         } else if (field === 'emailAddr') {
           emailActive = value;
         } else if (field === 'email2') {

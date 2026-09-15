@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from './api'
+import { addCrmChangeListener } from './realtime'
 
 type CacheEntry<T> = {
   data: T
@@ -11,33 +12,43 @@ const inFlightRequests = new Map<string, Promise<any>>()
 
 /**
  * Executes a fetcher with request deduplication and in-memory caching.
+ * Set `bypassCache: true` when a revision bump or mutation demands fresh server data.
  */
 export const fetchCached = async <T>(
   key: string,
   fetcher: () => Promise<T>,
-  ttlMs: number = 60_000
+  ttlMs: number = 60_000,
+  bypassCache: boolean = false
 ): Promise<T> => {
   const cached = memoryCache.get(key)
   const now = Date.now()
 
-  // Return fresh cached data if within TTL
-  if (cached && (now - cached.timestamp < ttlMs)) {
+  // Return fresh cached data if within TTL and not explicitly bypassing
+  if (!bypassCache && cached && (now - cached.timestamp < ttlMs)) {
     return cached.data
   }
 
-  // Deduplicate in-flight requests
-  if (inFlightRequests.has(key)) {
+  // Deduplicate in-flight requests (unless bypassing cache)
+  if (!bypassCache && inFlightRequests.has(key)) {
     return inFlightRequests.get(key) as Promise<T>
   }
+  if (bypassCache) {
+    inFlightRequests.delete(key)
+  }
 
-  const promise = fetcher()
+  // A forced fetch can start while an older one for the same key is still out. Only the
+  // newest may write the cache or clear the in-flight slot, or a slow stale answer would
+  // overwrite the fresh one.
+  const promise: Promise<T> = fetcher()
     .then(data => {
-      memoryCache.set(key, { data, timestamp: Date.now() })
-      inFlightRequests.delete(key)
+      if (inFlightRequests.get(key) === promise) {
+        memoryCache.set(key, { data, timestamp: Date.now() })
+        inFlightRequests.delete(key)
+      }
       return data
     })
     .catch(err => {
-      inFlightRequests.delete(key)
+      if (inFlightRequests.get(key) === promise) inFlightRequests.delete(key)
       throw err
     })
 
@@ -66,6 +77,26 @@ export const invalidateCache = (keyPrefix?: string) => {
     }
   }
 }
+
+// Auto-invalidate matching cache entries when a change is detected locally or via Realtime
+addCrmChangeListener(event => {
+  if (event.resource === '*') {
+    memoryCache.clear()
+    return
+  }
+  invalidateCache(event.resource)
+  if (event.resource === 'deals' || event.resource === 'contracts') {
+    invalidateCache('analytics')
+    invalidateCache('customers')
+  }
+  if (event.resource === 'leads') {
+    invalidateCache('analytics')
+    invalidateCache('customers')
+  }
+  if (event.resource === 'inventory') {
+    invalidateCache('inventory')
+  }
+})
 
 /**
  * Custom hook implementing Stale-While-Revalidate (SWR) caching for 0ms loads.

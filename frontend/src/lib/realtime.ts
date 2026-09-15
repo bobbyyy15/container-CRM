@@ -2,14 +2,9 @@ import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../config/supabase';
 
-// Live CRM updates run on Supabase Realtime rather than a self-hosted Socket.IO
-// server, so the API stays stateless and can be deployed to request-scoped
-// serverless functions. See supabase/migrations/..._039_realtime_publication.sql.
-//
-// As before, only an invalidation signal reaches the client -- never row data. The
-// affected screens refetch through the authenticated HTTP endpoints, preserving
-// every role and PIC filter. Realtime also applies RLS, so a user is only told
-// about rows they could already read.
+// Live CRM updates run on Supabase Realtime and local mutation broadcasting.
+// When rows are updated or created, change signals trigger cache invalidation
+// and automatic table re-fetching across active screens.
 
 export type CrmChangedEvent = {
   resource: string;
@@ -20,8 +15,7 @@ export type CrmChangedEvent = {
 export type RealtimeStatus = 'connecting' | 'connected' | 'disconnected';
 
 // Maps a changed table to the resource key screens subscribe to via
-// useRealtimeRevision(). Tables absent here are ignored, so publishing an extra
-// table is harmless.
+// useRealtimeRevision().
 const TABLE_RESOURCES: Record<string, string> = {
   prospect_clients: 'leads',
   warm_leads: 'leads',
@@ -36,8 +30,6 @@ const TABLE_RESOURCES: Record<string, string> = {
   notifications: 'notifications',
 };
 
-// Postgres operations mapped back to the HTTP verbs the old event used, so any
-// consumer reading `method` keeps working.
 const METHOD_BY_EVENT: Record<string, string> = {
   INSERT: 'POST',
   UPDATE: 'PATCH',
@@ -57,42 +49,74 @@ const setStatus = (status: RealtimeStatus) => {
   statusListeners.forEach(listener => listener(status));
 };
 
-const teardown = () => {
+export const addCrmChangeListener = (listener: (event: CrmChangedEvent) => void) => {
+  changeListeners.add(listener);
+  return () => { changeListeners.delete(listener); };
+};
+
+export const broadcastCrmChange = (resource: string, method = 'POST') => {
+  const event: CrmChangedEvent = {
+    resource,
+    method,
+    at: new Date().toISOString(),
+  };
+  changeListeners.forEach(listener => listener(event));
+};
+
+let isOpeningChannel = false;
+
+const teardown = async () => {
   if (channel) {
-    void supabase.removeChannel(channel);
+    const ch = channel;
     channel = null;
+    try {
+      await supabase.removeChannel(ch);
+    } catch {
+      // ignore teardown errors
+    }
   }
   setStatus('disconnected');
 };
 
-const openChannel = () => {
-  if (channel) return;
+const openChannel = async () => {
+  if (channel || isOpeningChannel) return;
+  isOpeningChannel = true;
   setStatus('connecting');
 
-  // Subscribing to the whole schema keeps the table list in one place -- the
-  // publication in migration 039 -- instead of duplicating it here.
-  channel = supabase
-    .channel('crm-changes')
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public' },
-      payload => {
-        const resource = TABLE_RESOURCES[payload.table];
-        if (!resource) return;
-        const event: CrmChangedEvent = {
-          resource,
-          method: METHOD_BY_EVENT[payload.eventType] ?? payload.eventType,
-          at: new Date().toISOString(),
-        };
-        changeListeners.forEach(listener => listener(event));
-      },
-    )
-    .subscribe(status => {
+  try {
+    const existing = supabase.getChannels().find(ch => ch.topic === 'realtime:crm-changes');
+    if (existing) {
+      await supabase.removeChannel(existing);
+    }
+
+    if (channel) return;
+
+    const newChannel = supabase
+      .channel('crm-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public' },
+        payload => {
+          const resource = TABLE_RESOURCES[payload.table];
+          if (!resource) return;
+          broadcastCrmChange(resource, METHOD_BY_EVENT[payload.eventType] ?? payload.eventType);
+        },
+      );
+
+    channel = newChannel;
+
+    newChannel.subscribe(status => {
       if (status === 'SUBSCRIBED') setStatus('connected');
       else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         setStatus('disconnected');
       }
     });
+  } catch (err) {
+    console.warn('Failed to initialize realtime channel:', err);
+    setStatus('disconnected');
+  } finally {
+    isOpeningChannel = false;
+  }
 };
 
 const startAuthSubscription = () => {
@@ -100,13 +124,11 @@ const startAuthSubscription = () => {
   authSubscriptionStarted = true;
   supabase.auth.onAuthStateChange((_event, session) => {
     if (!session?.access_token) {
-      teardown();
+      void teardown();
       return;
     }
-    // Realtime needs the current token to evaluate RLS on the replication stream;
-    // without this the channel connects but delivers nothing on protected tables.
     supabase.realtime.setAuth(session.access_token);
-    if (!channel) openChannel();
+    if (!channel) void openChannel();
   });
 };
 
@@ -133,17 +155,37 @@ export const useRealtimeStatus = () => {
   return status;
 };
 
+// An import or bulk delete arrives as one change event per row, and every revision bump
+// makes a screen re-read its whole list. Bumps wait for the burst to go quiet, and a long
+// burst still refreshes every MAX_WAIT so the screen does not sit stale until it ends.
+const REVISION_QUIET_MS = 1_000;
+const REVISION_MAX_WAIT_MS = 10_000;
+
 export const useRealtimeRevision = (resources: string[]) => {
   const [revision, setRevision] = useState(0);
   const resourceKey = resources.slice().sort().join('|');
   useEffect(() => {
     const accepted = new Set(resourceKey.split('|').filter(Boolean));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let firstPendingAt = 0;
+    const flush = () => {
+      timer = undefined;
+      firstPendingAt = 0;
+      setRevision(value => value + 1);
+    };
     const onChanged = (event: CrmChangedEvent) => {
-      if (accepted.size === 0 || accepted.has(event.resource)) setRevision(value => value + 1);
+      if (accepted.size > 0 && event.resource !== '*' && !accepted.has(event.resource)) return;
+      const now = Date.now();
+      if (!firstPendingAt) firstPendingAt = now;
+      clearTimeout(timer);
+      timer = setTimeout(flush, Math.min(REVISION_QUIET_MS, Math.max(0, firstPendingAt + REVISION_MAX_WAIT_MS - now)));
     };
     changeListeners.add(onChanged);
     void connectRealtime();
-    return () => { changeListeners.delete(onChanged); };
+    return () => {
+      clearTimeout(timer);
+      changeListeners.delete(onChanged);
+    };
   }, [resourceKey]);
   return revision;
 };

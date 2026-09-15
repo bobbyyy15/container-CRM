@@ -54,7 +54,14 @@ export default function App() {
   }, [])
 
 
-  if (authChecking) return null;
+  if (authChecking) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg, #f8fafc)', gap: 12 }}>
+        <span className="spinner" style={{ width: 28, height: 28 }} />
+        <span style={{ fontSize: 13, color: 'var(--t3, #64748b)', fontWeight: 500 }}>Initializing Container CRM…</span>
+      </div>
+    );
+  }
   if (isPasswordRecovery) return (
     <>
       <Suspense fallback={<div className="loading-row"><span className="spinner" />Loading…</div>}>

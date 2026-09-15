@@ -4,7 +4,7 @@ import { api } from '../../lib/api'
 import { toast } from '../../lib/notify'
 import { Ic, I } from '../../components/ui/icons'
 import Btn from '../../components/ui/Button'
-import { Badge, Trend, Prog } from '../../components/ui/primitives'
+import { Badge, Trend, Prog, RankBadge } from '../../components/ui/primitives'
 import { useAnalytics } from '../../hooks/useAnalytics'
 import { useCustomers } from '../../hooks/useCustomers'
 import { useContracts } from '../../hooks/useContracts'
@@ -380,7 +380,7 @@ const Dashboard = ({ onNav, session, role }: { onNav: (s: Screen) => void; sessi
                                 {topCustomers.map((row, idx) => (
                   <tr key={row.id}>
                     <td style={{ width: 36 }}>
-                      <span style={{ width: 22, height: 22, borderRadius: 6, background: idx === 0 ? '#FEF3C7' : 'var(--s3)', color: idx === 0 ? '#D97706' : 'var(--t4)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{idx + 1}</span>
+                      <RankBadge index={idx} />
                     </td>
                     <td style={{ fontWeight: 600, fontSize: 12.5 }}>{row.co}</td>
                     <td className="r mono" style={{ fontWeight: 700 }}>{row.units}</td>

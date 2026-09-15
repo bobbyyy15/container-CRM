@@ -1,3 +1,6 @@
+import { formatPhoneNumber } from '../../lib/formatters'
+import { formatCountryAbbr, formatStateAbbr, formatCityTitleCase } from '../../lib/places'
+
 export type ProspectImportRow = {
   date_added?: string
   pic?: string
@@ -176,6 +179,14 @@ const validateCandidates = (
     const phones = [phone(record.contact_number_direct), phone(record.contact_number_2)].filter(Boolean)
     if (!emails.length && !phones.length) {
       errors.push({ message: `Excel row ${rowNumber}: no email or phone on file.`, kind: 'skipped' })
+      return
+    }
+    if (record.email_active && !record.email_active.includes('@')) {
+      errors.push({ message: `Excel row ${rowNumber}: Email "${record.email_active}" must contain an "@".`, kind: 'issue' })
+      return
+    }
+    if (record.email_2 && !record.email_2.includes('@')) {
+      errors.push({ message: `Excel row ${rowNumber}: Email 2 "${record.email_2}" must contain an "@".`, kind: 'issue' })
       return
     }
 
@@ -469,8 +480,19 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
     // (e.g. two phone-like headers) can't blank out an already-populated field.
     mapped.forEach((field, index) => {
       if (!field || record[field]) return
-      const value = clean(source[index])
-      if (value) record[field] = value
+      let value = clean(source[index])
+      if (value) {
+        if (field === 'contact_number_direct' || field === 'contact_number_2') {
+          value = formatPhoneNumber(value)
+        } else if (field === 'country') {
+          value = formatCountryAbbr(value)
+        } else if (field === 'state_province') {
+          value = formatStateAbbr(value)
+        } else if (field === 'city') {
+          value = formatCityTitleCase(value)
+        }
+        record[field] = value
+      }
     })
     if (!record.industry && cargoColumns.length) {
       const active = cargoColumns

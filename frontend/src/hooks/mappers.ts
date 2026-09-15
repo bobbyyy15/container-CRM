@@ -1,3 +1,6 @@
+import { formatPhoneNumber } from '../lib/formatters'
+import { formatCountryAbbr, formatStateAbbr } from '../lib/places'
+
 // Row shapes for the list views. These were split out of the hooks so a cached
 // payload can be re-mapped without refetching -- the hook reads raw rows from
 // the cache on first paint, then maps them through here.
@@ -14,7 +17,7 @@ export const mapInquiryRow = (row: any) => {
     channel: row.requirements?.match(/email/i) ? 'Email' : 'Direct',
     company: row.companies?.name || '',
     contact: row.contacts ? `${row.contacts.first_name || ''} ${row.contacts.last_name || ''}`.trim() : '',
-    phone: row.contacts?.phone_direct || row.contacts?.phone_2 || '',
+    phone: formatPhoneNumber(row.contacts?.phone_direct || row.contacts?.phone_2),
     email: row.contacts?.email_active || row.contacts?.email_2 || '',
     category: row.requirements || 'To be qualified',
     city: row.companies?.address_city || '',
@@ -122,10 +125,10 @@ export const mapCustomerRow = (c: any) => ({
   id: c.company_id,
   co: c.company_name,
   contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
-  phone: c.primary_contact ? (c.primary_contact.phone_1 || c.primary_contact.phone_2) : '-',
+  phone: formatPhoneNumber(c.primary_contact ? (c.primary_contact.phone_1 || c.primary_contact.phone_2) : '-'),
   email: c.primary_contact ? (c.primary_contact.email || '-') : '-',
-  state: c.state || '-',
-  country: c.country || '-',
+  state: formatStateAbbr(c.state) || '-',
+  country: formatCountryAbbr(c.country) || '-',
   sales: c.sales_count,
   units: c.total_units,
   revenue: Number(c.total_revenue),

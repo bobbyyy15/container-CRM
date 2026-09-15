@@ -66,3 +66,46 @@ test('lead cell update accepts valid fields and stages', () => {
     value: 'Available',
   }).success, false);
 });
+
+test('email validation requires "@" symbol when email is provided', () => {
+  // Manual Warm Lead
+  assert.equal(CreateManualWarmLeadSchema.safeParse({
+    companyName: 'Acme',
+    email: 'invalid-email',
+  }).success, false);
+  assert.equal(CreateManualWarmLeadSchema.safeParse({
+    companyName: 'Acme',
+    email: 'valid@example.com',
+  }).success, true);
+
+  // Manual Inquiry
+  assert.equal(CreateManualInquirySchema.safeParse({
+    companyName: 'Direct Buyer',
+    email: 'notanemail',
+    containerSizeId: catalogId,
+    containerConditionId: catalogId,
+    quantity: 1,
+  }).success, false);
+  assert.equal(CreateManualInquirySchema.safeParse({
+    companyName: 'Direct Buyer',
+    email: 'buyer@test.com',
+    containerSizeId: catalogId,
+    containerConditionId: catalogId,
+    quantity: 1,
+  }).success, true);
+
+  // Update Lead Cell
+  assert.equal(UpdateLeadCellSchema.safeParse({
+    stage: 'prospect',
+    entityId: catalogId,
+    field: 'emailAddr',
+    value: 'invalid-email-address',
+  }).success, false);
+  assert.equal(UpdateLeadCellSchema.safeParse({
+    stage: 'prospect',
+    entityId: catalogId,
+    field: 'emailAddr',
+    value: 'hello@company.com',
+  }).success, true);
+});
+

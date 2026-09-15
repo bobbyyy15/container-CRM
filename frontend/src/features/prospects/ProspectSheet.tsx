@@ -9,6 +9,7 @@ import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import type { Screen, BadgeStatus, NavIntent, OutreachChannel } from '../../app/types'
 import AssignPicModal from '../../components/ui/AssignPicModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
+import { TableSkeleton } from '../../components/ui/SkeletonLoader'
 import RefreshButton from '../../components/ui/RefreshButton'
 import { confirmDelete, confirmBulkDelete } from '../../lib/deleteRecord'
 import { invalidateCache } from '../../lib/dataCache'
@@ -18,6 +19,24 @@ import { mapPipelineRow } from '../../hooks/mapPipelineRow'
 import { useProspects } from '../../hooks/useProspects'
 import { useWarmLeads } from '../../hooks/useWarmLeads'
 import { exportToCSV, readDensity, writeDensity } from '../../lib/exporters'
+import { formatPhoneNumber, formatPhoneAsYouType, hasAtSymbol } from '../../lib/formatters'
+import SuggestInput from '../../components/ui/SuggestInput'
+import {
+  COUNTRY_OPTIONS,
+  STATE_PROVINCE_OPTIONS,
+  COMMON_CITIES,
+  formatCountryAbbr,
+  formatStateAbbr,
+  formatCityTitleCase,
+  getStatesForCountry,
+  getCountryForState,
+  getCitiesForState,
+  getCitiesForCountry,
+  lookupCity,
+  getCountrySuggestOptions,
+  getStateSuggestOptions,
+  getCitySuggestOptions,
+} from '../../lib/places'
 import type { DensityOption } from '../../app/types'
 
 const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm'; onNav?: (s: Screen, intent?: NavIntent) => void }) => {
@@ -85,30 +104,97 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     field: string;
     value: string;
     originalValue: string;
+    isCustom?: boolean;
   } | null>(null)
 
   const _prospectsData = useProspects(revision, mode === 'prospect' ? status : 'active', mode === 'prospect')
   const _warmData = useWarmLeads(revision, mode === 'warm')
   const prospectsData = mode === 'warm' ? _warmData : _prospectsData
+  const isLoading = mode === 'warm' ? _warmData.loading : _prospectsData.loading
 
   const commitCellEdit = async (rowId: string, field: string, newValue: string, oldValue: string) => {
     setEditingCell(null);
-    if (newValue === oldValue) return;
+    let finalValue = newValue.trim();
+
+    if (field === 'phone' || field === 'phone2') {
+      finalValue = formatPhoneNumber(finalValue);
+    } else if (field === 'emailAddr' || field === 'email2') {
+      if (finalValue && !hasAtSymbol(finalValue)) {
+        toast('Email must contain an "@"', 'error');
+        return;
+      }
+    } else if (field === 'country') {
+      finalValue = formatCountryAbbr(finalValue);
+    } else if (field === 'state') {
+      finalValue = formatStateAbbr(finalValue);
+    } else if (field === 'city') {
+      finalValue = formatCityTitleCase(finalValue);
+    }
+
+    if (finalValue === oldValue) return;
+
+    const newOverrides: Record<string, string> = { [field]: finalValue };
+    let autoFilledState: string | undefined;
+    let autoFilledCountry: string | undefined;
+
+    // A city or state only completes what is still blank. A location someone already set is
+    // theirs, even when a city of the same name exists in another state.
+    if (field === 'city' && finalValue) {
+      const currentRow = prospectsData.find(r => r.id === rowId);
+      const currentState = localOverrides[rowId]?.state || (currentRow as any)?.state || '';
+      const currentCountry = localOverrides[rowId]?.country || (currentRow as any)?.country || '';
+      const match = lookupCity(finalValue, currentState, currentCountry);
+      if (match && !currentState) {
+        autoFilledState = match.state;
+        newOverrides['state'] = match.state;
+      }
+      if (match && !currentCountry) {
+        autoFilledCountry = match.country;
+        newOverrides['country'] = match.country;
+      }
+    } else if (field === 'state' && finalValue) {
+      const inferred = getCountryForState(finalValue);
+      const currentRow = prospectsData.find(r => r.id === rowId);
+      const currentCountry = localOverrides[rowId]?.country || (currentRow as any)?.country || '';
+      if (inferred && !currentCountry) {
+        autoFilledCountry = inferred;
+        newOverrides['country'] = inferred;
+      }
+    }
+
     setLocalOverrides(prev => ({
       ...prev,
-      [rowId]: { ...(prev[rowId] || {}), [field]: newValue },
+      [rowId]: { ...(prev[rowId] || {}), ...newOverrides },
     }));
+
+    const stage = mode === 'prospect' ? 'prospect' : 'warm_lead';
     try {
-      await api.patch(`/leads/${mode === 'prospect' ? 'prospect' : 'warm_lead'}/${rowId}/cell`, {
+      await api.patch(`/leads/${stage}/${rowId}/cell`, {
         field,
-        value: newValue,
+        value: finalValue,
       });
+      if (autoFilledState) {
+        await api.patch(`/leads/${stage}/${rowId}/cell`, {
+          field: 'state',
+          value: autoFilledState,
+        }).catch(() => {});
+      }
+      if (autoFilledCountry) {
+        await api.patch(`/leads/${stage}/${rowId}/cell`, {
+          field: 'country',
+          value: autoFilledCountry,
+        }).catch(() => {});
+      }
       toast('Saved', 'success');
     } catch (err: any) {
       toast(err.response?.data?.error?.message ?? 'Failed to update cell', 'error');
       setLocalOverrides(prev => {
         const next = { ...prev };
-        if (next[rowId]) delete next[rowId][field];
+        if (next[rowId]) {
+          delete next[rowId][field];
+          if (autoFilledState) delete next[rowId]['state'];
+          if (autoFilledCountry) delete next[rowId]['country'];
+        }
         return next;
       });
       setRevision(v => v + 1);
@@ -312,7 +398,11 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
       const target = event.target as HTMLElement | null
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
 
-      if (event.key === 'Enter' || event.key === 'F2') {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setAnchor(null)
+        setFocusCell(null)
+      } else if (event.key === 'Enter' || event.key === 'F2') {
         if (bounds.r1 === bounds.r2 && bounds.c1 === bounds.c2) {
           const row = filtered[bounds.r1]
           const col = visibleCols[bounds.c1]
@@ -354,6 +444,17 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           r: Math.max(0, Math.min(lastRow, fromR + dr)),
           c: Math.max(0, Math.min(lastCol, fromC + dc)),
         }
+        setAnchor(next)
+        setFocusCell(next)
+      } else if (event.key === 'Tab') {
+        // Tab walks one cell at a time and wraps onto the next row, as a spreadsheet does.
+        event.preventDefault()
+        const lastCol = visibleCols.length - 1
+        const from = focusCell ?? { r: bounds.r1, c: bounds.c1 }
+        let next = { r: from.r, c: from.c + (event.shiftKey ? -1 : 1) }
+        if (next.c > lastCol) next = { r: from.r + 1, c: 0 }
+        if (next.c < 0) next = { r: from.r - 1, c: lastCol }
+        if (next.r < 0 || next.r > filtered.length - 1) return
         setAnchor(next)
         setFocusCell(next)
       }
@@ -540,44 +641,57 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                 onChange={e => setSelected(e.target.checked ? filtered.map(r => r.id) : [])}
               />
             </div>
-            {visibleCols.map((col, ci) => (
-              <div
-                key={col.key}
-                style={{
-                  minWidth: col.w, width: col.w, padding: '7px 12px',
-                  borderRight: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none',
-                  display: 'flex', alignItems: 'center',
-                  // Highlight the header when its whole column is the active selection.
-                  background: bounds && bounds.c1 === ci && bounds.c2 === ci && bounds.r1 === 0 && bounds.r2 === filtered.length - 1
-                    ? 'rgba(49,94,246,0.14)' : undefined,
-                }}
-                title={`Click to select all ${col.label} · Ctrl+C to copy`}
-                // One click selects the entire column -- copying "all the numbers"
-                // shouldn't mean dragging through every row.
-                onClick={() => {
-                  if (!filtered.length) return
-                  setAnchor({ r: 0, c: ci })
-                  setFocusCell({ r: filtered.length - 1, c: ci })
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setContextMenu({ x: e.clientX, y: e.clientY, colField: col.field, colLabel: col.label });
-                }}
-              >
-                <div>
-                  <span className="col-header-letter">{col.key}</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{col.label}</span>
+            {visibleCols.map((col, ci) => {
+              const isColSelected = !!(bounds && ci >= bounds.c1 && ci <= bounds.c2 && bounds.r1 === 0 && bounds.r2 === filtered.length - 1)
+              return (
+                <div
+                  key={col.key}
+                  style={{
+                    minWidth: col.w, width: col.w, padding: '7px 12px',
+                    borderRight: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none',
+                    display: 'flex', alignItems: 'center',
+                    // Highlight the header when its whole column is the active selection.
+                    background: isColSelected ? 'rgba(49,94,246,0.14)' : undefined,
+                  }}
+                  title={`Click or drag to select ${col.label} · Ctrl+C to copy`}
+                  onMouseDown={(e) => {
+                    if (e.button !== 0) return
+                    if (!filtered.length) return
+                    draggingRef.current = true
+                    if (e.shiftKey && anchor) {
+                      setFocusCell({ r: filtered.length - 1, c: ci })
+                    } else {
+                      setAnchor({ r: 0, c: ci })
+                      setFocusCell({ r: filtered.length - 1, c: ci })
+                    }
+                  }}
+                  onMouseEnter={() => {
+                    if (draggingRef.current && anchor) {
+                      setFocusCell({ r: filtered.length - 1, c: ci })
+                    }
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setContextMenu({ x: e.clientX, y: e.clientY, colField: col.field, colLabel: col.label });
+                  }}
+                >
+                  <div>
+                    <span className="col-header-letter">{col.key}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{col.label}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
             <div style={{ minWidth: 232, width: 232, padding: '7px 12px' }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t3)' }}>ACTIONS</span>
             </div>
           </div>
 
           {/* Data rows */}
-          {filtered.length === 0 && (
+          {isLoading && filtered.length === 0 ? (
+            <TableSkeleton rows={10} cols={visibleCols.length + 2} asTable={false} />
+          ) : filtered.length === 0 ? (
             <EmptyTableState
               icon={mode === 'warm' ? I.lead : I.prospect}
               title={mode === 'warm' ? 'No warm leads found' : 'No prospect clients found'}
@@ -587,7 +701,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
               actionLabel={mode === 'warm' ? 'New Warm Lead' : 'New Prospect'}
               onAction={() => mode === 'warm' ? setShowNewWarmLead(true) : setShowNewProspect(true)}
             />
-          )}
+          ) : null}
           {windowTop > 0 && <div style={{ height: windowTop }} />}
           {windowRows.map((row, windowIndex) => {
             const ri = windowStart + windowIndex
@@ -612,9 +726,31 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                   {/* Row number selects the whole row's cells, mirroring the header
                       selecting a whole column. */}
                   <span
-                    style={{ fontSize: 10, color: 'var(--t4)', fontFamily: 'var(--mono)', cursor: 'pointer', userSelect: 'none' }}
-                    title="Click to select this row · Ctrl+C to copy"
-                    onClick={() => { setAnchor({ r: ri, c: 0 }); setFocusCell({ r: ri, c: visibleCols.length - 1 }) }}
+                    style={{
+                      fontSize: 10,
+                      color: bounds && ri >= bounds.r1 && ri <= bounds.r2 && bounds.c1 === 0 && bounds.c2 === visibleCols.length - 1 ? 'var(--brand)' : 'var(--t4)',
+                      fontWeight: bounds && ri >= bounds.r1 && ri <= bounds.r2 && bounds.c1 === 0 && bounds.c2 === visibleCols.length - 1 ? 700 : 400,
+                      fontFamily: 'var(--mono)',
+                      cursor: 'pointer',
+                      userSelect: 'none'
+                    }}
+                    title="Click or drag to select this row · Ctrl+C to copy"
+                    onMouseDown={(e) => {
+                      if (e.button !== 0) return
+                      e.stopPropagation()
+                      draggingRef.current = true
+                      if (e.shiftKey && anchor) {
+                        setFocusCell({ r: ri, c: visibleCols.length - 1 })
+                      } else {
+                        setAnchor({ r: ri, c: 0 })
+                        setFocusCell({ r: ri, c: visibleCols.length - 1 })
+                      }
+                    }}
+                    onMouseEnter={() => {
+                      if (draggingRef.current && anchor) {
+                        setFocusCell({ r: ri, c: visibleCols.length - 1 })
+                      }
+                    }}
                   >{ri + 1}</span>
                 </div>
                 {visibleCols.map((col, ci) => {
@@ -623,11 +759,15 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                   const isEditing = editingCell && editingCell.r === ri && editingCell.c === ci
                   const isEditable = !['added', 'entryPath'].includes(col.field)
 
+                  const cellCountry = localOverrides[row.id]?.country || (row as any)?.country || ''
+                  const cellState = localOverrides[row.id]?.state || (row as any)?.state || ''
+
                   return (
                     <div
                       key={col.key}
                       onMouseDown={event => {
                         if (isEditing) return
+                        if (event.button !== 0) return
                         event.preventDefault()
                         beginSelect(ri, ci, event.shiftKey)
                       }}
@@ -651,6 +791,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                         display: 'flex', alignItems: 'center', overflow: isEditing ? 'visible' : 'hidden',
                         cursor: isEditing ? 'text' : isEditable ? 'cell' : 'default', userSelect: isEditing ? 'auto' : 'none',
                         position: 'relative',
+                        zIndex: picked ? 2 : undefined,
                         background: picked ? 'rgba(49,94,246,0.14)' : undefined,
                         // Outline the block edges so a range reads as one selection.
                         borderRight: picked && bounds && ci === bounds.c2 ? '1px solid var(--brand)' : '1px solid var(--border-s)',
@@ -746,13 +887,76 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                               <option value="">Unassigned</option>
                               {pics.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
                             </select>
+                          ) : col.field === 'country' ? (
+                            <SuggestInput
+                              autoFocus
+                              className="inp"
+                              inputStyle={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 8px', fontSize: 12.5, background: 'transparent' }}
+                              value={editingCell.value}
+                              onChange={val => setEditingCell({ ...editingCell, value: val })}
+                              onSelect={item => commitCellEdit(row.id, col.field, item.value, editingCell.originalValue)}
+                              onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
+                              options={getCountrySuggestOptions()}
+                              placeholder="US or CA..."
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                } else if (e.key === 'Escape') {
+                                  setEditingCell(null)
+                                }
+                              }}
+                            />
+                          ) : col.field === 'state' ? (
+                            <SuggestInput
+                              autoFocus
+                              className="inp"
+                              inputStyle={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 8px', fontSize: 12.5, background: 'transparent' }}
+                              value={editingCell.value}
+                              onChange={val => setEditingCell({ ...editingCell, value: val })}
+                              onSelect={item => commitCellEdit(row.id, col.field, item.value, editingCell.originalValue)}
+                              onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
+                              options={getStateSuggestOptions(cellCountry)}
+                              placeholder="e.g. TX, CA..."
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                } else if (e.key === 'Escape') {
+                                  setEditingCell(null)
+                                }
+                              }}
+                            />
+                          ) : col.field === 'city' ? (
+                            <SuggestInput
+                              autoFocus
+                              className="inp"
+                              inputStyle={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 8px', fontSize: 12.5, background: 'transparent' }}
+                              value={editingCell.value}
+                              onChange={val => setEditingCell({ ...editingCell, value: val })}
+                              onSelect={item => commitCellEdit(row.id, col.field, item.value, editingCell.originalValue)}
+                              onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
+                              options={getCitySuggestOptions(cellState, cellCountry)}
+                              placeholder="Type city..."
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                } else if (e.key === 'Escape') {
+                                  setEditingCell(null)
+                                }
+                              }}
+                            />
                           ) : (
                             <input
                               autoFocus
                               className="inp"
                               style={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 8px', fontSize: 12.5, background: 'transparent' }}
                               value={editingCell.value}
-                              onChange={e => setEditingCell({ ...editingCell, value: e.target.value })}
+                              onChange={e => {
+                                const isPhone = ['phone', 'phone2'].includes(col.field)
+                                setEditingCell({ ...editingCell, value: isPhone ? formatPhoneAsYouType(e.target.value) : e.target.value })
+                              }}
                               onFocus={e => e.target.select()}
                               onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
                               onKeyDown={e => {
@@ -876,6 +1080,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           onAssign={handleAssignPic}
         />
       )}
+
     </div>
   )
 }

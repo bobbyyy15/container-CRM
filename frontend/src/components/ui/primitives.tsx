@@ -124,3 +124,53 @@ export const EligDot = ({ on }: { on: boolean }) => (
 export const ChipPIC = ({ label }: { label: string }) => (
   <span style={{ background: 'var(--brand-bg)', color: 'var(--brand)', padding: '2px 7px', borderRadius: 5, fontSize: 11, fontWeight: 700 }}>{label}</span>
 )
+
+export const getRankBadgeStyle = (index: number): React.CSSProperties => {
+  if (index === 0) {
+    // 1st: Gold
+    return { background: '#FEF3C7', color: '#D97706' }
+  }
+  if (index === 1) {
+    // 2nd: Silver
+    return { background: '#E2E8F0', color: '#475569' }
+  }
+  if (index === 2) {
+    // 3rd: Bronze
+    return { background: '#FFEDD5', color: '#9A3412' }
+  }
+  // 4th+: Default
+  return { background: 'var(--s3)', color: 'var(--t4)' }
+}
+
+export const RankBadge = ({
+  rank,
+  index,
+  size = 22,
+}: {
+  rank?: number
+  index?: number
+  size?: number
+}) => {
+  const idx = index !== undefined ? index : (rank !== undefined ? rank - 1 : 0)
+  const displayRank = rank !== undefined ? rank : (index !== undefined ? index + 1 : 1)
+  const style = getRankBadgeStyle(idx)
+
+  return (
+    <span
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 6,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 11,
+        fontWeight: 700,
+        ...style,
+      }}
+    >
+      {displayRank}
+    </span>
+  )
+}
+

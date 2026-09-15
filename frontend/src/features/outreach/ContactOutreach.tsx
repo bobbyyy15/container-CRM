@@ -10,6 +10,154 @@ import RefreshButton from '../../components/ui/RefreshButton'
 import type { Screen, BadgeStatus, NavIntent, OutreachChannel } from '../../app/types'
 import { EligDot } from '../../components/ui/primitives'
 import { useProspects } from '../../hooks/useProspects'
+import SuggestInput from '../../components/ui/SuggestInput'
+import { usePics } from '../pipeline/PipelineDialogs'
+
+type TemplateKey = 'cold_intro' | 'inventory_promo' | 'followup' | 'custom'
+
+const TEMPLATES: { id: TemplateKey; label: string; desc: string }[] = [
+  { id: 'cold_intro', label: 'Cold Introduction', desc: 'Standard supply inquiry & introductory outreach' },
+  { id: 'inventory_promo', label: 'Inventory & Pricing', desc: 'Promote available container stock and quick dispatch' },
+  { id: 'followup', label: 'Follow-Up / Check-In', desc: 'Follow up on previous container inquiry or pricing' },
+  { id: 'custom', label: 'Custom Message (Blank)', desc: 'Write your own custom subject & body from scratch' },
+]
+
+const OFFERING_SUGGESTIONS = [
+  '20ft & 40ft shipping containers',
+  '20ft Standard Dry Van containers',
+  '40ft High Cube (40HC) containers',
+  '40ft Standard Dry Van containers',
+  'Cargo Worthy (CW) certified containers',
+  'Wind & Water Tight (WWT) containers',
+  '10ft Storage containers',
+  '45ft High Cube containers',
+  'Refrigerated (Reefer) containers',
+  'One-Trip / New condition containers',
+  'Open Top & Flat Rack containers',
+]
+
+const OFFER_DETAILS_SUGGESTIONS = [
+  'Depot-direct pricing with immediate release.',
+  'Competitive wholesale rates and quick turnaround.',
+  'Current discounted rates on surplus stock this week.',
+  'Volume discount available on multi-unit orders.',
+  'Immediate dispatch with crane or tilt-bed delivery available.',
+  'Prompt pickup from local depot or direct-to-site delivery.',
+  'Units are pre-inspected and ready for fast gate release.',
+]
+
+const COMMON_DEPOTS = [
+  'Chicago, IL depot',
+  'Houston, TX depot',
+  'Los Angeles / Long Beach, CA',
+  'Savannah, GA depot',
+  'Dallas / Fort Worth, TX',
+  'New York / New Jersey port area',
+  'Atlanta, GA depot',
+  'Seattle / Tacoma, WA',
+  'Denver, CO depot',
+  'Kansas City, MO depot',
+  'your local area',
+]
+
+const TITLE_SUGGESTIONS = [
+  'Container Sales Specialist',
+  'Account Executive',
+  'Sales Manager',
+  'Equipment & Logistics Specialist',
+  'Account Manager',
+  'Commercial Sales Representative',
+  'Regional Supply Representative',
+]
+
+const generateEmail = (
+  tmpl: TemplateKey,
+  params: {
+    contact: string
+    company: string
+    location: string
+    offering: string
+    details: string
+    sender: string
+    title?: string
+  }
+) => {
+  const greeting = params.contact ? `Hi ${params.contact},` : 'Hello,'
+  const company = params.company || 'your team'
+  const location = params.location || 'your area'
+  const offering = params.offering || '20ft & 40ft shipping containers'
+  const details = params.details ? `\n\n${params.details}` : ''
+  const signoffName = params.sender || 'Sales Team'
+  const signoffTitle = params.title?.trim() ? `\n${params.title.trim()}` : ''
+  const signoff = `Best regards,\n${signoffName}${signoffTitle}`
+
+  if (tmpl === 'cold_intro') {
+    return {
+      subject: `Container supply & availability for ${params.company || 'your projects'}`,
+      body: `${greeting}
+
+I hope this email finds you well.
+
+I'm reaching out from our sales team regarding shipping container equipment and availability in ${location}. We currently have certified ${offering} ready for immediate dispatch and release.${details}
+
+Would ${company} be open to a quick quote or having our current equipment and price sheet on hand for your upcoming container needs?
+
+${signoff}`,
+    }
+  }
+
+  if (tmpl === 'inventory_promo') {
+    return {
+      subject: `Available container inventory & depot rates — ${params.company || 'Direct Supply'}`,
+      body: `${greeting}
+
+We currently have available surplus inventory of ${offering} positioned near ${location}, ready for prompt pickup or direct delivery.${details}
+
+All units are thoroughly inspected, wind & water tight (WWT) or cargo worthy (CW). Please let me know if you would like current depot pricing, photos, or a quick quote today.
+
+${signoff}`,
+    }
+  }
+
+  if (tmpl === 'followup') {
+    return {
+      subject: `Following up — Container equipment for ${params.company || 'your team'}`,
+      body: `${greeting}
+
+Just following up on my previous note regarding container equipment supply for ${company}.
+
+We have newly released units of ${offering} available in ${location}.${details}
+
+Please feel free to reply directly here if there is anything we can price out for you this week.
+
+${signoff}`,
+    }
+  }
+
+  return { subject: '', body: '' }
+}
+
+// A batch shares one message, so a template for several recipients writes placeholders
+// and each email fills them from its own prospect. Anything a prospect lacks falls back to
+// wording that still reads naturally.
+const PLACEHOLDER_HINT = '{contact}, {company} and {location} are filled in from each prospect when it sends.'
+
+const locationOf = (row: any) => [row.city, row.state].filter(Boolean).join(', ')
+
+const personalize = (text: string, row: any) => text
+  .replace(/\{contact\}/g, row.contact || 'there')
+  .replace(/\{company\}/g, row.company || 'your team')
+  .replace(/\{location\}/g, locationOf(row) || 'your area')
+
+type TemplateFields = { location: string; offering: string; details: string; sender: string; title: string }
+
+const DEFAULT_TEMPLATE_FIELDS: TemplateFields = {
+  location: '',
+  offering: '20ft & 40ft shipping containers',
+  details: 'Depot-direct pricing with immediate release.',
+  sender: 'Sales Team',
+  title: 'Container Sales Specialist',
+}
 
 type EmailSendResult = {
   id: string
@@ -34,6 +182,7 @@ const CHANNELS: { key: OutreachChannel; label: string }[] = [
 ]
 
 const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | null; onIntentApplied?: () => void } = {}) => {
+  const pics = usePics()
   // The revision counter exists for the Refresh button -- useProspects re-fetches
   // when it changes, which a cache invalidation alone would not trigger.
   const [revision, setRevision] = useState(0)
@@ -69,6 +218,48 @@ const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | nul
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0
   }, [channel, stateFilter, search])
+
+  // Template picker. Changing a detail regenerates the message from the chosen template;
+  // 'custom' leaves the subject and body entirely to the sender.
+  const [templateKey, setTemplateKey] = useState<TemplateKey>('cold_intro')
+  const [templateFields, setTemplateFields] = useState<TemplateFields>(DEFAULT_TEMPLATE_FIELDS)
+  const composeLocked = sendingEmail || sendResults.length > 0
+
+  const locationSuggestions = React.useMemo(() => {
+    const own = emailRows.length === 1 ? locationOf(emailRows[0]) : '{location}'
+    return own && !COMMON_DEPOTS.includes(own) ? [own, ...COMMON_DEPOTS] : COMMON_DEPOTS
+  }, [emailRows])
+
+  const senderSuggestions = React.useMemo(
+    () => Array.from(new Set([...pics.map(p => p.name).filter(Boolean), 'Sales Team', 'Container Equipment Desk'])),
+    [pics],
+  )
+
+  const applyTemplate = (key: TemplateKey, fields: TemplateFields, rows: any[]) => {
+    if (key === 'custom') return
+    const recipient = rows.length === 1
+      ? { contact: rows[0].contact || '', company: rows[0].company || '' }
+      : { contact: '{contact}', company: '{company}' }
+    const generated = generateEmail(key, { ...recipient, ...fields })
+    setEmailSubject(generated.subject)
+    setEmailBody(generated.body)
+  }
+
+  const handleTemplateChange = (key: TemplateKey) => {
+    setTemplateKey(key)
+    if (key === 'custom') {
+      setEmailSubject('')
+      setEmailBody('')
+    } else {
+      applyTemplate(key, templateFields, emailRows)
+    }
+  }
+
+  const updateTemplateField = (updates: Partial<TemplateFields>) => {
+    const next = { ...templateFields, ...updates }
+    setTemplateFields(next)
+    applyTemplate(templateKey, next, emailRows)
+  }
 
   const term = search.trim().toLowerCase()
   const filtered = prospectsData.filter(r =>
@@ -148,6 +339,17 @@ const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | nul
     setSendProgress({ completed: 0, total: rows.length, current: '' })
     setStopRequested(false)
     stopBulkRef.current = false
+
+    // One recipient gets their own location and PIC written in; a batch gets placeholders.
+    const single = rows.length === 1 ? rows[0] : null
+    const fields: TemplateFields = {
+      ...templateFields,
+      location: single ? locationOf(single) || 'your area' : '{location}',
+      sender: single?.pic && single.pic !== 'Unassigned' ? single.pic : DEFAULT_TEMPLATE_FIELDS.sender,
+    }
+    setTemplateKey('cold_intro')
+    setTemplateFields(fields)
+    applyTemplate('cold_intro', fields, rows)
   }
 
   const closeEmailComposer = () => {
@@ -214,8 +416,8 @@ const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | nul
         await api.post('/outreach/email', {
           prospectId: row.id,
           to: row.emailAddr,
-          subject: emailSubject,
-          body: emailBody.replace(/\n/g, '<br />'),
+          subject: personalize(emailSubject, row),
+          body: personalize(emailBody, row).replace(/\n/g, '<br />'),
         })
         results.push({ id: row.id, label, email: row.emailAddr, status: 'sent' })
       } catch (error: any) {
@@ -252,8 +454,39 @@ const ContactOutreach = ({ intent, onIntentApplied }: { intent?: NavIntent | nul
             <div className="modal-header"><div><div className="modal-title">Compose outreach email</div><div className="modal-desc">{emailRows.length === 1 ? `Sending through your connected Google account to ${emailRows[0].emailAddr}.` : `${emailRows.length} separate emails through your connected Google account. Recipients will not see each other.`}</div></div><button type="button" className="btn btn-ghost" disabled={sendingEmail} onClick={closeEmailComposer} aria-label="Close">×</button></div>
             <div className="modal-body" style={{ display: 'grid', gap: 12 }}>
               {emailError && <div style={{ padding: 10, borderRadius: 8, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 12 }}>{emailError}</div>}
-              <label><span className="form-label">Subject</span><input className="inp" required maxLength={200} disabled={sendingEmail || sendResults.length > 0} value={emailSubject} onChange={e => setEmailSubject(e.target.value)} /></label>
-              <label><span className="form-label">Message</span><textarea className="inp" required rows={8} disabled={sendingEmail || sendResults.length > 0} value={emailBody} onChange={e => setEmailBody(e.target.value)} /></label>
+              {!composeLocked && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+                    <span className="form-label" style={{ marginBottom: 0 }}>Template</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--t4)' }}>{TEMPLATES.find(t => t.id === templateKey)?.desc}</span>
+                  </div>
+                  <select className="sel" style={{ width: '100%' }} value={templateKey} onChange={e => handleTemplateChange(e.target.value as TemplateKey)}>
+                    {TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  </select>
+                </div>
+              )}
+              {!composeLocked && templateKey !== 'custom' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, padding: '12px 14px', borderRadius: 10, background: 'var(--s2)', border: '1px solid var(--border-s)' }}>
+                  <label><span className="form-label" style={{ fontSize: 11 }}>Offering / equipment</span>
+                    <SuggestInput value={templateFields.offering} onChange={offering => updateTemplateField({ offering })} options={OFFERING_SUGGESTIONS} placeholder="e.g. 20ft & 40ft shipping containers" inputStyle={{ height: 32, fontSize: 12 }} />
+                  </label>
+                  <label><span className="form-label" style={{ fontSize: 11 }}>Location / depot</span>
+                    <SuggestInput value={templateFields.location} onChange={location => updateTemplateField({ location })} options={locationSuggestions} placeholder="e.g. Chicago, IL" inputStyle={{ height: 32, fontSize: 12 }} />
+                  </label>
+                  <label style={{ gridColumn: '1 / -1' }}><span className="form-label" style={{ fontSize: 11 }}>Offer / pricing note</span>
+                    <SuggestInput value={templateFields.details} onChange={details => updateTemplateField({ details })} options={OFFER_DETAILS_SUGGESTIONS} placeholder="e.g. Depot-direct pricing with fast release." inputStyle={{ height: 32, fontSize: 12 }} />
+                  </label>
+                  <label><span className="form-label" style={{ fontSize: 11 }}>Sign-off name</span>
+                    <SuggestInput value={templateFields.sender} onChange={sender => updateTemplateField({ sender })} options={senderSuggestions} placeholder="e.g. Sales Team" inputStyle={{ height: 32, fontSize: 12 }} />
+                  </label>
+                  <label><span className="form-label" style={{ fontSize: 11 }}>Sign-off title <span style={{ color: 'var(--t4)', fontWeight: 400 }}>(optional)</span></span>
+                    <SuggestInput value={templateFields.title} onChange={title => updateTemplateField({ title })} options={TITLE_SUGGESTIONS} placeholder="e.g. Container Sales Specialist" inputStyle={{ height: 32, fontSize: 12 }} />
+                  </label>
+                  {emailRows.length > 1 && <div style={{ gridColumn: '1 / -1', fontSize: 11.5, color: 'var(--t3)' }}>{PLACEHOLDER_HINT}</div>}
+                </div>
+              )}
+              <label><span className="form-label">Subject</span><input className="inp" required maxLength={200} disabled={composeLocked} value={emailSubject} onChange={e => setEmailSubject(e.target.value)} placeholder={templateKey === 'custom' ? 'Enter email subject…' : ''} /></label>
+              <label><span className="form-label">Message</span><textarea className="inp" required rows={12} disabled={composeLocked} value={emailBody} onChange={e => setEmailBody(e.target.value)} placeholder={templateKey === 'custom' ? 'Write your outreach message here…' : ''} /></label>
               {(sendingEmail || sendResults.length > 0) && (
                 <div className="bulk-email-progress">
                   <div className="bulk-email-progress-head">

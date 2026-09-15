@@ -1,3 +1,6 @@
+import { formatPhoneNumber } from '../lib/formatters'
+import { formatCountryAbbr, formatStateAbbr, formatCityTitleCase } from '../lib/places'
+
 export const mapPipelineRow = (p: any) => ({
   id: p.id,
   added: new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
@@ -7,14 +10,14 @@ export const mapPipelineRow = (p: any) => ({
   email: p.source_data?.email_deliverability || (p.contacts?.email_active ? 'Available' : 'Unavailable'),
   industry: p.companies?.industry || '',
   territory: p.source_data?.service_locations || '',
-  country: p.companies?.address_country || '',
-  state: p.companies?.address_state || '',
-  city: p.companies?.address_city || '',
+  country: formatCountryAbbr(p.companies?.address_country),
+  state: formatStateAbbr(p.companies?.address_state),
+  city: formatCityTitleCase(p.companies?.address_city),
   company: p.companies?.name || '',
   contact: p.contacts ? `${p.contacts.first_name || ''} ${p.contacts.last_name || ''}`.trim() : '',
   contactMissing: !p.contact_id,
-  phone: p.contacts?.phone_direct || '',
-  phone2: p.contacts?.phone_2 || '',
+  phone: formatPhoneNumber(p.contacts?.phone_direct),
+  phone2: formatPhoneNumber(p.contacts?.phone_2),
   emailAddr: p.contacts?.email_active || '',
   email2: p.contacts?.email_2 || '',
   address: p.companies?.address_street || '',

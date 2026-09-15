@@ -7,6 +7,7 @@ import { Badge, ChipPIC } from '../../components/ui/primitives'
 import ExportMenu from '../../components/ui/ExportMenu'
 import RecordDetailModal from '../../components/ui/RecordDetailModal'
 import EmptyTableState from '../../components/ui/EmptyTableState'
+import { TableSkeleton } from '../../components/ui/SkeletonLoader'
 import RefreshButton from '../../components/ui/RefreshButton'
 import type { Screen, BadgeStatus } from '../../app/types'
 import { NewManualSaleDialog, usePics } from '../pipeline/PipelineDialogs'
@@ -88,20 +89,22 @@ const CustomerAccounts = ({ role }: { role?: string }) => {
             <th className="r">Gross Profit</th><th>Last Purchase</th><th>Status</th>
             <th className="col-actions">Actions</th>
           </tr></thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <EmptyTableState
-                colSpan={11}
-                icon={I.customer}
-                title="No customer accounts found"
-                subtitle={search || tab !== 'All'
-                  ? 'No accounts match your filters. Try clearing the search or filter tab.'
-                  : 'Customer accounts are compiled from Won sales. Record a sale to create one.'}
-                actionLabel="Record Sale"
-                onAction={() => setShowNewCustomer(true)}
-              />
-            ) : (
-              filtered.map(c => (
+          {customers.loading && filtered.length === 0 ? (
+            <TableSkeleton rows={8} cols={11} asTable={true} />
+          ) : (
+            <tbody>
+              {filtered.length === 0 ? (
+                <EmptyTableState
+                  colSpan={11}
+                  icon={I.customer}
+                  title="No customer accounts found"
+                  subtitle={search || tab !== 'All'
+                    ? 'No accounts match your filters. Try clearing the search or filter tab.'
+                    : 'Customer accounts are compiled from Won sales. Record a sale to create one.'}
+                  actionLabel="Record Sale"
+                  onAction={() => setShowNewCustomer(true)}
+                />
+              ) : filtered.map(c => (
                 <tr key={c.id}>
                   <td>
                     <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>{c.co}</div>
@@ -127,9 +130,9 @@ const CustomerAccounts = ({ role }: { role?: string }) => {
                     </div>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
+              ))}
+            </tbody>
+          )}
         </table>
       </div>
       {viewRow && (

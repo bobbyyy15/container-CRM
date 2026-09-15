@@ -1,6 +1,25 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../../lib/api'
 import { fetchCached, getFromCache } from '../../lib/dataCache'
+import { formatPhoneNumber, formatPhoneAsYouType, hasAtSymbol } from '../../lib/formatters'
+import SuggestInput from '../../components/ui/SuggestInput'
+import {
+  COUNTRY_OPTIONS,
+  STATE_PROVINCE_OPTIONS,
+  COMMON_CITIES,
+  formatCountryAbbr,
+  formatStateAbbr,
+  formatCityTitleCase,
+  getStatesForCountry,
+  getCountryForState,
+  getCitiesForState,
+  getCitiesForCountry,
+  lookupCity,
+  isKnownCountry,
+  getCountrySuggestOptions,
+  getStateSuggestOptions,
+  getCitySuggestOptions,
+} from '../../lib/places'
 
 type CatalogOption = { id: string; name: string }
 
@@ -129,7 +148,7 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
           setCompanyName(match.company_name ?? '')
           setContactPerson(match.contact_person ?? '')
           setEmail(match.email ?? '')
-          setPhone(match.phone ?? '')
+          setPhone(formatPhoneNumber(match.phone ?? ''))
           setStateProvince(match.state_province ?? '')
           setCountry(match.country ?? '')
           // Keep the inquiry with whoever already owns the relationship.
@@ -163,6 +182,10 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!canSubmit) return
+    if (email.trim() && !hasAtSymbol(email)) {
+      setError('Email must contain an "@"')
+      return
+    }
     setWorking(true)
     setError('')
     try {
@@ -180,20 +203,20 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
       if (source === 'warmLead') {
         await api.post(`/leads/warm-leads/${warmLeadId}/create-inquiry`, {
           ...shared,
-          stateProvince: stateProvince.trim() || undefined,
-          country: country.trim() || undefined,
-          city: city.trim() || undefined,
+          stateProvince: formatStateAbbr(stateProvince.trim()) || undefined,
+          country: formatCountryAbbr(country.trim()) || undefined,
+          city: formatCityTitleCase(city.trim()) || undefined,
         })
       } else {
         await api.post('/leads/inquiries', {
           ...shared,
           companyName: companyName.trim(),
           contactPerson: contactPerson.trim() || undefined,
-          phone: phone.trim() || undefined,
+          phone: formatPhoneNumber(phone).trim() || undefined,
           email: email.trim() || undefined,
-          stateProvince: stateProvince.trim() || undefined,
-          country: country.trim() || undefined,
-          city: city.trim() || undefined,
+          stateProvince: formatStateAbbr(stateProvince.trim()) || undefined,
+          country: formatCountryAbbr(country.trim()) || undefined,
+          city: formatCityTitleCase(city.trim()) || undefined,
           picId: picId || undefined,
         })
       }
@@ -327,7 +350,13 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
               </div>
               <div>
                 <FieldLabel label="Phone" optional />
-                <input className="inp" value={phone} onChange={event => setPhone(event.target.value)} placeholder="(555) 000-0000" />
+                <input
+                  className="inp"
+                  value={phone}
+                  onChange={event => setPhone(formatPhoneAsYouType(event.target.value))}
+                  onBlur={() => setPhone(formatPhoneNumber(phone))}
+                  placeholder="(555) 000-0000"
+                />
               </div>
               <div>
                 <FieldLabel label="Email" optional />
@@ -339,15 +368,43 @@ export const NewInquiryDialog = ({ warmLeads, initialId, initialIdentity, onClos
           {(source === 'warmLead' ? warmLeads.length > 0 : true) && <>
             <div>
               <FieldLabel label="City" optional />
-              <input className="inp" value={city} onChange={event => setCity(event.target.value)} placeholder="e.g. Pueblo" />
-            </div>
-            <div>
-              <FieldLabel label="State / Province" optional />
-              <input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. CO, ON" />
+              <input className="inp" value={city} onChange={event => setCity(event.target.value)} onBlur={() => setCity(formatCityTitleCase(city))} placeholder="e.g. Pueblo" />
             </div>
             <div>
               <FieldLabel label="Country" optional />
-              <input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" />
+              <SuggestInput
+                value={country}
+                onChange={val => {
+                  setCountry(val)
+                  const norm = formatCountryAbbr(val)
+                  if (stateProvince && isKnownCountry(norm)) {
+                    const stateCountry = getCountryForState(stateProvince)
+                    if (stateCountry && stateCountry !== norm) setStateProvince('')
+                  }
+                }}
+                onBlur={() => setCountry(formatCountryAbbr(country))}
+                options={getCountrySuggestOptions()}
+                placeholder="Type country (e.g. US, CA)..."
+              />
+            </div>
+            <div>
+              <FieldLabel label="State / Province" optional />
+              <SuggestInput
+                value={stateProvince}
+                onChange={val => {
+                  setStateProvince(val)
+                  const inferred = getCountryForState(val)
+                  if (inferred && !country) setCountry(inferred)
+                }}
+                onBlur={() => {
+                  const formatted = formatStateAbbr(stateProvince)
+                  setStateProvince(formatted)
+                  const inferred = getCountryForState(formatted)
+                  if (inferred && !country) setCountry(inferred)
+                }}
+                options={getStateSuggestOptions(country)}
+                placeholder="Type state (e.g. TX, CA, ON)..."
+              />
             </div>
             <div>
               <FieldLabel label="Container size" required />
@@ -444,7 +501,7 @@ export const NewWarmLeadDialog = ({ initialIdentity, onClose, onSaved }: {
           setCompanyName(match.company_name ?? '')
           setContactPerson(match.contact_person ?? '')
           setEmail(match.email ?? '')
-          setPhone(match.phone ?? '')
+          setPhone(formatPhoneNumber(match.phone ?? ''))
           setStateProvince(match.state_province ?? '')
           setCountry(match.country ?? '')
           if (match.pic_id) setPicId(match.pic_id)
@@ -471,16 +528,20 @@ export const NewWarmLeadDialog = ({ initialIdentity, onClose, onSaved }: {
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!companyName.trim() || (!contactPerson.trim() && !phone.trim() && !email.trim())) return
+    if (email.trim() && !hasAtSymbol(email)) {
+      setError('Email must contain an "@"')
+      return
+    }
     setWorking(true)
     setError('')
     try {
       await api.post('/leads/warm-leads', {
         companyName: companyName.trim(),
         contactPerson: contactPerson.trim() || undefined,
-        phone: phone.trim() || undefined,
+        phone: formatPhoneNumber(phone).trim() || undefined,
         email: email.trim() || undefined,
-        stateProvince: stateProvince.trim() || undefined,
-        country: country.trim() || undefined,
+        stateProvince: formatStateAbbr(stateProvince.trim()) || undefined,
+        country: formatCountryAbbr(country.trim()) || undefined,
         picId: picId || undefined,
         notes: notes.trim() || undefined,
         previousInquiryIndicator,
@@ -597,19 +658,53 @@ export const NewWarmLeadDialog = ({ initialIdentity, onClose, onSaved }: {
           </div>
           <div>
             <FieldLabel label="Phone" optional />
-            <input className="inp" value={phone} onChange={event => setPhone(event.target.value)} placeholder="(555) 000-0000" />
+            <input
+              className="inp"
+              value={phone}
+              onChange={event => setPhone(formatPhoneAsYouType(event.target.value))}
+              onBlur={() => setPhone(formatPhoneNumber(phone))}
+              placeholder="(555) 000-0000"
+            />
           </div>
           <div>
             <FieldLabel label="Email" optional />
             <input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="name@company.com" />
           </div>
           <div>
-            <FieldLabel label="State / Province" optional />
-            <input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. CO, ON" />
+            <FieldLabel label="Country" optional />
+            <SuggestInput
+              value={country}
+              onChange={val => {
+                setCountry(val)
+                const norm = formatCountryAbbr(val)
+                if (stateProvince && isKnownCountry(norm)) {
+                  const stateCountry = getCountryForState(stateProvince)
+                  if (stateCountry && stateCountry !== norm) setStateProvince('')
+                }
+              }}
+              onBlur={() => setCountry(formatCountryAbbr(country))}
+              options={getCountrySuggestOptions()}
+              placeholder="Type country (e.g. US, CA)..."
+            />
           </div>
           <div>
-            <FieldLabel label="Country" optional />
-            <input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" />
+            <FieldLabel label="State / Province" optional />
+            <SuggestInput
+              value={stateProvince}
+              onChange={val => {
+                setStateProvince(val)
+                const inferred = getCountryForState(val)
+                if (inferred && !country) setCountry(inferred)
+              }}
+              onBlur={() => {
+                const formatted = formatStateAbbr(stateProvince)
+                setStateProvince(formatted)
+                const inferred = getCountryForState(formatted)
+                if (inferred && !country) setCountry(inferred)
+              }}
+              options={getStateSuggestOptions(country)}
+              placeholder="Type state (e.g. TX, CA, ON)..."
+            />
           </div>
           <div>
             <FieldLabel label="Source" optional />
@@ -666,25 +761,74 @@ export const NewProspectDialog = ({ onClose, onSaved }: {
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
 
+  const handleCountryChange = (val: string) => {
+    setCountry(val)
+    const norm = formatCountryAbbr(val)
+    if (stateProvince && isKnownCountry(norm)) {
+      const stateCountry = getCountryForState(stateProvince)
+      if (stateCountry && stateCountry !== norm) {
+        setStateProvince('')
+        setCity('')
+      }
+    }
+  }
+
+  const handleCountryBlur = () => {
+    setCountry(formatCountryAbbr(country))
+  }
+
+  // A state or city only fills in what is still blank. Overwriting a chosen value would turn
+  // Ontario, Canada into Ontario, California the moment the city was typed.
+  const handleStateChange = (val: string) => {
+    setStateProvince(val)
+    const inferred = getCountryForState(val)
+    if (inferred && !country) setCountry(inferred)
+  }
+
+  const handleStateBlur = () => {
+    const formatted = formatStateAbbr(stateProvince)
+    setStateProvince(formatted)
+    const inferred = getCountryForState(formatted)
+    if (inferred && !country) setCountry(inferred)
+  }
+
+  const handleCityChange = (val: string) => setCity(val)
+
+  // Looked up once the city is finished, not on every keystroke, so a half-typed name
+  // cannot fill in the wrong state on the way to the right one.
+  const handleCityBlur = () => {
+    const formatted = formatCityTitleCase(city)
+    setCity(formatted)
+    const match = lookupCity(formatted, stateProvince, country)
+    if (match) {
+      if (!stateProvince) setStateProvince(match.state)
+      if (!country) setCountry(match.country)
+    }
+  }
+
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!companyName.trim()) return
+    if (email.trim() && !hasAtSymbol(email)) {
+      setError('Email must contain an "@"')
+      return
+    }
     setWorking(true)
     setError('')
     try {
       await api.post('/leads/prospects', {
         companyName: companyName.trim(),
         contactPerson: contactPerson.trim() || undefined,
-        phone: phone.trim() || undefined,
+        phone: formatPhoneNumber(phone).trim() || undefined,
         email: email.trim() || undefined,
         picId: picId || undefined,
         category,
         smsDeliverability: smsDeliverability || undefined,
         industry: (industry === 'Others' ? industryOther.trim() : industry) || undefined,
         serviceLocation: serviceLocation.trim() || undefined,
-        country: country.trim() || undefined,
-        stateProvince: stateProvince.trim() || undefined,
-        city: city.trim() || undefined,
+        country: formatCountryAbbr(country.trim()) || undefined,
+        stateProvince: formatStateAbbr(stateProvince.trim()) || undefined,
+        city: formatCityTitleCase(city.trim()) || undefined,
         dateAdded: dateAdded || undefined,
       })
       onSaved()
@@ -714,7 +858,13 @@ export const NewProspectDialog = ({ onClose, onSaved }: {
           </div>
           <div>
             <FieldLabel label="Phone" optional />
-            <input className="inp" value={phone} onChange={event => setPhone(event.target.value)} placeholder="(555) 000-0000" />
+            <input
+              className="inp"
+              value={phone}
+              onChange={event => setPhone(formatPhoneAsYouType(event.target.value))}
+              onBlur={() => setPhone(formatPhoneNumber(phone))}
+              placeholder="(555) 000-0000"
+            />
           </div>
           <div>
             <FieldLabel label="Email" optional />
@@ -762,15 +912,33 @@ export const NewProspectDialog = ({ onClose, onSaved }: {
           </div>
           <div>
             <FieldLabel label="Country" optional />
-            <input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" />
+            <SuggestInput
+              value={country}
+              onChange={val => handleCountryChange(val)}
+              onBlur={handleCountryBlur}
+              options={getCountrySuggestOptions()}
+              placeholder="Type country (e.g. US, CA)..."
+            />
           </div>
           <div>
             <FieldLabel label="State / Province" optional />
-            <input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. CO, ON" />
+            <SuggestInput
+              value={stateProvince}
+              onChange={val => handleStateChange(val)}
+              onBlur={handleStateBlur}
+              options={getStateSuggestOptions(country)}
+              placeholder="Type state (e.g. TX, CA, ON)..."
+            />
           </div>
           <div>
             <FieldLabel label="City" optional />
-            <input className="inp" value={city} onChange={event => setCity(event.target.value)} placeholder="City" />
+            <SuggestInput
+              value={city}
+              onChange={val => handleCityChange(val)}
+              onBlur={handleCityBlur}
+              options={getCitySuggestOptions(stateProvince, country)}
+              placeholder={stateProvince ? `Type city in ${stateProvince}...` : 'Type city...'}
+            />
           </div>
           <div style={{ gridColumn: '1 / -1' }}><ErrorMessage message={error} /></div>
         </div>
@@ -834,21 +1002,25 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!companyName.trim()) return
+    if (email.trim() && !hasAtSymbol(email)) {
+      setError('Email must contain an "@"')
+      return
+    }
     setWorking(true)
     setError('')
     try {
       await api.post('/deals/sales', {
         companyName: companyName.trim(),
         contactPerson: contactPerson.trim() || undefined,
-        phone: phone.trim() || undefined,
+        phone: formatPhoneNumber(phone).trim() || undefined,
         email: email.trim() || undefined,
         picId: picId || undefined,
         totalUnits,
         buyingCost,
         revenue,
-        stateProvince: stateProvince.trim() || undefined,
-        country: country.trim() || undefined,
-        city: city.trim() || undefined,
+        stateProvince: formatStateAbbr(stateProvince.trim()) || undefined,
+        country: formatCountryAbbr(country.trim()) || undefined,
+        city: formatCityTitleCase(city.trim()) || undefined,
         containerSizeId: containerSizeId || undefined,
         containerConditionId: containerConditionId || undefined,
         containerCategoryId: containerCategoryId || undefined,
@@ -886,23 +1058,57 @@ export const NewManualSaleDialog = ({ initialData, onClose, onSaved }: {
           </div>
           <div>
             <FieldLabel label="Phone" optional />
-            <input className="inp" value={phone} onChange={event => setPhone(event.target.value)} placeholder="(555) 000-0000" />
+            <input
+              className="inp"
+              value={phone}
+              onChange={event => setPhone(formatPhoneAsYouType(event.target.value))}
+              onBlur={() => setPhone(formatPhoneNumber(phone))}
+              placeholder="(555) 000-0000"
+            />
           </div>
           <div>
             <FieldLabel label="Email" optional />
             <input className="inp" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="name@company.com" />
           </div>
           <div>
-            <FieldLabel label="State / Province" optional />
-            <input className="inp" value={stateProvince} onChange={event => setStateProvince(event.target.value)} placeholder="e.g. TX, CA" />
+            <FieldLabel label="Country" optional />
+            <SuggestInput
+              value={country}
+              onChange={val => {
+                setCountry(val)
+                const norm = formatCountryAbbr(val)
+                if (stateProvince && isKnownCountry(norm)) {
+                  const stateCountry = getCountryForState(stateProvince)
+                  if (stateCountry && stateCountry !== norm) setStateProvince('')
+                }
+              }}
+              onBlur={() => setCountry(formatCountryAbbr(country))}
+              options={getCountrySuggestOptions()}
+              placeholder="Type country (e.g. US, CA)..."
+            />
           </div>
           <div>
             <FieldLabel label="City" optional />
-            <input className="inp" value={city} onChange={event => setCity(event.target.value)} placeholder="e.g. Pueblo" />
+            <input className="inp" value={city} onChange={event => setCity(event.target.value)} onBlur={() => setCity(formatCityTitleCase(city))} placeholder="e.g. Pueblo" />
           </div>
           <div>
-            <FieldLabel label="Country" optional />
-            <input className="inp" value={country} onChange={event => setCountry(event.target.value)} placeholder="US or CA" />
+            <FieldLabel label="State / Province" optional />
+            <SuggestInput
+              value={stateProvince}
+              onChange={val => {
+                setStateProvince(val)
+                const inferred = getCountryForState(val)
+                if (inferred && !country) setCountry(inferred)
+              }}
+              onBlur={() => {
+                const formatted = formatStateAbbr(stateProvince)
+                setStateProvince(formatted)
+                const inferred = getCountryForState(formatted)
+                if (inferred && !country) setCountry(inferred)
+              }}
+              options={getStateSuggestOptions(country)}
+              placeholder="Type state (e.g. TX, CA, ON)..."
+            />
           </div>
           <div>
             <FieldLabel label="Sale number" optional />
