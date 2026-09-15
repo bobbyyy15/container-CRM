@@ -25,3 +25,11 @@ export const formatPhoneNumber = (value: unknown): string => {
   // If it doesn't fill the 10-digit standard, leave as-is
   return str;
 };
+
+export const hasAtSymbol = (email: unknown): boolean => {
+  if (email === null || email === undefined) return true;
+  const str = String(email).trim();
+  if (!str) return true;
+  return str.includes('@') && !str.startsWith('@') && !str.endsWith('@');
+};
+

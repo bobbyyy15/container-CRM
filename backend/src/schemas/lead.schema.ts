@@ -25,7 +25,7 @@ export const CreateManualWarmLeadSchema = z.object({
   companyName: z.string().trim().min(1, 'Company is required'),
   contactPerson: z.string().trim().max(200).optional(),
   phone: z.string().trim().max(50).optional(),
-  email: z.string().trim().max(200).optional(),
+  email: z.string().trim().max(200).refine(val => !val || val.includes('@'), { message: 'Email must contain an "@"' }).optional(),
   stateProvince: z.string().trim().max(100).optional(),
   country: z.string().trim().max(100).optional(),
   picId: z.string().uuid().optional(),
@@ -46,7 +46,7 @@ export const CreateManualInquirySchema = z.object({
   companyName: z.string().trim().min(1).optional(),
   contactPerson: z.string().trim().max(200).optional(),
   phone: z.string().trim().max(50).optional(),
-  email: z.string().trim().max(200).optional(),
+  email: z.string().trim().max(200).refine(val => !val || val.includes('@'), { message: 'Email must contain an "@"' }).optional(),
   stateProvince: z.string().trim().max(100).optional(),
   country: z.string().trim().max(100).optional(),
   picId: z.string().uuid().optional(),
@@ -68,7 +68,7 @@ export const CreateManualProspectSchema = z.object({
   companyName: z.string().trim().min(1, 'Company is required'),
   contactPerson: z.string().trim().max(200).optional(),
   phone: z.string().trim().max(50).optional(),
-  email: z.string().trim().max(200).optional(),
+  email: z.string().trim().max(200).refine(val => !val || val.includes('@'), { message: 'Email must contain an "@"' }).optional(),
   picId: z.string().uuid().optional(),
   category: z.enum(['Proceed', 'Removed']).default('Proceed'),
   smsDeliverability: z.enum(['Call/Text', 'Calls Only', 'Text Only']).optional(),
@@ -159,6 +159,15 @@ export const UpdateLeadCellSchema = z.object({
       path: ['field'],
       message: `${data.field} is not editable for Warm Leads`,
     });
+  }
+  if (['emailAddr', 'email2'].includes(data.field) && data.value && data.value.trim()) {
+    if (!data.value.includes('@')) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['value'],
+        message: 'Email must contain an "@"',
+      });
+    }
   }
 });
 

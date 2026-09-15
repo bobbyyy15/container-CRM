@@ -1,4 +1,5 @@
 import { formatPhoneNumber } from '../lib/formatters'
+import { formatCountryAbbr, formatStateAbbr } from '../lib/places'
 
 // Row shapes for the list views. These were split out of the hooks so a cached
 // payload can be re-mapped without refetching -- the hook reads raw rows from
@@ -101,8 +102,8 @@ export const mapCustomerRow = (c: any) => ({
   contact: c.primary_contact ? c.primary_contact.first_name + ' ' + (c.primary_contact.last_name || '') : '-',
   phone: formatPhoneNumber(c.primary_contact ? (c.primary_contact.phone_1 || c.primary_contact.phone_2) : '-'),
   email: c.primary_contact ? (c.primary_contact.email || '-') : '-',
-  state: c.state || '-',
-  country: c.country || '-',
+  state: formatStateAbbr(c.state) || '-',
+  country: formatCountryAbbr(c.country) || '-',
   sales: c.sales_count,
   units: c.total_units,
   revenue: Number(c.total_revenue),

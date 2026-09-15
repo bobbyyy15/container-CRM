@@ -18,7 +18,24 @@ import { mapPipelineRow } from '../../hooks/mapPipelineRow'
 import { useProspects } from '../../hooks/useProspects'
 import { useWarmLeads } from '../../hooks/useWarmLeads'
 import { exportToCSV, readDensity, writeDensity } from '../../lib/exporters'
-import { formatPhoneNumber, formatPhoneAsYouType } from '../../lib/formatters'
+import { formatPhoneNumber, formatPhoneAsYouType, hasAtSymbol } from '../../lib/formatters'
+import SuggestInput from '../../components/ui/SuggestInput'
+import {
+  COUNTRY_OPTIONS,
+  STATE_PROVINCE_OPTIONS,
+  COMMON_CITIES,
+  formatCountryAbbr,
+  formatStateAbbr,
+  formatCityTitleCase,
+  getStatesForCountry,
+  getCountryForState,
+  getCitiesForState,
+  getCitiesForCountry,
+  lookupCity,
+  getCountrySuggestOptions,
+  getStateSuggestOptions,
+  getCitySuggestOptions,
+} from '../../lib/places'
 import type { DensityOption } from '../../app/types'
 
 const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm'; onNav?: (s: Screen) => void }) => {
@@ -59,6 +76,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
     field: string;
     value: string;
     originalValue: string;
+    isCustom?: boolean;
   } | null>(null)
 
   const _prospectsData = useProspects(revision, mode === 'prospect' ? status : 'active', mode === 'prospect')
@@ -68,24 +86,87 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
 
   const commitCellEdit = async (rowId: string, field: string, newValue: string, oldValue: string) => {
     setEditingCell(null);
-    const isPhone = field === 'phone' || field === 'phone2';
-    const finalValue = isPhone ? formatPhoneNumber(newValue) : newValue;
+    let finalValue = newValue.trim();
+
+    if (field === 'phone' || field === 'phone2') {
+      finalValue = formatPhoneNumber(finalValue);
+    } else if (field === 'emailAddr' || field === 'email2') {
+      if (finalValue && !hasAtSymbol(finalValue)) {
+        toast('Email must contain an "@"', 'error');
+        return;
+      }
+    } else if (field === 'country') {
+      finalValue = formatCountryAbbr(finalValue);
+    } else if (field === 'state') {
+      finalValue = formatStateAbbr(finalValue);
+    } else if (field === 'city') {
+      finalValue = formatCityTitleCase(finalValue);
+    }
+
     if (finalValue === oldValue) return;
+
+    const newOverrides: Record<string, string> = { [field]: finalValue };
+    let autoFilledState: string | undefined;
+    let autoFilledCountry: string | undefined;
+
+    if (field === 'city' && finalValue) {
+      const currentRow = prospectsData.find(r => r.id === rowId);
+      const currentState = localOverrides[rowId]?.state || (currentRow as any)?.state || '';
+      const currentCountry = localOverrides[rowId]?.country || (currentRow as any)?.country || '';
+      const match = lookupCity(finalValue, currentState);
+      if (match) {
+        if (!currentState || currentState !== match.state) {
+          autoFilledState = match.state;
+          newOverrides['state'] = match.state;
+        }
+        if (!currentCountry || currentCountry !== match.country) {
+          autoFilledCountry = match.country;
+          newOverrides['country'] = match.country;
+        }
+      }
+    } else if (field === 'state' && finalValue) {
+      const inferred = getCountryForState(finalValue);
+      const currentRow = prospectsData.find(r => r.id === rowId);
+      const currentCountry = localOverrides[rowId]?.country || (currentRow as any)?.country || '';
+      if (inferred && (!currentCountry || currentCountry !== inferred)) {
+        autoFilledCountry = inferred;
+        newOverrides['country'] = inferred;
+      }
+    }
+
     setLocalOverrides(prev => ({
       ...prev,
-      [rowId]: { ...(prev[rowId] || {}), [field]: finalValue },
+      [rowId]: { ...(prev[rowId] || {}), ...newOverrides },
     }));
+
+    const stage = mode === 'prospect' ? 'prospect' : 'warm_lead';
     try {
-      await api.patch(`/leads/${mode === 'prospect' ? 'prospect' : 'warm_lead'}/${rowId}/cell`, {
+      await api.patch(`/leads/${stage}/${rowId}/cell`, {
         field,
         value: finalValue,
       });
+      if (autoFilledState) {
+        await api.patch(`/leads/${stage}/${rowId}/cell`, {
+          field: 'state',
+          value: autoFilledState,
+        }).catch(() => {});
+      }
+      if (autoFilledCountry) {
+        await api.patch(`/leads/${stage}/${rowId}/cell`, {
+          field: 'country',
+          value: autoFilledCountry,
+        }).catch(() => {});
+      }
       toast('Saved', 'success');
     } catch (err: any) {
       toast(err.response?.data?.error?.message ?? 'Failed to update cell', 'error');
       setLocalOverrides(prev => {
         const next = { ...prev };
-        if (next[rowId]) delete next[rowId][field];
+        if (next[rowId]) {
+          delete next[rowId][field];
+          if (autoFilledState) delete next[rowId]['state'];
+          if (autoFilledCountry) delete next[rowId]['country'];
+        }
         return next;
       });
       setRevision(v => v + 1);
@@ -526,6 +607,9 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                   const isEditing = editingCell && editingCell.r === ri && editingCell.c === ci
                   const isEditable = !['added', 'entryPath'].includes(col.field)
 
+                  const cellCountry = localOverrides[row.id]?.country || (row as any)?.country || ''
+                  const cellState = localOverrides[row.id]?.state || (row as any)?.state || ''
+
                   return (
                     <div
                       key={col.key}
@@ -649,6 +733,66 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
                               <option value="">Unassigned</option>
                               {pics.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
                             </select>
+                          ) : col.field === 'country' ? (
+                            <SuggestInput
+                              autoFocus
+                              className="inp"
+                              inputStyle={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 8px', fontSize: 12.5, background: 'transparent' }}
+                              value={editingCell.value}
+                              onChange={val => setEditingCell({ ...editingCell, value: val })}
+                              onSelect={item => commitCellEdit(row.id, col.field, item.value, editingCell.originalValue)}
+                              onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
+                              options={getCountrySuggestOptions()}
+                              placeholder="US or CA..."
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                } else if (e.key === 'Escape') {
+                                  setEditingCell(null)
+                                }
+                              }}
+                            />
+                          ) : col.field === 'state' ? (
+                            <SuggestInput
+                              autoFocus
+                              className="inp"
+                              inputStyle={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 8px', fontSize: 12.5, background: 'transparent' }}
+                              value={editingCell.value}
+                              onChange={val => setEditingCell({ ...editingCell, value: val })}
+                              onSelect={item => commitCellEdit(row.id, col.field, item.value, editingCell.originalValue)}
+                              onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
+                              options={getStateSuggestOptions(cellCountry)}
+                              placeholder="e.g. TX, CA..."
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                } else if (e.key === 'Escape') {
+                                  setEditingCell(null)
+                                }
+                              }}
+                            />
+                          ) : col.field === 'city' ? (
+                            <SuggestInput
+                              autoFocus
+                              className="inp"
+                              inputStyle={{ width: '100%', height: '100%', border: 'none', borderRadius: 0, padding: '0 8px', fontSize: 12.5, background: 'transparent' }}
+                              value={editingCell.value}
+                              onChange={val => setEditingCell({ ...editingCell, value: val })}
+                              onSelect={item => commitCellEdit(row.id, col.field, item.value, editingCell.originalValue)}
+                              onBlur={() => commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)}
+                              options={getCitySuggestOptions(cellState, cellCountry)}
+                              placeholder="Type city..."
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  commitCellEdit(row.id, col.field, editingCell.value, editingCell.originalValue)
+                                } else if (e.key === 'Escape') {
+                                  setEditingCell(null)
+                                }
+                              }}
+                            />
                           ) : (
                             <input
                               autoFocus
@@ -781,6 +925,7 @@ const ProspectSheet = ({ mode = 'prospect', onNav }: { mode?: 'prospect' | 'warm
           onAssign={handleAssignPic}
         />
       )}
+
     </div>
   )
 }

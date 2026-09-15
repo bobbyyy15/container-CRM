@@ -1,4 +1,5 @@
 import { formatPhoneNumber } from '../../lib/formatters'
+import { formatCountryAbbr, formatStateAbbr, formatCityTitleCase } from '../../lib/places'
 
 export type ProspectImportRow = {
   date_added?: string
@@ -169,6 +170,14 @@ const validateCandidates = (
       errors.push({ message: `Excel row ${rowNumber}: no email or phone on file.`, kind: 'skipped' })
       return
     }
+    if (record.email_active && !record.email_active.includes('@')) {
+      errors.push({ message: `Excel row ${rowNumber}: Email "${record.email_active}" must contain an "@".`, kind: 'issue' })
+      return
+    }
+    if (record.email_2 && !record.email_2.includes('@')) {
+      errors.push({ message: `Excel row ${rowNumber}: Email 2 "${record.email_2}" must contain an "@".`, kind: 'issue' })
+      return
+    }
 
     const duplicateAt = emails.map(value => seenEmails.get(value)).find(value => value !== undefined)
       ?? phones.map(value => seenPhones.get(value)).find(value => value !== undefined)
@@ -289,6 +298,12 @@ export const parseProspectMatrix = (matrix: unknown[][]): ParsedProspectImport =
       if (value) {
         if (field === 'contact_number_direct' || field === 'contact_number_2') {
           value = formatPhoneNumber(value)
+        } else if (field === 'country') {
+          value = formatCountryAbbr(value)
+        } else if (field === 'state_province') {
+          value = formatStateAbbr(value)
+        } else if (field === 'city') {
+          value = formatCityTitleCase(value)
         }
         record[field] = value
       }

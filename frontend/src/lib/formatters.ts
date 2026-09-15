@@ -55,3 +55,15 @@ export const formatPhoneAsYouType = (value: string): string => {
   // If longer than 10 digits, format the first 10 and append the rest
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)} ${digits.slice(10)}`;
 };
+
+/**
+ * Checks if an email is provided and contains an '@' symbol.
+ * Returns true if empty/blank (for optional fields) or if it contains '@'.
+ */
+export const hasAtSymbol = (email: unknown): boolean => {
+  if (email === null || email === undefined) return true;
+  const str = String(email).trim();
+  if (!str) return true;
+  return str.includes('@') && !str.startsWith('@') && !str.endsWith('@');
+};
+
