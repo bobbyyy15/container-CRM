@@ -52,6 +52,8 @@ export type MappedSaleRow = {
   accountLabel?: string;
   /** A repurchase on an account that an earlier row of the same file opens. */
   openedOnRow?: number;
+  /** The row is a sale already in the CRM; it only fills that sale's blank columns. */
+  fill?: BlankFill;
   /** Anything wrong with this row. A row with errors is never imported. */
   errors: string[];
   /** Worth saying, but not a reason to refuse the row. */
@@ -299,6 +301,39 @@ export const markDuplicatesWithinFile = (rows: MappedSaleRow[]): MappedSaleRow[]
 export const mapSalesSheet = (rows: RawSalesRow[]): MappedSaleRow[] =>
   markDuplicatesWithinFile(rows.map((raw, index) => mapSaleRow(raw, index + 2)));
 
+/** A sale already in the CRM, as the import sees it. */
+export type ExistingSale = { id: string; sizeId: string | null; conditionId: string | null; categoryId: string | null };
+
+/** What a row for an existing sale may write: only the columns that sale is missing. */
+export type BlankFill = { saleId: string; columns: Record<string, string>; fields: string[] };
+
+/**
+ * A row whose release number is already in the CRM is that sale, not a new one. It may only
+ * complete what the sale is missing -- the Size, Condition or Type an earlier import could
+ * not read -- and never changes anything already recorded. Undefined when there is nothing
+ * to fill, so the row is refused as the duplicate it is.
+ */
+export const planBlankFill = (
+  existing: ExistingSale,
+  resolved: { sizeId?: string; conditionId?: string; categoryId?: string },
+): BlankFill | undefined => {
+  const columns: Record<string, string> = {};
+  const fields: string[] = [];
+  if (!existing.sizeId && resolved.sizeId) {
+    columns.container_size_id = resolved.sizeId;
+    fields.push('Size');
+  }
+  if (!existing.conditionId && resolved.conditionId) {
+    columns.container_condition_id = resolved.conditionId;
+    fields.push('Condition');
+  }
+  if (!existing.categoryId && resolved.categoryId) {
+    columns.container_category_id = resolved.categoryId;
+    fields.push('Type');
+  }
+  return fields.length ? { saleId: existing.id, columns, fields } : undefined;
+};
+
 /** An email as the database compares it: trimmed and lower-cased. */
 export const normalizeEmail = (value: unknown): string | undefined => {
   const text = clean(value).toLowerCase();
@@ -357,7 +392,8 @@ export const resolveCustomerAccounts = (rows: MappedSaleRow[], existingAccounts:
   const openedByPhone = new Map<string, MappedSaleRow>();
 
   for (const row of rows) {
-    if (row.errors.length) continue;
+    // A row that fills an existing sale already has its account.
+    if (row.errors.length || row.fill) continue;
     const email = normalizeEmail(row.email);
     const phone = normalizePhone(row.phone);
     const code = row.clientId?.trim().toUpperCase();

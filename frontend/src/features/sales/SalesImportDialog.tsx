@@ -21,6 +21,8 @@ type Row = {
   releaseNumber?: string
   account?: 'new' | 'existing'
   accountLabel?: string
+  /** A sale already in the CRM: the row fills only its blank columns. */
+  fill?: { fields: string[] }
   saleDate?: string
   quantity: number
   type?: string
@@ -93,13 +95,20 @@ const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImp
     setMessage('')
     try {
       let imported = 0
+      let filled = 0
       let rejected = 0
       for (let index = 0; index < rawRows.length; index += CHUNK) {
         const response = await api.post('/deals/sales/import', { rows: rawRows.slice(index, index + CHUNK), dryRun: false, filename })
         imported += response.data.data.summary.imported
+        filled += response.data.data.summary.filled ?? 0
         rejected += response.data.data.summary.rejected
       }
-      toast(`${imported} sale${imported === 1 ? '' : 's'} imported${rejected ? ` · ${rejected} rejected` : ''}.`, rejected ? 'error' : 'success')
+      const parts = [
+        `${imported} sale${imported === 1 ? '' : 's'} imported`,
+        filled ? `${filled} existing sale${filled === 1 ? '' : 's'} filled in` : '',
+        rejected ? `${rejected} rejected` : '',
+      ].filter(Boolean)
+      toast(`${parts.join(' · ')}.`, rejected ? 'error' : 'success')
       invalidateCache('deals:sales')
       invalidateCache('customers')
       onImported()
@@ -153,6 +162,7 @@ const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImp
                 <span><b>{preview.summary.total}</b> rows read</span>
                 <span style={{ color: 'var(--green)' }}><b>{preview.summary.importable}</b> ready to import</span>
                 {preview.summary.newAccounts > 0 && <span><b>{preview.summary.newAccounts}</b> new clients (first transaction)</span>}
+                {preview.summary.toFill > 0 && <span><b>{preview.summary.toFill}</b> existing sales get their blanks filled</span>}
                 {preview.summary.rejected > 0 && <span style={{ color: 'var(--red)' }}><b>{preview.summary.rejected}</b> rejected</span>}
               </div>
 
@@ -192,7 +202,7 @@ const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImp
                         <td className="mono" style={mono}>{row.rowNumber}</td>
                         <td className="mono" style={mono}>{row.invoiceNumber || '—'}</td>
                         <td className="mono" style={mono}>{row.releaseNumber || <span style={{ color: 'var(--t4)' }}>auto</span>}</td>
-                        <td style={cell}>{row.account === 'new' ? 'First transaction' : row.account === 'existing' ? `Repurchase${row.accountLabel ? ` · ${row.accountLabel}` : ''}` : '—'}</td>
+                        <td style={cell}>{row.fill ? `Fills ${row.fill.fields.join(', ')} on ${row.releaseNumber}` : row.account === 'new' ? 'First transaction' : row.account === 'existing' ? `Repurchase${row.accountLabel ? ` · ${row.accountLabel}` : ''}` : '—'}</td>
                         <td className="mono" style={mono}>{row.saleDate || '—'}</td>
                         <td style={{ fontSize: 12, fontWeight: 600 }}>{row.companyName || '—'}</td>
                         <td style={cell}>{row.type || '—'}</td>
@@ -228,7 +238,7 @@ const SalesImportDialog = ({ onClose, onImported }: { onClose: () => void; onImp
             disabled={working || reading || !preview?.summary.importable}
             onClick={commit}
           >
-            {working ? 'Importing…' : preview ? `Import ${preview.summary.importable} sales` : 'Choose a file first'}
+            {working ? 'Importing…' : preview ? `Import ${preview.summary.importable} rows` : 'Choose a file first'}
           </button>
         </div>
       </div>

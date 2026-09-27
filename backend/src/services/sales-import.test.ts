@@ -11,6 +11,7 @@ import {
   mapHeaders,
   normalizeEmail,
   normalizePhone,
+  planBlankFill,
   resolveCustomerAccounts,
   WAVE_PATTERN,
   type AccountIdentity,
@@ -329,4 +330,32 @@ test('a row that is already refused does not open a client for later rows', () =
   ), []);
   assert.equal(rows[0].account, undefined);
   assert.equal(rows[1].account, 'new', 'the first importable row opens it');
+});
+
+// ── Re-importing to fill blanks ──────────────────────────────────────────────────────
+
+const blankSale = { id: 'sale-10383', sizeId: null, conditionId: null, categoryId: 'type-dc' };
+
+test('a re-imported sale fills only the columns it is missing', () => {
+  const fill = planBlankFill(blankSale, { sizeId: 'size-40hc', conditionId: 'cond-cw', categoryId: 'type-dd' });
+  assert.equal(fill?.columns.container_category_id, undefined, 'a type already recorded is never replaced');
+  assert.deepEqual(fill, {
+    saleId: 'sale-10383',
+    columns: { container_size_id: 'size-40hc', container_condition_id: 'cond-cw' },
+    fields: ['Size', 'Condition'],
+  });
+});
+
+test('a re-imported sale with nothing to fill is a duplicate', () => {
+  const complete = { id: 'sale-1', sizeId: 'a', conditionId: 'b', categoryId: 'c' };
+  assert.equal(planBlankFill(complete, { sizeId: 'x', conditionId: 'y', categoryId: 'z' }), undefined);
+  assert.equal(planBlankFill(blankSale, {}), undefined, 'a sheet that still cannot be read fills nothing');
+});
+
+test('a row that fills an existing sale is not placed on a client again', () => {
+  const [row] = accountRows({ 'Client ID': '', 'Email Address': '', 'Contact Number': '' });
+  row.fill = planBlankFill(blankSale, { sizeId: 'size-40hc' });
+  resolveCustomerAccounts([row], []);
+  assert.equal(row.errors.length, 0, 'no phone or email is needed to fill a blank');
+  assert.equal(row.account, undefined);
 });

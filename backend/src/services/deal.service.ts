@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../config/supabase';
-import { mapSalesSheet, normalizeEmail, normalizePhone, resolveCustomerAccounts, type AccountIdentity } from './sales-import';
+import { mapSalesSheet, normalizeEmail, normalizePhone, planBlankFill, resolveCustomerAccounts, type AccountIdentity } from './sales-import';
 import { findConditionId, findSizeId, type CatalogEntry } from './container-catalog';
 import { saleTotalsColumns } from './sale-financials';
 import { ConvertToSalePayload, CreateQuotationPayload, UpdateQuotationStatusPayload, CreateManualSalePayload, UpdateSalePayload, ImportSalesPayload } from '../schemas/deal.schema';
@@ -113,12 +113,13 @@ export class DealService {
     const invoiceNumbers = rows.map(r => r.invoiceNumber).filter((v): v is string => Boolean(v));
 
     const [existingReleases, existingInvoices, accounts, categories, sizes, conditions] = await Promise.all([
+      // What each existing sale already has, so a re-imported row can fill only its blanks.
       releaseNumbers.length
-        ? supabaseAdmin.from('sales').select('sale_number').in('sale_number', releaseNumbers)
-        : Promise.resolve({ data: [] as { sale_number: string }[], error: null }),
+        ? supabaseAdmin.from('sales').select('id, sale_number, container_size_id, container_condition_id, container_category_id').in('sale_number', releaseNumbers)
+        : Promise.resolve({ data: [] as any[], error: null }),
       invoiceNumbers.length
-        ? supabaseAdmin.from('sales').select('invoice_number').in('invoice_number', invoiceNumbers)
-        : Promise.resolve({ data: [] as { invoice_number: string }[], error: null }),
+        ? supabaseAdmin.from('sales').select('id, invoice_number').in('invoice_number', invoiceNumbers)
+        : Promise.resolve({ data: [] as any[], error: null }),
       // Every account with the contact it is known by, so a row's phone or email finds its client.
       supabaseAdmin.from('customer_accounts').select('id, client_code, companies(name), contacts(email_active, email_2, phone_direct, phone_2)'),
       supabaseAdmin.from('container_categories').select('id, code, name'),
@@ -128,24 +129,36 @@ export class DealService {
     const failed = [existingReleases, existingInvoices, accounts, categories, sizes, conditions].find(result => result.error);
     if (failed?.error) throw failed.error;
 
-    const takenRelease = new Set((existingReleases.data ?? []).map(r => String(r.sale_number).toUpperCase()));
-    const takenInvoice = new Set((existingInvoices.data ?? []).map(r => String(r.invoice_number).toUpperCase()));
+    const existingByRelease = new Map(((existingReleases.data ?? []) as any[]).map(sale => [String(sale.sale_number).toUpperCase(), sale]));
+    const invoiceOwners = new Map(((existingInvoices.data ?? []) as any[]).map(sale => [String(sale.invoice_number).toUpperCase(), String(sale.id)]));
     const byCode = new Map((categories.data ?? []).map(c => [String(c.code ?? '').toUpperCase(), c.id]));
     const sizeCatalog = (sizes.data ?? []) as CatalogEntry[];
     const conditionCatalog = (conditions.data ?? []) as CatalogEntry[];
 
     for (const row of rows) {
-      if (row.releaseNumber && takenRelease.has(row.releaseNumber.toUpperCase())) {
-        row.errors.push(`Release Number ${row.releaseNumber} already exists in the CRM`);
+      const sizeId = row.size ? findSizeId(row.size, sizeCatalog) : undefined;
+      const conditionId = row.condition ? findConditionId(row.condition, conditionCatalog) : undefined;
+      if (row.size && !sizeId) row.notices.push(`Size "${row.size}" is not in the catalog and was left unset`);
+      if (row.condition && !conditionId) row.notices.push(`Condition "${row.condition}" is not in the catalog and was left unset`);
+
+      // A release number already on file is that sale. Re-importing it may fill what the
+      // sale is missing -- nothing else -- or, with nothing to fill, it is a duplicate.
+      const existing = row.releaseNumber ? existingByRelease.get(row.releaseNumber.toUpperCase()) : undefined;
+      if (existing) {
+        const fill = planBlankFill(
+          { id: existing.id, sizeId: existing.container_size_id, conditionId: existing.container_condition_id, categoryId: existing.container_category_id },
+          { sizeId, conditionId, categoryId: row.type ? byCode.get(row.type) : undefined },
+        );
+        if (fill) {
+          row.fill = fill;
+          row.notices.push(`Already in the CRM as ${row.releaseNumber}: fills its blank ${fill.fields.join(', ')} and changes nothing else`);
+        } else {
+          row.errors.push(`Release Number ${row.releaseNumber} already exists in the CRM`);
+        }
       }
-      if (row.invoiceNumber && takenInvoice.has(row.invoiceNumber.toUpperCase())) {
+      const invoiceOwner = row.invoiceNumber ? invoiceOwners.get(row.invoiceNumber.toUpperCase()) : undefined;
+      if (invoiceOwner && invoiceOwner !== existing?.id) {
         row.errors.push(`Invoice Number ${row.invoiceNumber} is already on another sale`);
-      }
-      if (row.size && !findSizeId(row.size, sizeCatalog)) {
-        row.notices.push(`Size "${row.size}" is not in the catalog and was left unset`);
-      }
-      if (row.condition && !findConditionId(row.condition, conditionCatalog)) {
-        row.notices.push(`Condition "${row.condition}" is not in the catalog and was left unset`);
       }
     }
 
@@ -170,6 +183,8 @@ export class DealService {
       rejected: rows.length - importable.length,
       imported: 0,
       newAccounts: importable.filter(row => row.account === 'new').length,
+      toFill: importable.filter(row => row.fill).length,
+      filled: 0,
     };
 
     if (payload.dryRun) return { summary, rows, committed: false };
@@ -177,6 +192,26 @@ export class DealService {
     // In sheet order, so a repurchase on an account opened earlier in the file finds it.
     const openedAccounts = new Map<number, string>();
     for (const row of importable) {
+      if (row.fill) {
+        // Each column is written only while it is still blank, so a value someone entered
+        // since the preview is never overwritten.
+        let wrote = false;
+        for (const [column, value] of Object.entries(row.fill.columns)) {
+          const { data: updated, error } = await supabaseAdmin
+            .from('sales')
+            .update({ [column]: value, updated_at: new Date().toISOString() })
+            .eq('id', row.fill.saleId)
+            .is(column, null)
+            .select('id');
+          if (error) {
+            row.errors.push(error.message);
+            break;
+          }
+          if (updated?.length) wrote = true;
+        }
+        if (!row.errors.length && wrote) summary.filled += 1;
+        continue;
+      }
       const accountId = row.account === 'existing'
         ? row.accountId ?? (row.openedOnRow ? openedAccounts.get(row.openedOnRow) : undefined)
         : undefined;
@@ -217,7 +252,7 @@ export class DealService {
       const sale = (Array.isArray(data) ? data[0] : data) as { customer_account_id?: string } | null;
       if (row.account === 'new' && sale?.customer_account_id) openedAccounts.set(row.rowNumber, sale.customer_account_id);
     }
-    summary.rejected = rows.length - summary.imported;
+    summary.rejected = rows.length - summary.imported - summary.filled;
 
     return { summary, rows, committed: true };
   }
